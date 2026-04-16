@@ -2,13 +2,21 @@ import { useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'react-toastify'
 import {
+  ArrowPathIcon,
+  CheckCircleIcon,
+  CloudArrowUpIcon,
+  DocumentTextIcon,
+  ExclamationCircleIcon,
+  TrashIcon,
+  ClockIcon,
+} from '@heroicons/react/24/outline'
+import {
   attachKnowledgeBaseDocument,
   createTextKnowledgeBaseDocumentFromFile,
-  createTextKnowledgeBaseDocumentFromText,
-  createTextKnowledgeBaseDocumentFromUrl,
   deleteTextKnowledgeBaseDocument,
   detachKnowledgeBaseDocument,
   listTextKnowledgeBaseDocuments,
+  reindexKnowledgeBaseDocument,
 } from '@/api/TextAgentsAPI'
 import type { TextKnowledgeBaseDocument } from '@/types/textAgent'
 
@@ -17,235 +25,311 @@ type Props = {
   attachedDocuments: TextKnowledgeBaseDocument[]
 }
 
-export default function TextAgentKnowledgeBaseTab({
-  agentId,
-  attachedDocuments,
-}: Props) {
+const ACCEPTED = '.txt,.md,.json,.csv,.html,.xml'
+const ACCEPTED_LABEL = 'TXT · MD · JSON · CSV · HTML · XML'
+
+function IndexStatusBadge({ status }: { status: TextKnowledgeBaseDocument['index_status'] }) {
+  if (status === 'indexed')
+    return (
+      <span className="flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
+        <CheckCircleIcon className="h-3 w-3" />
+        Indexado
+      </span>
+    )
+  if (status === 'indexing')
+    return (
+      <span className="flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
+        <ClockIcon className="h-3 w-3 animate-pulse" />
+        Indexando...
+      </span>
+    )
+  return (
+    <span className="flex items-center gap-1 rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-semibold text-rose-700">
+      <ExclamationCircleIcon className="h-3 w-3" />
+      Error
+    </span>
+  )
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+export default function TextAgentKnowledgeBaseTab({ agentId, attachedDocuments }: Props) {
   const queryClient = useQueryClient()
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [isDragging, setIsDragging] = useState(false)
+  const [uploading, setUploading] = useState<string[]>([])
 
-  const [url, setUrl] = useState('')
-  const [urlName, setUrlName] = useState('')
-  const [textName, setTextName] = useState('')
-  const [textContent, setTextContent] = useState('')
-
-  const attachedIds = new Set(attachedDocuments.map((item) => item.id))
+  const attachedIds = new Set(attachedDocuments.map((d) => d.id))
 
   const { data } = useQuery({
     queryKey: ['text-kb-documents'],
     queryFn: listTextKnowledgeBaseDocuments,
   })
 
-  const workspaceDocuments = data?.documents ?? []
+  const workspaceDocs = data?.documents ?? []
+
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ['text-agent', agentId] })
     queryClient.invalidateQueries({ queryKey: ['text-kb-documents'] })
   }
 
-  const { mutate: createTextDoc, isPending: isCreatingText } = useMutation({
-    mutationFn: () =>
-      createTextKnowledgeBaseDocumentFromText({
-        name: textName.trim() || undefined,
-        text: textContent.trim(),
-      }),
-    onSuccess: async (doc) => {
-      await attachKnowledgeBaseDocument(agentId, doc.id, 'auto')
-      toast.success('Documento de texto creado y adjuntado')
-      setTextName('')
-      setTextContent('')
-      refresh()
-    },
-    onError: (error: Error) => toast.error(error.message),
-  })
-
-  const { mutate: createUrlDoc, isPending: isCreatingUrl } = useMutation({
-    mutationFn: () =>
-      createTextKnowledgeBaseDocumentFromUrl({
-        name: urlName.trim() || undefined,
-        url: url.trim(),
-      }),
-    onSuccess: async (doc) => {
-      await attachKnowledgeBaseDocument(agentId, doc.id, 'auto')
-      toast.success('Documento URL creado y adjuntado')
-      setUrl('')
-      setUrlName('')
-      refresh()
-    },
-    onError: (error: Error) => toast.error(error.message),
-  })
-
   const { mutate: attachDoc } = useMutation({
-    mutationFn: ({ documentId, usageMode }: { documentId: string; usageMode: 'auto' | 'prompt' }) =>
-      attachKnowledgeBaseDocument(agentId, documentId, usageMode),
+    mutationFn: ({ docId, mode }: { docId: string; mode: 'auto' | 'prompt' }) =>
+      attachKnowledgeBaseDocument(agentId, docId, mode),
     onSuccess: () => {
-      toast.success('Documento adjuntado')
+      toast.success('Documento adjuntado al agente')
       refresh()
     },
-    onError: (error: Error) => toast.error(error.message),
+    onError: (e: Error) => toast.error(e.message),
   })
 
   const { mutate: detachDoc } = useMutation({
-    mutationFn: (documentId: string) => detachKnowledgeBaseDocument(agentId, documentId),
+    mutationFn: (docId: string) => detachKnowledgeBaseDocument(agentId, docId),
     onSuccess: () => {
-      toast.success('Documento retirado')
+      toast.success('Documento retirado del agente')
       refresh()
     },
-    onError: (error: Error) => toast.error(error.message),
+    onError: (e: Error) => toast.error(e.message),
   })
 
   const { mutate: deleteDoc } = useMutation({
-    mutationFn: (documentId: string) => deleteTextKnowledgeBaseDocument(documentId),
+    mutationFn: (docId: string) => deleteTextKnowledgeBaseDocument(docId),
     onSuccess: () => {
       toast.success('Documento eliminado')
       refresh()
     },
-    onError: (error: Error) => toast.error(error.message),
+    onError: (e: Error) => toast.error(e.message),
   })
 
-  const { mutate: uploadFile } = useMutation({
-    mutationFn: (file: File) => createTextKnowledgeBaseDocumentFromFile(file),
-    onSuccess: async (doc) => {
-      await attachKnowledgeBaseDocument(agentId, doc.id, 'auto')
-      toast.success('Archivo subido y adjuntado')
+  const { mutate: reindex } = useMutation({
+    mutationFn: (docId: string) => reindexKnowledgeBaseDocument(docId),
+    onSuccess: () => {
+      toast.success('Documento re-indexado')
       refresh()
-      if (fileInputRef.current) fileInputRef.current.value = ''
     },
-    onError: (error: Error) => toast.error(error.message),
+    onError: (e: Error) => toast.error(e.message),
   })
+
+  async function uploadFile(file: File) {
+    const key = file.name + Date.now()
+    setUploading((prev) => [...prev, key])
+    try {
+      const doc = await createTextKnowledgeBaseDocumentFromFile(file, file.name)
+      await attachKnowledgeBaseDocument(agentId, doc.id, 'auto')
+      toast.success(`"${file.name}" subido e indexado`)
+      refresh()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Error al subir archivo')
+    } finally {
+      setUploading((prev) => prev.filter((k) => k !== key))
+    }
+  }
+
+  async function handleFiles(files: FileList | null) {
+    if (!files) return
+    for (const file of Array.from(files)) {
+      await uploadFile(file)
+    }
+  }
+
+  function onDrop(e: React.DragEvent) {
+    e.preventDefault()
+    setIsDragging(false)
+    handleFiles(e.dataTransfer.files)
+  }
+
+  const isUploading = uploading.length > 0
 
   return (
-    <div className="space-y-5">
-      <section className="rounded-xl border border-[#e4e0f5] bg-white p-5">
-        <h3 className="mb-3 text-sm font-semibold text-black">Crear documento por texto</h3>
-        <div className="grid gap-3">
-          <input
-            type="text"
-            value={textName}
-            onChange={(event) => setTextName(event.target.value)}
-            placeholder="Nombre del documento"
-            className="rounded-lg border border-[#e4e0f5] bg-white px-3 py-2 text-sm text-black placeholder:text-black/50 focus:border-[#271173] focus:outline-none"
-          />
-          <textarea
-            rows={4}
-            value={textContent}
-            onChange={(event) => setTextContent(event.target.value)}
-            placeholder="Pega aquí el contenido de conocimiento"
-            className="rounded-lg border border-[#e4e0f5] bg-white px-3 py-2 text-sm text-black placeholder:text-black/50 focus:border-[#271173] focus:outline-none"
-          />
-          <button
-            type="button"
-            disabled={isCreatingText || !textContent.trim()}
-            onClick={() => createTextDoc()}
-            className="w-fit rounded-lg bg-[#271173] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#1f0d5a] disabled:opacity-60"
-          >
-            Crear y adjuntar
-          </button>
+    <div className="max-w-4xl space-y-6">
+      {/* Explanation banner */}
+      <div className="rounded-2xl border border-[#e4e0f5] bg-linear-to-br from-[#f5f3ff] to-white p-5">
+        <div className="flex gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#271173]">
+            <DocumentTextIcon className="h-4 w-4 text-white" />
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-black">Base de conocimiento RAG</p>
+            <p className="mt-1 text-xs leading-relaxed text-black/60">
+              Los documentos subidos se procesan, dividen en fragmentos semánticos y se indexan.
+              Durante el chat, el agente recupera automáticamente el contexto más relevante para
+              cada pregunta.
+            </p>
+          </div>
         </div>
-      </section>
+      </div>
 
-      <section className="rounded-xl border border-[#e4e0f5] bg-white p-5">
-        <h3 className="mb-3 text-sm font-semibold text-black">Crear documento por URL</h3>
-        <div className="grid gap-3 lg:grid-cols-[1fr,2fr,auto]">
-          <input
-            type="text"
-            value={urlName}
-            onChange={(event) => setUrlName(event.target.value)}
-            placeholder="Nombre (opcional)"
-            className="rounded-lg border border-[#e4e0f5] bg-white px-3 py-2 text-sm text-black placeholder:text-black/50 focus:border-[#271173] focus:outline-none"
-          />
-          <input
-            type="url"
-            value={url}
-            onChange={(event) => setUrl(event.target.value)}
-            placeholder="https://..."
-            className="rounded-lg border border-[#e4e0f5] bg-white px-3 py-2 text-sm text-black placeholder:text-black/50 focus:border-[#271173] focus:outline-none"
-          />
-          <button
-            type="button"
-            disabled={isCreatingUrl || !url.trim()}
-            onClick={() => createUrlDoc()}
-            className="rounded-lg bg-[#271173] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#1f0d5a] disabled:opacity-60"
-          >
-            Crear
-          </button>
-        </div>
-      </section>
-
-      <section className="rounded-xl border border-[#e4e0f5] bg-white p-5">
-        <h3 className="mb-3 text-sm font-semibold text-black">Subir archivo</h3>
+      {/* Drop zone */}
+      <div
+        onDragOver={(e) => {
+          e.preventDefault()
+          setIsDragging(true)
+        }}
+        onDragLeave={() => setIsDragging(false)}
+        onDrop={onDrop}
+        onClick={() => fileInputRef.current?.click()}
+        className={`relative flex cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed py-12 text-center transition-colors duration-200 ease-out ${
+          isDragging
+            ? 'border-[#271173] bg-[#ede9ff]'
+            : 'border-[#d4cfee] bg-[#fafafa] hover:border-[#271173] hover:bg-[#f5f3ff]'
+        }`}
+      >
         <input
           ref={fileInputRef}
           type="file"
-          accept=".txt,.md,.json,.csv,.html,.xml"
-          onChange={(event) => {
-            const file = event.target.files?.[0]
-            if (file) uploadFile(file)
-          }}
-          className="block w-full text-sm text-black/85 file:mr-3 file:rounded-lg file:border-0 file:bg-[#271173] file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-white"
+          accept={ACCEPTED}
+          multiple
+          className="hidden"
+          onChange={(e) => handleFiles(e.target.files)}
         />
-      </section>
 
-      <section className="overflow-hidden rounded-xl border border-[#e4e0f5] bg-white">
-        <div className="border-b border-[#e4e0f5] px-5 py-3">
-          <h3 className="text-sm font-semibold text-black">Documentos del workspace</h3>
+        {isUploading ? (
+          <>
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#271173]">
+              <ArrowPathIcon className="h-6 w-6 animate-spin text-white" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-black">
+                Subiendo y procesando {uploading.length} archivo{uploading.length > 1 ? 's' : ''}...
+              </p>
+              <p className="mt-0.5 text-xs text-black/50">El archivo se indexará automáticamente</p>
+            </div>
+          </>
+        ) : (
+          <>
+            <div
+              className={`flex h-12 w-12 items-center justify-center rounded-2xl transition-colors ${
+                isDragging ? 'bg-[#271173]' : 'bg-[#ede9ff]'
+              }`}
+            >
+              <CloudArrowUpIcon
+                className={`h-6 w-6 transition-colors ${isDragging ? 'text-white' : 'text-[#271173]'}`}
+              />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-black">
+                Arrastra archivos aquí o haz clic para seleccionar
+              </p>
+              <p className="mt-0.5 text-xs text-black/50">{ACCEPTED_LABEL}</p>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Documents list */}
+      <div>
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-black">
+            Documentos del workspace
+            {workspaceDocs.length > 0 && (
+              <span className="ml-2 rounded-full bg-[#ede9ff] px-2 py-0.5 text-xs font-semibold text-[#271173]">
+                {workspaceDocs.length}
+              </span>
+            )}
+          </h3>
         </div>
 
-        {workspaceDocuments.length === 0 ? (
-          <div className="px-5 py-6 text-sm text-black/60">No hay documentos todavía.</div>
+        {workspaceDocs.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-[#d4cfee] bg-[#fafafa] py-10 text-center">
+            <p className="text-sm text-black/50">No hay documentos todavía. Sube el primero.</p>
+          </div>
         ) : (
-          <div className="divide-y divide-[#e4e0f5]">
-            {workspaceDocuments.map((doc) => {
+          <div className="space-y-2">
+            {workspaceDocs.map((doc) => {
               const attached = attachedIds.has(doc.id)
-              const attachedDoc = attachedDocuments.find((item) => item.id === doc.id)
+              const attachedDoc = attachedDocuments.find((d) => d.id === doc.id)
 
               return (
-                <div key={doc.id} className="px-5 py-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
+                <div
+                  key={doc.id}
+                  className={`overflow-hidden rounded-xl border bg-white transition-colors ${
+                    attached ? 'border-[#271173]/30' : 'border-[#e4e0f5]'
+                  }`}
+                >
+                  <div className="flex flex-wrap items-start gap-3 px-5 py-4">
+                    <div
+                      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
+                        attached ? 'bg-[#271173]' : 'bg-[#ede9ff]'
+                      }`}
+                    >
+                      <DocumentTextIcon
+                        className={`h-4 w-4 ${attached ? 'text-white' : 'text-[#271173]'}`}
+                      />
+                    </div>
+
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium text-black">{doc.name}</p>
-                      <p className="mt-0.5 text-xs text-black/60">
-                        {doc.source_type.toUpperCase()} · {doc.source_value}
-                      </p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-sm font-semibold text-black">{doc.name}</p>
+                        <IndexStatusBadge status={doc.index_status} />
+                        {doc.chunk_count > 0 && (
+                          <span className="text-[10px] text-black/40">
+                            {doc.chunk_count} fragmento{doc.chunk_count !== 1 ? 's' : ''}
+                          </span>
+                        )}
+                      </div>
+                      <p className="mt-0.5 text-xs text-black/40">{doc.source_value}</p>
                       {doc.content_preview && (
-                        <p className="mt-1 text-xs text-black/70">{doc.content_preview}</p>
+                        <p className="mt-1 line-clamp-2 text-xs text-black/60">
+                          {doc.content_preview}
+                        </p>
                       )}
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex shrink-0 flex-wrap items-center gap-2">
                       {attached && (
                         <select
                           value={attachedDoc?.usage_mode ?? 'auto'}
-                          onChange={(event) =>
+                          onChange={(e) =>
                             attachDoc({
-                              documentId: doc.id,
-                              usageMode: event.target.value as 'auto' | 'prompt',
+                              docId: doc.id,
+                              mode: e.target.value as 'auto' | 'prompt',
                             })
                           }
                           className="rounded-lg border border-[#e4e0f5] bg-white px-2 py-1 text-xs text-black focus:border-[#271173] focus:outline-none"
                         >
-                          <option value="auto">Auto</option>
-                          <option value="prompt">Prompt</option>
+                          <option value="auto">Auto RAG</option>
+                          <option value="prompt">En prompt</option>
                         </select>
+                      )}
+
+                      {doc.index_status === 'failed' && (
+                        <button
+                          type="button"
+                          onClick={() => reindex(doc.id)}
+                          className="rounded-lg border border-amber-200 p-1.5 text-amber-600 transition-colors hover:bg-amber-50"
+                          title="Re-indexar"
+                        >
+                          <ArrowPathIcon className="h-3.5 w-3.5" />
+                        </button>
                       )}
 
                       <button
                         type="button"
-                        onClick={() => (attached ? detachDoc(doc.id) : attachDoc({ documentId: doc.id, usageMode: 'auto' }))}
-                        className={`rounded-lg px-2.5 py-1 text-xs font-medium ${
+                        onClick={() =>
                           attached
-                            ? 'border border-amber-200 text-amber-700 hover:bg-amber-50'
-                            : 'border border-[#271173]/30 text-[#271173] hover:bg-[#ede9ff]'
+                            ? detachDoc(doc.id)
+                            : attachDoc({ docId: doc.id, mode: 'auto' })
+                        }
+                        className={`rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors ${
+                          attached
+                            ? 'border-[#271173]/30 bg-[#ede9ff] text-[#271173] hover:bg-[#d4cfee]'
+                            : 'border-[#e4e0f5] text-black/60 hover:border-[#271173]/30 hover:bg-[#f5f3ff] hover:text-[#271173]'
                         }`}
                       >
-                        {attached ? 'Desadjuntar' : 'Adjuntar'}
+                        {attached ? 'Adjunto ✓' : 'Adjuntar'}
                       </button>
 
                       <button
                         type="button"
                         onClick={() => deleteDoc(doc.id)}
-                        className="rounded-lg border border-rose-200 px-2.5 py-1 text-xs font-medium text-rose-600 hover:bg-rose-50"
+                        className="rounded-lg border border-rose-200 p-1.5 text-rose-500 transition-colors hover:bg-rose-50"
+                        title="Eliminar"
                       >
-                        Eliminar
+                        <TrashIcon className="h-3.5 w-3.5" />
                       </button>
                     </div>
                   </div>
@@ -254,7 +338,7 @@ export default function TextAgentKnowledgeBaseTab({
             })}
           </div>
         )}
-      </section>
+      </div>
     </div>
   )
 }

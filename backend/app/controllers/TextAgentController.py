@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 from datetime import datetime
 from typing import Any
 
@@ -14,7 +15,9 @@ from app.controllers.deps.db_session import SessionDep
 from app.models.TextAgent import TextAgent
 from app.models.TextAgentKnowledgeBase import TextAgentKnowledgeBase
 from app.models.TextAgentTool import TextAgentTool
+from app.models.TextAgentWhatsApp import TextAgentWhatsApp
 from app.models.TextConversation import TextConversation
+from app.models.TextKnowledgeBaseChunk import TextKnowledgeBaseChunk
 from app.models.TextKnowledgeBaseDocument import TextKnowledgeBaseDocument
 from app.models.TextMessage import TextMessage
 from app.models.TextProviderConfig import TextProviderConfig
@@ -23,6 +26,7 @@ from app.utils.crypto import decrypt_secret, encrypt_secret, mask_secret
 SUPPORTED_PROVIDERS = {"openai", "gemini"}
 SUPPORTED_TOOL_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE"}
 SUPPORTED_USAGE_MODES = {"auto", "prompt"}
+SUPPORTED_WA_PROVIDERS = {"meta", "twilio"}
 
 TEXT_AGENTS_REQUIRE_USER_KEYS = (
     os.getenv("TEXT_AGENTS_REQUIRE_USER_KEYS", "false").strip().lower() == "true"
@@ -30,6 +34,12 @@ TEXT_AGENTS_REQUIRE_USER_KEYS = (
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 
+_CHUNK_SIZE = 500
+_CHUNK_OVERLAP = 80
+_RAG_TOP_K = 5
+
+
+# ─── Helpers ────────────────────────────────────────────────────────────────
 
 def _utcnow() -> datetime:
     return datetime.utcnow()
@@ -81,27 +91,6 @@ def _require_owned_document(
             detail="Documento no encontrado o sin permisos",
         )
     return row
-
-
-def _require_provider_config(
-    provider: str,
-    current_user: CurrentUser,
-    session: SessionDep,
-) -> TextProviderConfig:
-    config = session.exec(
-        select(TextProviderConfig).where(
-            TextProviderConfig.user_id == current_user.id,
-            TextProviderConfig.provider == provider,
-        )
-    ).first()
-
-    if not config:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Debes configurar una API key para {provider} antes de usar este proveedor",
-        )
-
-    return config
 
 
 def _get_env_provider_key(provider: str) -> str:
@@ -189,8 +178,18 @@ def _serialize_provider_config(config: TextProviderConfig | None, provider: str)
 def _serialize_tool(tool: TextAgentTool) -> dict[str, Any]:
     try:
         parsed_headers = json.loads(tool.headers_json)
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, TypeError):
         parsed_headers = {}
+
+    try:
+        parameters_schema = json.loads(tool.parameters_schema_json or "{}")
+    except (json.JSONDecodeError, TypeError):
+        parameters_schema = {}
+
+    try:
+        response_mapping = json.loads(tool.response_mapping_json or "{}")
+    except (json.JSONDecodeError, TypeError):
+        response_mapping = {}
 
     return {
         "id": tool.id,
@@ -199,7 +198,8 @@ def _serialize_tool(tool: TextAgentTool) -> dict[str, Any]:
         "endpoint_url": tool.endpoint_url,
         "http_method": tool.http_method,
         "headers": parsed_headers,
-        "body_template": tool.body_template,
+        "parameters_schema": parameters_schema,
+        "response_mapping": response_mapping,
         "enabled": tool.enabled,
         "created_at_unix_secs": _to_unix(tool.created_at),
         "updated_at_unix_secs": _to_unix(tool.updated_at),
@@ -213,6 +213,8 @@ def _serialize_document(doc: TextKnowledgeBaseDocument) -> dict[str, Any]:
         "source_type": doc.source_type,
         "source_value": doc.source_value,
         "content_preview": doc.content[:240],
+        "index_status": getattr(doc, "index_status", "indexed"),
+        "chunk_count": getattr(doc, "chunk_count", 0),
         "created_at_unix_secs": _to_unix(doc.created_at),
         "updated_at_unix_secs": _to_unix(doc.updated_at),
     }
@@ -231,6 +233,29 @@ def _serialize_text_agent(agent: TextAgent) -> dict[str, Any]:
         "max_tokens": agent.max_tokens,
         "created_at_unix_secs": _to_unix(agent.created_at),
         "updated_at_unix_secs": _to_unix(agent.updated_at),
+    }
+
+
+def _serialize_whatsapp(config: TextAgentWhatsApp) -> dict[str, Any]:
+    has_credentials = False
+    if config.provider == "twilio":
+        has_credentials = bool(config.account_sid and config.auth_token_encrypted)
+    elif config.provider == "meta":
+        has_credentials = bool(config.access_token_encrypted and config.phone_number_id)
+
+    return {
+        "id": config.id,
+        "text_agent_id": config.text_agent_id,
+        "provider": config.provider,
+        "phone_number": config.phone_number,
+        "account_sid": config.account_sid,
+        "phone_number_id": config.phone_number_id,
+        "business_account_id": config.business_account_id,
+        "webhook_verify_token": config.webhook_verify_token,
+        "has_credentials": has_credentials,
+        "active": config.active,
+        "created_at_unix_secs": _to_unix(config.created_at),
+        "updated_at_unix_secs": _to_unix(config.updated_at),
     }
 
 
@@ -272,34 +297,130 @@ def _list_agent_knowledge_base(
     return response
 
 
-def _build_context_block(
-    knowledge_base: list[dict[str, Any]],
-    tools: list[TextAgentTool],
-) -> str:
-    blocks: list[str] = []
+# ─── RAG ────────────────────────────────────────────────────────────────────
 
-    if knowledge_base:
-        kb_lines = ["Contexto de base de conocimiento:"]
-        for item in knowledge_base[:6]:
-            preview = str(item.get("content_preview") or "").strip()
-            if not preview:
-                continue
-            kb_lines.append(f"- {item.get('name', 'documento')}: {preview}")
-        if len(kb_lines) > 1:
-            blocks.append("\n".join(kb_lines))
+def _chunk_text(text: str) -> list[str]:
+    text = text.strip()
+    if not text:
+        return []
+    chunks: list[str] = []
+    start = 0
+    while start < len(text):
+        end = min(start + _CHUNK_SIZE, len(text))
+        if end < len(text):
+            for sep in ["\n\n", ".\n", ". ", "\n"]:
+                pos = text.rfind(sep, start + 80, end)
+                if pos > start + 40:
+                    end = pos + len(sep)
+                    break
+        chunk = text[start:end].strip()
+        if chunk and len(chunk) > 20:
+            chunks.append(chunk)
+        if end >= len(text):
+            break
+        start = end - _CHUNK_OVERLAP
+    return chunks
 
-    active_tools = [tool for tool in tools if tool.enabled]
-    if active_tools:
-        tool_lines = ["Herramientas disponibles (describe cuando deberian ejecutarse):"]
-        for tool in active_tools:
-            method = tool.http_method
-            tool_lines.append(
-                f"- {tool.name}: {tool.description or 'Sin descripcion'} [{method} {tool.endpoint_url}]"
+
+def _index_document(
+    doc: TextKnowledgeBaseDocument,
+    session: SessionDep,
+) -> int:
+    session.exec(
+        delete(TextKnowledgeBaseChunk).where(
+            TextKnowledgeBaseChunk.document_id == doc.id
+        )
+    )
+
+    chunks = _chunk_text(doc.content)
+    now = _utcnow()
+    for i, chunk_text in enumerate(chunks):
+        session.add(
+            TextKnowledgeBaseChunk(
+                document_id=doc.id,
+                chunk_index=i,
+                content=chunk_text,
+                created_at=now,
             )
-        blocks.append("\n".join(tool_lines))
+        )
+    return len(chunks)
 
-    return "\n\n".join(blocks)
 
+def _score_chunk(query_terms: set[str], chunk_content: str) -> float:
+    words = chunk_content.lower().split()
+    word_set = set(words)
+    overlap = query_terms & word_set
+    if not overlap:
+        return 0.0
+    precision = len(overlap) / max(len(query_terms), 1)
+    tf_bonus = sum(words.count(t) for t in overlap) * 0.05
+    return precision + tf_bonus
+
+
+def _retrieve_rag_context(
+    session: SessionDep,
+    agent_id: str,
+    query: str,
+) -> str:
+    links = session.exec(
+        select(TextAgentKnowledgeBase).where(
+            TextAgentKnowledgeBase.text_agent_id == agent_id
+        )
+    ).all()
+    if not links:
+        return ""
+
+    doc_ids = [link.document_id for link in links]
+
+    chunks = session.exec(
+        select(TextKnowledgeBaseChunk).where(
+            TextKnowledgeBaseChunk.document_id.in_(doc_ids)
+        )
+    ).all()
+
+    if not chunks:
+        docs = session.exec(
+            select(TextKnowledgeBaseDocument).where(
+                TextKnowledgeBaseDocument.id.in_(doc_ids)
+            )
+        ).all()
+        if not docs:
+            return ""
+        parts = [doc.content[:2000] for doc in docs if doc.content.strip()]
+        combined = "\n\n".join(parts[:3])
+        return f"Contexto de base de conocimiento:\n{combined}" if combined else ""
+
+    query_terms = set(query.lower().split())
+    scored = sorted(
+        [(c, _score_chunk(query_terms, c.content)) for c in chunks],
+        key=lambda x: x[1],
+        reverse=True,
+    )
+
+    top = scored[:_RAG_TOP_K]
+    if all(s == 0.0 for _, s in top):
+        top = scored[:3]
+
+    lines = [c.content.strip() for c, _ in top if c.content.strip()]
+    if not lines:
+        return ""
+
+    return "Contexto de base de conocimiento:\n" + "\n\n---\n\n".join(lines)
+
+
+def _build_tools_description(tools: list[TextAgentTool]) -> str:
+    active = [t for t in tools if t.enabled]
+    if not active:
+        return ""
+    lines = ["Herramientas disponibles (usa su nombre cuando el usuario las necesite):"]
+    for tool in active:
+        lines.append(
+            f"- {tool.name}: {tool.description or 'Sin descripcion'} [{tool.http_method} {tool.endpoint_url}]"
+        )
+    return "\n".join(lines)
+
+
+# ─── LLM calls ──────────────────────────────────────────────────────────────
 
 def _call_openai(
     api_key: str,
@@ -431,7 +552,68 @@ def _call_gemini(
     return content.strip(), total_tokens if isinstance(total_tokens, int) else None
 
 
+def _dispatch_llm(
+    provider: str,
+    api_key: str,
+    model: str,
+    system_prompt: str,
+    history: list[dict[str, str]],
+    temperature: float,
+    max_tokens: int,
+) -> tuple[str, int | None]:
+    if provider == "openai":
+        return _call_openai(api_key, model, system_prompt, history, temperature, max_tokens)
+    return _call_gemini(api_key, model, system_prompt, history, temperature, max_tokens)
+
+
+# ─── WhatsApp sending ────────────────────────────────────────────────────────
+
+def _send_twilio_message(
+    account_sid: str,
+    auth_token: str,
+    from_number: str,
+    to_number: str,
+    body: str,
+) -> None:
+    url = f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Messages.json"
+    with httpx.Client(timeout=30) as client:
+        client.post(
+            url,
+            auth=(account_sid, auth_token),
+            data={"From": from_number, "To": to_number, "Body": body},
+        )
+
+
+def _send_meta_message(
+    access_token: str,
+    phone_number_id: str,
+    to_number: str,
+    body: str,
+) -> None:
+    url = f"https://graph.facebook.com/v18.0/{phone_number_id}/messages"
+    with httpx.Client(timeout=30) as client:
+        client.post(
+            url,
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "messaging_product": "whatsapp",
+                "recipient_type": "individual",
+                "to": to_number,
+                "type": "text",
+                "text": {"body": body},
+            },
+        )
+
+
+# ─── Controller ──────────────────────────────────────────────────────────────
+
 class TextAgentController:
+
+    # ── Provider configs ──────────────────────────────────────────────────
+
     @staticmethod
     async def list_provider_configs(current_user: CurrentUser, session: SessionDep):
         rows = session.exec(
@@ -497,7 +679,6 @@ class TextAgentController:
 
         session.commit()
         session.refresh(row)
-
         return _serialize_provider_config(row, normalized_provider)
 
     @staticmethod
@@ -528,6 +709,8 @@ class TextAgentController:
             session.commit()
 
         return {"deleted": True}
+
+    # ── Agents ───────────────────────────────────────────────────────────
 
     @staticmethod
     async def list_agents(current_user: CurrentUser, session: SessionDep):
@@ -599,13 +782,6 @@ class TextAgentController:
                 )
             agent.name = name
 
-        if "provider" in payload:
-            provider = _normalize_provider(payload.get("provider"))
-            _resolve_provider_api_key(provider, current_user, session)
-            agent.provider = provider
-            if "model" not in payload:
-                agent.model = _default_model(provider)
-
         if "model" in payload:
             agent.model = str(payload.get("model") or "").strip() or _default_model(agent.provider)
 
@@ -640,34 +816,40 @@ class TextAgentController:
     async def delete_agent(text_agent_id: str, current_user: CurrentUser, session: SessionDep):
         agent = _require_owned_text_agent(text_agent_id, current_user, session)
 
-        tools = session.exec(
+        for tool in session.exec(
             select(TextAgentTool).where(TextAgentTool.text_agent_id == agent.id)
-        ).all()
-        for tool in tools:
+        ).all():
             session.delete(tool)
 
-        links = session.exec(
+        for link in session.exec(
             select(TextAgentKnowledgeBase).where(TextAgentKnowledgeBase.text_agent_id == agent.id)
-        ).all()
-        for link in links:
+        ).all():
             session.delete(link)
+
+        wa_config = session.exec(
+            select(TextAgentWhatsApp).where(TextAgentWhatsApp.text_agent_id == agent.id)
+        ).first()
+        if wa_config:
+            session.delete(wa_config)
 
         conversations = session.exec(
             select(TextConversation).where(TextConversation.text_agent_id == agent.id)
         ).all()
 
-        conversation_ids = [conversation.id for conversation in conversations]
+        conversation_ids = [c.id for c in conversations]
         if conversation_ids:
             session.exec(
                 delete(TextMessage).where(TextMessage.conversation_id.in_(conversation_ids))
             )
 
-        for conversation in conversations:
-            session.delete(conversation)
+        for c in conversations:
+            session.delete(c)
 
         session.delete(agent)
         session.commit()
         return {"deleted": True}
+
+    # ── Tools ─────────────────────────────────────────────────────────────
 
     @staticmethod
     async def list_tools(text_agent_id: str, current_user: CurrentUser, session: SessionDep):
@@ -707,6 +889,20 @@ class TextAgentController:
                 detail="headers debe ser un objeto",
             )
 
+        parameters_schema = payload.get("parameters_schema") or {}
+        if not isinstance(parameters_schema, dict):
+            try:
+                parameters_schema = json.loads(str(parameters_schema))
+            except (json.JSONDecodeError, TypeError):
+                parameters_schema = {}
+
+        response_mapping = payload.get("response_mapping") or {}
+        if not isinstance(response_mapping, dict):
+            try:
+                response_mapping = json.loads(str(response_mapping))
+            except (json.JSONDecodeError, TypeError):
+                response_mapping = {}
+
         now = _utcnow()
         tool = TextAgentTool(
             text_agent_id=text_agent_id,
@@ -715,7 +911,8 @@ class TextAgentController:
             endpoint_url=endpoint_url,
             http_method=method,
             headers_json=json.dumps(headers),
-            body_template=str(payload.get("body_template") or ""),
+            parameters_schema_json=json.dumps(parameters_schema),
+            response_mapping_json=json.dumps(response_mapping),
             enabled=bool(payload.get("enabled", True)),
             created_at=now,
             updated_at=now,
@@ -782,8 +979,23 @@ class TextAgentController:
                 )
             tool.headers_json = json.dumps(headers)
 
-        if "body_template" in payload:
-            tool.body_template = str(payload.get("body_template") or "")
+        if "parameters_schema" in payload:
+            ps = payload.get("parameters_schema") or {}
+            if isinstance(ps, str):
+                try:
+                    ps = json.loads(ps)
+                except (json.JSONDecodeError, TypeError):
+                    ps = {}
+            tool.parameters_schema_json = json.dumps(ps if isinstance(ps, dict) else {})
+
+        if "response_mapping" in payload:
+            rm = payload.get("response_mapping") or {}
+            if isinstance(rm, str):
+                try:
+                    rm = json.loads(rm)
+                except (json.JSONDecodeError, TypeError):
+                    rm = {}
+            tool.response_mapping_json = json.dumps(rm if isinstance(rm, dict) else {})
 
         if "enabled" in payload:
             tool.enabled = bool(payload.get("enabled"))
@@ -821,6 +1033,8 @@ class TextAgentController:
         session.commit()
         return {"deleted": True}
 
+    # ── Knowledge base ────────────────────────────────────────────────────
+
     @staticmethod
     async def list_knowledge_base_documents(current_user: CurrentUser, session: SessionDep):
         rows = session.exec(
@@ -829,77 +1043,6 @@ class TextAgentController:
             .order_by(TextKnowledgeBaseDocument.updated_at.desc())
         ).all()
         return {"documents": [_serialize_document(doc) for doc in rows]}
-
-    @staticmethod
-    async def create_knowledge_base_document_from_text(
-        payload: dict,
-        current_user: CurrentUser,
-        session: SessionDep,
-    ):
-        text = str(payload.get("text") or "").strip()
-        if not text:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="El contenido de texto es requerido",
-            )
-
-        name = str(payload.get("name") or "Documento de texto").strip() or "Documento de texto"
-        now = _utcnow()
-        doc = TextKnowledgeBaseDocument(
-            user_id=current_user.id,
-            name=name,
-            source_type="text",
-            source_value="inline",
-            content=text,
-            created_at=now,
-            updated_at=now,
-        )
-        session.add(doc)
-        session.commit()
-        session.refresh(doc)
-
-        return _serialize_document(doc)
-
-    @staticmethod
-    async def create_knowledge_base_document_from_url(
-        payload: dict,
-        current_user: CurrentUser,
-        session: SessionDep,
-    ):
-        url = str(payload.get("url") or "").strip()
-        if not url:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="La URL es requerida",
-            )
-
-        name = str(payload.get("name") or "Documento URL").strip() or "Documento URL"
-        content = str(payload.get("content") or "").strip()
-
-        if not content:
-            try:
-                with httpx.Client(timeout=15) as client:
-                    response = client.get(url, follow_redirects=True)
-                    if response.is_success:
-                        content = response.text[:120_000]
-            except Exception:
-                content = ""
-
-        now = _utcnow()
-        doc = TextKnowledgeBaseDocument(
-            user_id=current_user.id,
-            name=name,
-            source_type="url",
-            source_value=url,
-            content=content,
-            created_at=now,
-            updated_at=now,
-        )
-        session.add(doc)
-        session.commit()
-        session.refresh(doc)
-
-        return _serialize_document(doc)
 
     @staticmethod
     async def create_knowledge_base_document_from_file(
@@ -919,6 +1062,8 @@ class TextAgentController:
             source_type="file",
             source_value=file.filename or "uploaded-file",
             content=content,
+            index_status="indexing",
+            chunk_count=0,
             created_at=now,
             updated_at=now,
         )
@@ -926,29 +1071,45 @@ class TextAgentController:
         session.commit()
         session.refresh(doc)
 
+        try:
+            count = _index_document(doc, session)
+            doc.chunk_count = count
+            doc.index_status = "indexed"
+            doc.updated_at = _utcnow()
+            session.add(doc)
+            session.commit()
+            session.refresh(doc)
+        except Exception:
+            doc.index_status = "failed"
+            session.add(doc)
+            session.commit()
+
         return _serialize_document(doc)
 
     @staticmethod
-    async def update_knowledge_base_document(
+    async def reindex_document(
         document_id: str,
-        payload: dict,
         current_user: CurrentUser,
         session: SessionDep,
     ):
         doc = _require_owned_document(document_id, current_user, session)
 
-        if "name" in payload:
-            next_name = str(payload.get("name") or "").strip()
-            if next_name:
-                doc.name = next_name
-
-        if "content" in payload:
-            doc.content = str(payload.get("content") or "")
-
-        doc.updated_at = _utcnow()
+        doc.index_status = "indexing"
         session.add(doc)
         session.commit()
-        session.refresh(doc)
+
+        try:
+            count = _index_document(doc, session)
+            doc.chunk_count = count
+            doc.index_status = "indexed"
+            doc.updated_at = _utcnow()
+            session.add(doc)
+            session.commit()
+            session.refresh(doc)
+        except Exception:
+            doc.index_status = "failed"
+            session.add(doc)
+            session.commit()
 
         return _serialize_document(doc)
 
@@ -960,17 +1121,21 @@ class TextAgentController:
     ):
         doc = _require_owned_document(document_id, current_user, session)
 
-        links = session.exec(
+        session.exec(
+            delete(TextKnowledgeBaseChunk).where(
+                TextKnowledgeBaseChunk.document_id == document_id
+            )
+        )
+
+        for link in session.exec(
             select(TextAgentKnowledgeBase).where(
                 TextAgentKnowledgeBase.document_id == document_id
             )
-        ).all()
-        for link in links:
+        ).all():
             session.delete(link)
 
         session.delete(doc)
         session.commit()
-
         return {"deleted": True}
 
     @staticmethod
@@ -1048,6 +1213,108 @@ class TextAgentController:
         session.commit()
         return {"detached": True}
 
+    # ── WhatsApp ──────────────────────────────────────────────────────────
+
+    @staticmethod
+    async def get_whatsapp_config(
+        text_agent_id: str,
+        current_user: CurrentUser,
+        session: SessionDep,
+    ):
+        _require_owned_text_agent(text_agent_id, current_user, session)
+        config = session.exec(
+            select(TextAgentWhatsApp).where(
+                TextAgentWhatsApp.text_agent_id == text_agent_id
+            )
+        ).first()
+
+        if not config:
+            return {"config": None}
+
+        return {"config": _serialize_whatsapp(config)}
+
+    @staticmethod
+    async def upsert_whatsapp_config(
+        text_agent_id: str,
+        payload: dict,
+        current_user: CurrentUser,
+        session: SessionDep,
+    ):
+        _require_owned_text_agent(text_agent_id, current_user, session)
+
+        provider = str(payload.get("provider") or "").strip().lower()
+        if provider not in SUPPORTED_WA_PROVIDERS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Proveedor WhatsApp no soportado. Usa meta o twilio",
+            )
+
+        config = session.exec(
+            select(TextAgentWhatsApp).where(
+                TextAgentWhatsApp.text_agent_id == text_agent_id
+            )
+        ).first()
+
+        now = _utcnow()
+        if not config:
+            config = TextAgentWhatsApp(
+                text_agent_id=text_agent_id,
+                provider=provider,
+                webhook_verify_token=secrets.token_urlsafe(24),
+                created_at=now,
+                updated_at=now,
+            )
+
+        config.provider = provider
+        config.phone_number = str(payload.get("phone_number") or "").strip()
+
+        if provider == "twilio":
+            config.account_sid = str(payload.get("account_sid") or "").strip()
+            raw_auth = str(payload.get("auth_token") or "").strip()
+            if raw_auth:
+                config.auth_token_encrypted = encrypt_secret(raw_auth)
+        elif provider == "meta":
+            raw_token = str(payload.get("access_token") or "").strip()
+            if raw_token:
+                config.access_token_encrypted = encrypt_secret(raw_token)
+            config.phone_number_id = str(payload.get("phone_number_id") or "").strip()
+            config.business_account_id = str(payload.get("business_account_id") or "").strip()
+
+        if "active" in payload:
+            config.active = bool(payload.get("active"))
+
+        if not config.webhook_verify_token:
+            config.webhook_verify_token = secrets.token_urlsafe(24)
+
+        config.updated_at = now
+        session.add(config)
+        session.commit()
+        session.refresh(config)
+
+        return {"config": _serialize_whatsapp(config)}
+
+    @staticmethod
+    async def delete_whatsapp_config(
+        text_agent_id: str,
+        current_user: CurrentUser,
+        session: SessionDep,
+    ):
+        _require_owned_text_agent(text_agent_id, current_user, session)
+
+        config = session.exec(
+            select(TextAgentWhatsApp).where(
+                TextAgentWhatsApp.text_agent_id == text_agent_id
+            )
+        ).first()
+
+        if config:
+            session.delete(config)
+            session.commit()
+
+        return {"deleted": True}
+
+    # ── Conversations ─────────────────────────────────────────────────────
+
     @staticmethod
     async def list_conversations(
         text_agent_id: str,
@@ -1072,27 +1339,28 @@ class TextAgentController:
             .order_by(TextMessage.created_at.asc())
         ).all()
 
-        grouped_messages: dict[str, list[TextMessage]] = {}
+        grouped: dict[str, list[TextMessage]] = {}
         for message in messages:
-            grouped_messages.setdefault(message.conversation_id, []).append(message)
+            grouped.setdefault(message.conversation_id, []).append(message)
 
-        response: list[dict[str, Any]] = []
+        result: list[dict[str, Any]] = []
         for conversation in rows:
-            conversation_messages = grouped_messages.get(conversation.id, [])
-            last_preview = conversation_messages[-1].content[:140] if conversation_messages else ""
-            response.append(
+            msgs = grouped.get(conversation.id, [])
+            last_preview = msgs[-1].content[:140] if msgs else ""
+            result.append(
                 {
                     "conversation_id": conversation.id,
                     "agent_id": text_agent_id,
                     "status": "done",
+                    "channel": getattr(conversation, "channel", "web"),
                     "start_time_unix_secs": _to_unix(conversation.created_at),
                     "updated_at_unix_secs": _to_unix(conversation.updated_at),
-                    "message_count": len(conversation_messages),
+                    "message_count": len(msgs),
                     "last_message_preview": last_preview,
                 }
             )
 
-        return {"conversations": response}
+        return {"conversations": result}
 
     @staticmethod
     async def get_conversation_detail(
@@ -1133,6 +1401,7 @@ class TextAgentController:
             "conversation_id": conversation.id,
             "agent_id": agent.id,
             "status": "done",
+            "channel": getattr(conversation, "channel", "web"),
             "transcript": transcript,
             "metadata": {
                 "start_time_unix_secs": _to_unix(conversation.created_at),
@@ -1143,6 +1412,8 @@ class TextAgentController:
                 "call_successful": "yes" if latest_assistant else "unknown",
             },
         }
+
+    # ── Chat ──────────────────────────────────────────────────────────────
 
     @staticmethod
     async def chat(
@@ -1163,7 +1434,11 @@ class TextAgentController:
         conversation_id = str(payload.get("conversation_id") or "").strip()
         if conversation_id:
             conversation = session.get(TextConversation, conversation_id)
-            if not conversation or conversation.text_agent_id != agent.id or conversation.user_id != current_user.id:
+            if (
+                not conversation
+                or conversation.text_agent_id != agent.id
+                or conversation.user_id != current_user.id
+            ):
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Conversacion no encontrada o sin permisos",
@@ -1181,14 +1456,15 @@ class TextAgentController:
             session.commit()
             session.refresh(conversation)
 
-        user_row = TextMessage(
-            conversation_id=conversation.id,
-            role="user",
-            content=user_message,
-            provider=agent.provider,
-            model=agent.model,
+        session.add(
+            TextMessage(
+                conversation_id=conversation.id,
+                role="user",
+                content=user_message,
+                provider=agent.provider,
+                model=agent.model,
+            )
         )
-        session.add(user_row)
         session.commit()
 
         history_rows = session.exec(
@@ -1204,43 +1480,36 @@ class TextAgentController:
         ]
 
         tools = _list_agent_tools(session, agent.id)
-        knowledge_base = _list_agent_knowledge_base(session, agent.id)
-        context_block = _build_context_block(knowledge_base, tools)
+        rag_context = _retrieve_rag_context(session, agent.id, user_message)
+        tools_desc = _build_tools_description(tools)
 
         system_prompt = agent.system_prompt.strip() or "Eres un asistente util y claro."
-        if context_block:
-            system_prompt = f"{system_prompt}\n\n{context_block}"
+        extra_blocks = [b for b in [rag_context, tools_desc] if b]
+        if extra_blocks:
+            system_prompt = system_prompt + "\n\n" + "\n\n".join(extra_blocks)
 
         api_key, _ = _resolve_provider_api_key(agent.provider, current_user, session)
 
-        if agent.provider == "openai":
-            assistant_content, token_usage = _call_openai(
-                api_key=api_key,
-                model=agent.model,
-                system_prompt=system_prompt,
-                history=history,
-                temperature=agent.temperature,
-                max_tokens=agent.max_tokens,
-            )
-        else:
-            assistant_content, token_usage = _call_gemini(
-                api_key=api_key,
-                model=agent.model,
-                system_prompt=system_prompt,
-                history=history,
-                temperature=agent.temperature,
-                max_tokens=agent.max_tokens,
-            )
-
-        assistant_row = TextMessage(
-            conversation_id=conversation.id,
-            role="assistant",
-            content=assistant_content,
+        assistant_content, token_usage = _dispatch_llm(
             provider=agent.provider,
+            api_key=api_key,
             model=agent.model,
-            token_usage=token_usage,
+            system_prompt=system_prompt,
+            history=history,
+            temperature=agent.temperature,
+            max_tokens=agent.max_tokens,
         )
-        session.add(assistant_row)
+
+        session.add(
+            TextMessage(
+                conversation_id=conversation.id,
+                role="assistant",
+                content=assistant_content,
+                provider=agent.provider,
+                model=agent.model,
+                token_usage=token_usage,
+            )
+        )
 
         conversation.updated_at = _utcnow()
         session.add(conversation)
@@ -1253,3 +1522,106 @@ class TextAgentController:
             "model": agent.model,
             "token_usage": token_usage,
         }
+
+    # ── WhatsApp webhook ──────────────────────────────────────────────────
+
+    @staticmethod
+    async def handle_whatsapp_incoming(
+        config_id: str,
+        sender: str,
+        message_text: str,
+        session: SessionDep,
+    ) -> str:
+        config = session.get(TextAgentWhatsApp, config_id)
+        if not config or not config.active:
+            return ""
+
+        agent = session.get(TextAgent, config.text_agent_id)
+        if not agent:
+            return ""
+
+        wa_title = f"whatsapp:{sender}"
+        conversation = session.exec(
+            select(TextConversation).where(
+                TextConversation.text_agent_id == agent.id,
+                TextConversation.title == wa_title,
+            )
+        ).first()
+
+        if not conversation:
+            now = _utcnow()
+            conversation = TextConversation(
+                text_agent_id=agent.id,
+                user_id=agent.user_id,
+                title=wa_title,
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(conversation)
+            session.commit()
+            session.refresh(conversation)
+
+        session.add(
+            TextMessage(
+                conversation_id=conversation.id,
+                role="user",
+                content=message_text,
+                provider=agent.provider,
+                model=agent.model,
+            )
+        )
+        session.commit()
+
+        history_rows = session.exec(
+            select(TextMessage)
+            .where(TextMessage.conversation_id == conversation.id)
+            .order_by(TextMessage.created_at.asc())
+        ).all()
+
+        history = [
+            {"role": row.role, "content": row.content}
+            for row in history_rows
+            if row.role in {"user", "assistant"}
+        ]
+
+        tools = _list_agent_tools(session, agent.id)
+        rag_context = _retrieve_rag_context(session, agent.id, message_text)
+        tools_desc = _build_tools_description(tools)
+
+        system_prompt = agent.system_prompt.strip() or "Eres un asistente util y claro."
+        extra_blocks = [b for b in [rag_context, tools_desc] if b]
+        if extra_blocks:
+            system_prompt = system_prompt + "\n\n" + "\n\n".join(extra_blocks)
+
+        env_key = _get_env_provider_key(agent.provider)
+        if not env_key:
+            return "Lo siento, no puedo responder ahora mismo."
+
+        try:
+            assistant_content, token_usage = _dispatch_llm(
+                provider=agent.provider,
+                api_key=env_key,
+                model=agent.model,
+                system_prompt=system_prompt,
+                history=history,
+                temperature=agent.temperature,
+                max_tokens=agent.max_tokens,
+            )
+        except Exception:
+            return "Lo siento, ocurrio un error al procesar tu mensaje."
+
+        session.add(
+            TextMessage(
+                conversation_id=conversation.id,
+                role="assistant",
+                content=assistant_content,
+                provider=agent.provider,
+                model=agent.model,
+                token_usage=token_usage,
+            )
+        )
+        conversation.updated_at = _utcnow()
+        session.add(conversation)
+        session.commit()
+
+        return assistant_content

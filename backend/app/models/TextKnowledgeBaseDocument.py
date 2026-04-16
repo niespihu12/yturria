@@ -14,5 +14,7 @@ class TextKnowledgeBaseDocument(SQLModel, table=True):
     source_type: str = Field(nullable=False)
     source_value: str = Field(default="", nullable=False)
     content: str = Field(sa_column=Column(Text, nullable=False), default="")
+    index_status: str = Field(default="indexed", nullable=False)
+    chunk_count: int = Field(default=0, nullable=False)
     created_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
     updated_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)

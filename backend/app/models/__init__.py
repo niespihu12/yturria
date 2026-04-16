@@ -2,7 +2,9 @@ from app.models.Token import Token
 from app.models.TextAgent import TextAgent
 from app.models.TextAgentKnowledgeBase import TextAgentKnowledgeBase
 from app.models.TextAgentTool import TextAgentTool
+from app.models.TextAgentWhatsApp import TextAgentWhatsApp
 from app.models.TextConversation import TextConversation
+from app.models.TextKnowledgeBaseChunk import TextKnowledgeBaseChunk
 from app.models.TextKnowledgeBaseDocument import TextKnowledgeBaseDocument
 from app.models.TextMessage import TextMessage
 from app.models.TextProviderConfig import TextProviderConfig
@@ -16,7 +18,9 @@ __all__ = [
 	"TextAgent",
 	"TextAgentKnowledgeBase",
 	"TextAgentTool",
+	"TextAgentWhatsApp",
 	"TextConversation",
+	"TextKnowledgeBaseChunk",
 	"TextKnowledgeBaseDocument",
 	"TextMessage",
 	"TextProviderConfig",

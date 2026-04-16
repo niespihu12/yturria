@@ -6,10 +6,12 @@ import type {
   TextAgentDetail,
   TextAgentSummary,
   TextAgentTool,
+  TextAgentWhatsApp,
   TextConversation,
   TextConversationDetail,
   TextKnowledgeBaseDocument,
   TextProvider,
+  WhatsAppProvider,
 } from '@/types/textAgent'
 
 function getError(error: unknown): string {
@@ -22,6 +24,8 @@ function getError(error: unknown): string {
   return 'Error al conectar'
 }
 
+// ── Agents ────────────────────────────────────────────────────────────────────
+
 export async function getTextAgents(): Promise<{ agents: TextAgentSummary[] }> {
   try {
     const { data } = await api.get('/text-agents')
@@ -31,11 +35,7 @@ export async function getTextAgents(): Promise<{ agents: TextAgentSummary[] }> {
   }
 }
 
-export async function createTextAgent(payload: {
-  name: string
-  provider: TextProvider
-  model?: string
-}) {
+export async function createTextAgent(payload: { name: string; provider: TextProvider; model?: string }) {
   try {
     const { data } = await api.post('/text-agents', payload)
     return data as TextAgentSummary
@@ -57,7 +57,6 @@ export async function updateTextAgent(
   agentId: string,
   payload: Partial<{
     name: string
-    provider: TextProvider
     model: string
     system_prompt: string
     welcome_message: string
@@ -83,6 +82,8 @@ export async function deleteTextAgent(agentId: string) {
   }
 }
 
+// ── Provider configs ──────────────────────────────────────────────────────────
+
 export async function listProviderConfigs(): Promise<ProviderConfigListResponse> {
   try {
     const { data } = await api.get('/text-agents/provider-configs')
@@ -94,9 +95,7 @@ export async function listProviderConfigs(): Promise<ProviderConfigListResponse>
 
 export async function saveProviderConfig(provider: TextProvider, apiKey: string) {
   try {
-    const { data } = await api.put(`/text-agents/provider-configs/${provider}`, {
-      api_key: apiKey,
-    })
+    const { data } = await api.put(`/text-agents/provider-configs/${provider}`, { api_key: apiKey })
     return data as ProviderConfig
   } catch (error) {
     throw new Error(getError(error))
@@ -111,6 +110,8 @@ export async function deleteProviderConfig(provider: TextProvider) {
     throw new Error(getError(error))
   }
 }
+
+// ── Tools ─────────────────────────────────────────────────────────────────────
 
 export async function getTextAgentTools(agentId: string): Promise<{ tools: TextAgentTool[] }> {
   try {
@@ -129,7 +130,8 @@ export async function createTextAgentTool(
     endpoint_url: string
     http_method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
     headers?: Record<string, string>
-    body_template?: string
+    parameters_schema?: object
+    response_mapping?: object
     enabled?: boolean
   }
 ) {
@@ -150,7 +152,8 @@ export async function updateTextAgentTool(
     endpoint_url: string
     http_method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
     headers: Record<string, string>
-    body_template: string
+    parameters_schema: object
+    response_mapping: object
     enabled: boolean
   }>
 ) {
@@ -171,37 +174,14 @@ export async function deleteTextAgentTool(agentId: string, toolId: string) {
   }
 }
 
+// ── Knowledge base ────────────────────────────────────────────────────────────
+
 export async function listTextKnowledgeBaseDocuments(): Promise<{
   documents: TextKnowledgeBaseDocument[]
 }> {
   try {
     const { data } = await api.get('/text-agents/knowledge-base')
     return data
-  } catch (error) {
-    throw new Error(getError(error))
-  }
-}
-
-export async function createTextKnowledgeBaseDocumentFromText(payload: {
-  name?: string
-  text: string
-}) {
-  try {
-    const { data } = await api.post('/text-agents/knowledge-base/text', payload)
-    return data as TextKnowledgeBaseDocument
-  } catch (error) {
-    throw new Error(getError(error))
-  }
-}
-
-export async function createTextKnowledgeBaseDocumentFromUrl(payload: {
-  name?: string
-  url: string
-  content?: string
-}) {
-  try {
-    const { data } = await api.post('/text-agents/knowledge-base/url', payload)
-    return data as TextKnowledgeBaseDocument
   } catch (error) {
     throw new Error(getError(error))
   }
@@ -222,12 +202,9 @@ export async function createTextKnowledgeBaseDocumentFromFile(file: File, name?:
   }
 }
 
-export async function updateTextKnowledgeBaseDocument(
-  documentId: string,
-  payload: { name?: string; content?: string }
-) {
+export async function reindexKnowledgeBaseDocument(documentId: string) {
   try {
-    const { data } = await api.patch(`/text-agents/knowledge-base/${documentId}`, payload)
+    const { data } = await api.post(`/text-agents/knowledge-base/${documentId}/reindex`)
     return data as TextKnowledgeBaseDocument
   } catch (error) {
     throw new Error(getError(error))
@@ -260,12 +237,9 @@ export async function attachKnowledgeBaseDocument(
   usageMode: 'auto' | 'prompt'
 ) {
   try {
-    const { data } = await api.post(
-      `/text-agents/${agentId}/knowledge-base/${documentId}`,
-      {
-        usage_mode: usageMode,
-      }
-    )
+    const { data } = await api.post(`/text-agents/${agentId}/knowledge-base/${documentId}`, {
+      usage_mode: usageMode,
+    })
     return data as { attached: boolean }
   } catch (error) {
     throw new Error(getError(error))
@@ -274,14 +248,55 @@ export async function attachKnowledgeBaseDocument(
 
 export async function detachKnowledgeBaseDocument(agentId: string, documentId: string) {
   try {
-    const { data } = await api.delete(
-      `/text-agents/${agentId}/knowledge-base/${documentId}`
-    )
+    const { data } = await api.delete(`/text-agents/${agentId}/knowledge-base/${documentId}`)
     return data as { detached: boolean }
   } catch (error) {
     throw new Error(getError(error))
   }
 }
+
+// ── WhatsApp ──────────────────────────────────────────────────────────────────
+
+export async function getWhatsAppConfig(agentId: string): Promise<{ config: TextAgentWhatsApp | null }> {
+  try {
+    const { data } = await api.get(`/text-agents/${agentId}/whatsapp`)
+    return data
+  } catch (error) {
+    throw new Error(getError(error))
+  }
+}
+
+export async function upsertWhatsAppConfig(
+  agentId: string,
+  payload: {
+    provider: WhatsAppProvider
+    phone_number?: string
+    account_sid?: string
+    auth_token?: string
+    access_token?: string
+    phone_number_id?: string
+    business_account_id?: string
+    active?: boolean
+  }
+): Promise<{ config: TextAgentWhatsApp }> {
+  try {
+    const { data } = await api.put(`/text-agents/${agentId}/whatsapp`, payload)
+    return data
+  } catch (error) {
+    throw new Error(getError(error))
+  }
+}
+
+export async function deleteWhatsAppConfig(agentId: string) {
+  try {
+    const { data } = await api.delete(`/text-agents/${agentId}/whatsapp`)
+    return data as { deleted: boolean }
+  } catch (error) {
+    throw new Error(getError(error))
+  }
+}
+
+// ── Chat ──────────────────────────────────────────────────────────────────────
 
 export async function chatWithTextAgent(
   agentId: string,
@@ -301,9 +316,9 @@ export async function chatWithTextAgent(
   }
 }
 
-export async function getTextConversations(
-  agentId: string
-): Promise<{ conversations: TextConversation[] }> {
+// ── Conversations ─────────────────────────────────────────────────────────────
+
+export async function getTextConversations(agentId: string): Promise<{ conversations: TextConversation[] }> {
   try {
     const { data } = await api.get(`/text-agents/${agentId}/conversations`)
     return data
@@ -312,9 +327,7 @@ export async function getTextConversations(
   }
 }
 
-export async function getTextConversationDetail(
-  conversationId: string
-): Promise<TextConversationDetail> {
+export async function getTextConversationDetail(conversationId: string): Promise<TextConversationDetail> {
   try {
     const { data } = await api.get(`/text-agents/conversations/${conversationId}`)
     return data
