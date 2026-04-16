@@ -1,0 +1,88 @@
+@import "tailwindcss";
+
+/* ─── Emil Kowalski: Custom easing curves ─────────────────────────────── */
+:root {
+  --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out-strong: cubic-bezier(0.77, 0, 0.175, 1);
+}
+
+/* ─── Button press feedback (buttons must feel responsive) ─────────────── */
+@media (hover: hover) and (pointer: fine) {
+  button:not(:disabled):active,
+  input[type="submit"]:not(:disabled):active {
+    transform: scale(0.97);
+  }
+}
+
+/* ─── Modal content entry animation ───────────────────────────────────── */
+.modal-content {
+  animation: modalContentIn 200ms var(--ease-out-strong) both;
+}
+
+@keyframes modalContentIn {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* ─── Section / page entry animation ──────────────────────────────────── */
+.section-enter {
+  animation: fadeSlideUp 280ms var(--ease-out-strong) both;
+}
+
+@keyframes fadeSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ─── Stagger list items ───────────────────────────────────────────────── */
+.stagger-item {
+  animation: fadeSlideUp 240ms var(--ease-out-strong) both;
+}
+
+/* ─── Sidebar nav item subtle entry ───────────────────────────────────── */
+.nav-item {
+  animation: navItemIn 200ms var(--ease-out-strong) both;
+}
+
+@keyframes navItemIn {
+  from {
+    opacity: 0;
+    transform: translateX(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* ─── Code snippet style ───────────────────────────────────────────────── */
+.code-chip {
+  border-radius: 4px;
+  background: #f0edff;
+  padding: 1px 6px;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.7);
+}
+
+/* Hide visual scrollbar but keep wheel/trackpad scrolling enabled */
+.no-visible-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.no-visible-scrollbar::-webkit-scrollbar {
+  display: none;
+}
