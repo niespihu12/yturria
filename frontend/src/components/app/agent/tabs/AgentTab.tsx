@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+﻿import { useMemo, useState } from 'react'
 import type {
   UseFormRegister,
   UseFormSetValue,
@@ -8,7 +8,7 @@ import type {
 import type { AgentFormValues } from '@/types/agent'
 import { SUPPORTED_LLMS, SUPPORTED_LANGUAGES } from '@/types/agent'
 import { useQuery } from '@tanstack/react-query'
-import { getVoicePreview, getVoices } from '@/api/ElevenLabsAPI'
+import { getVoicePreview, getVoices } from '@/api/VoiceRuntimeAPI'
 import type { Voice } from '@/types/agent'
 import {
   ChatBubbleLeftRightIcon,
@@ -39,33 +39,33 @@ const LLM_DESCRIPTIONS: Record<string, string> = {
   'gpt-5-mini': 'Balance entre precision y velocidad.',
   'gpt-4.1-mini': 'Respuesta consistente para soporte y operaciones.',
   'claude-sonnet-4': 'Razonamiento fuerte para conversaciones complejas.',
-  'gpt-oss-120b': 'Modelo open-source hospedado por ElevenLabs.',
+  'gpt-oss-120b': 'Modelo open-source hospedado por la plataforma.',
 }
 
 const TTS_MODEL_OPTIONS = [
   {
     value: 'eleven_turbo_v2_5',
-    label: 'Turbo v2.5 · Ultra baja latencia · Recomendado',
+    label: 'Turbo v2.5 Â· Ultra baja latencia Â· Recomendado',
   },
   {
     value: 'eleven_flash_v2_5',
-    label: 'Flash v2.5 · ~75ms · Maxima velocidad',
+    label: 'Flash v2.5 Â· ~75ms Â· Maxima velocidad',
   },
   {
     value: 'eleven_multilingual_v2',
-    label: 'Multilingual v2 · Alta calidad · Multiidioma',
+    label: 'Multilingual v2 Â· Alta calidad Â· Multiidioma',
   },
   {
     value: 'eleven_v3',
-    label: 'v3 · Mas expresivo · 70+ idiomas',
+    label: 'v3 Â· Mas expresivo Â· 70+ idiomas',
   },
 ]
 
 const TTS_MODEL_DESCRIPTION: Record<string, string> = {
-  eleven_turbo_v2_5: 'Turbo v2.5 · Ultra baja latencia · Recomendado',
-  eleven_flash_v2_5: 'Flash v2.5 · ~75ms · Maxima velocidad',
-  eleven_multilingual_v2: 'Multilingual v2 · Alta calidad · Multiidioma',
-  eleven_v3: 'v3 · Mas expresivo · 70+ idiomas',
+  eleven_turbo_v2_5: 'Turbo v2.5 Â· Ultra baja latencia Â· Recomendado',
+  eleven_flash_v2_5: 'Flash v2.5 Â· ~75ms Â· Maxima velocidad',
+  eleven_multilingual_v2: 'Multilingual v2 Â· Alta calidad Â· Multiidioma',
+  eleven_v3: 'v3 Â· Mas expresivo Â· 70+ idiomas',
 }
 
 const ChevronDown = () => (
@@ -230,7 +230,7 @@ export default function AgentTab({ register, watch, setValue, errors }: Props) {
             <div>
               <p className="text-sm font-medium text-black">Ignorar personalidad por defecto</p>
               <p className="mt-1 text-xs text-black/50">
-                El agente no adoptara la personalidad amigable predeterminada de ElevenLabs
+                El agente no adoptara la personalidad amigable predeterminada de la plataforma
               </p>
             </div>
             <TogglePill
@@ -275,7 +275,7 @@ export default function AgentTab({ register, watch, setValue, errors }: Props) {
                   {voices.map((v) => (
                     <option key={v.voice_id} value={v.voice_id}>
                       {v.name}
-                      {v.category ? ` · ${v.category}` : ''}
+                      {v.category ? ` Â· ${v.category}` : ''}
                     </option>
                   ))}
                 </select>
@@ -591,7 +591,7 @@ export default function AgentTab({ register, watch, setValue, errors }: Props) {
             <div>
               <p className="text-sm font-medium text-black">Grabacion de llamadas</p>
               <p className="mt-1 text-xs text-black/50">
-                Guarda el audio de las conversaciones en ElevenLabs
+                Guarda el audio de las conversaciones en la plataforma
               </p>
             </div>
             <TogglePill
@@ -608,3 +608,5 @@ export default function AgentTab({ register, watch, setValue, errors }: Props) {
     </div>
   )
 }
+
+

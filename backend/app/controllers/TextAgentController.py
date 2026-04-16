@@ -8,6 +8,7 @@ from typing import Any
 
 import httpx
 from fastapi import HTTPException, UploadFile, status
+from sqlalchemy.exc import DataError
 from sqlmodel import delete, select
 
 from app.controllers.deps.auth import CurrentUser
@@ -63,6 +64,28 @@ def _default_model(provider: str) -> str:
     if provider == "gemini":
         return "gemini-2.5-flash"
     return "gpt-4.1-mini"
+
+
+def _commit_with_data_error_guard(session: SessionDep) -> None:
+    try:
+        session.commit()
+    except DataError as exc:
+        session.rollback()
+        message = str(exc).lower()
+
+        if "system_prompt" in message or "welcome_message" in message:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "El contenido del prompt excede el limite actual de la columna en base de datos. "
+                    "Reinicia el backend para aplicar la migracion de columnas LONGTEXT e intenta de nuevo."
+                ),
+            ) from exc
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No fue posible guardar el registro por un limite de longitud en base de datos.",
+        ) from exc
 
 
 def _require_owned_text_agent(
@@ -751,7 +774,7 @@ class TextAgentController:
             updated_at=now,
         )
         session.add(agent)
-        session.commit()
+        _commit_with_data_error_guard(session)
         session.refresh(agent)
 
         return _serialize_text_agent(agent)
@@ -804,7 +827,7 @@ class TextAgentController:
 
         agent.updated_at = _utcnow()
         session.add(agent)
-        session.commit()
+        _commit_with_data_error_guard(session)
         session.refresh(agent)
 
         response = _serialize_text_agent(agent)

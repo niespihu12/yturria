@@ -1,4 +1,4 @@
-import { z } from 'zod'
+﻿import { z } from 'zod'
 
 export const voiceSchema = z.object({
   voice_id: z.string(),
@@ -279,7 +279,7 @@ export const agentDetailSchema = z.object({
       .object({
         voice_id: z.string(),
         model_id: z.string().optional(),
-        // ElevenLabs may return voice settings flat at tts level
+        // la plataforma may return voice settings flat at tts level
         stability: z.number().optional(),
         similarity_boost: z.number().optional(),
         style: z.number().optional(),
@@ -361,7 +361,7 @@ export const SUPPORTED_LLMS = [
   { value: 'gpt-5-mini', label: 'GPT-5 Mini' },
   { value: 'gpt-4.1-mini', label: 'GPT-4.1 Mini' },
   { value: 'claude-sonnet-4', label: 'Claude Sonnet 4' },
-  { value: 'gpt-oss-120b', label: 'ElevenLabs GPT-OSS 120B' },
+  { value: 'gpt-oss-120b', label: 'GPT-OSS 120B' },
 ]
 
 export const RAG_EMBEDDING_MODELS = [
@@ -431,3 +431,4 @@ export const SYSTEM_TOOLS = [
     description: 'Detecta si se conect\u00f3 a un buz\u00f3n de voz.',
   },
 ]
+

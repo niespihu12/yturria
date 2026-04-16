@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+﻿import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowDownTrayIcon,
@@ -21,7 +21,7 @@ import {
   getConversations,
   runConversationAnalysis,
   updateAgent,
-} from '@/api/ElevenLabsAPI'
+} from '@/api/VoiceRuntimeAPI'
 import type {
   AgentDetail,
   AnalysisCriterion,
@@ -427,7 +427,7 @@ function ConversationDetailModal({
                             Audio de la llamada
                           </p>
                           <p className="text-xs text-black/60">
-                            Reproduce y valida esta conversación sin salir del análisis.
+                            Reproduce y valida esta conversaciÃ³n sin salir del anÃ¡lisis.
                           </p>
                         </div>
                       </div>
@@ -460,7 +460,7 @@ function ConversationDetailModal({
                           rel="noreferrer"
                           className="inline-flex items-center gap-1.5 rounded-lg border border-[#271173]/30 bg-white px-3 py-1.5 text-xs font-medium text-[#271173] transition-colors hover:bg-[#f5f3ff]"
                         >
-                          Abrir en pestaña
+                          Abrir en pestaÃ±a
                         </a>
                         <a
                           href={conversationAudioUrl}
@@ -727,7 +727,7 @@ export default function AnalysisTab({ agentId, agent, onUpdate }: Props) {
             <p className="mt-1 text-xs text-black/60">
               Guarda criterios de evaluacion, campos de extraccion y el idioma
               de los resumentes post-llamada usando la configuracion actual de
-              ElevenLabs.
+              la plataforma.
             </p>
           </div>
           <button
@@ -904,7 +904,7 @@ export default function AnalysisTab({ agentId, agent, onUpdate }: Props) {
                               )
                             )
                           }
-                          placeholder="Define exactamente que debe revisar ElevenLabs en la conversacion."
+                          placeholder="Define exactamente que debe revisar la plataforma en la conversacion."
                           className={textareaClass}
                         />
                       </div>
@@ -944,7 +944,7 @@ export default function AnalysisTab({ agentId, agent, onUpdate }: Props) {
                     Recopilacion de datos
                   </p>
                   <p className="mt-1 text-xs text-black/60">
-                    ElevenLabs soporta tipos string, boolean, integer y number
+                    la plataforma soporta tipos string, boolean, integer y number
                     para la extraccion estructurada.
                   </p>
                 </div>
@@ -1218,3 +1218,5 @@ export default function AnalysisTab({ agentId, agent, onUpdate }: Props) {
     </div>
   )
 }
+
+

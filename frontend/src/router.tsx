@@ -13,6 +13,7 @@ import PhoneNumbersView from '@/views/app/PhoneNumbersView'
 import TextAgentsView from '@/views/app/TextAgentsView'
 import TextAgentDetailView from '@/views/app/TextAgentDetailView'
 import SettingsView from '@/views/app/SettingsView'
+import DashboardView from '@/views/app/DashboardView'
 
 export default function Router() {
   return (
@@ -30,6 +31,7 @@ export default function Router() {
 
         {/* App routes (protected) */}
         <Route element={<AppLayout />}>
+          <Route path="/dashboard" element={<DashboardView />} />
           <Route path="/agentes_voz" element={<VoiceAgentsView />} />
           <Route path="/agentes_voz/:id" element={<VoiceAgentDetailView />} />
           <Route path="/agentes_texto" element={<TextAgentsView />} />

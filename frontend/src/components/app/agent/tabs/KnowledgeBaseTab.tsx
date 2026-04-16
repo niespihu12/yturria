@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+﻿import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'react-toastify'
 import {
@@ -20,7 +20,7 @@ import {
   getKnowledgeBaseRagIndexes,
   listKnowledgeBaseDocuments,
   updateAgent,
-} from '@/api/ElevenLabsAPI'
+} from '@/api/VoiceRuntimeAPI'
 import {
   RAG_EMBEDDING_MODELS,
   type AgentDetail,
@@ -435,7 +435,7 @@ export default function KnowledgeBaseTab({ agentId, agent, knowledgeBase, onUpda
             </div>
             <h2 className="text-xl font-semibold text-black">Documentos listos para respuestas con contexto</h2>
             <p className="mt-2 max-w-xl text-sm leading-6 text-black/60">
-              Segun la documentacion oficial de ElevenLabs, los documentos se crean primero en la
+              Segun la documentacion oficial de la plataforma, los documentos se crean primero en la
               knowledge base del workspace y luego se vinculan al agente.
             </p>
           </div>
@@ -633,7 +633,7 @@ export default function KnowledgeBaseTab({ agentId, agent, knowledgeBase, onUpda
               const workspaceDoc = workspaceDocumentMap.get(document.id)
               const supportedUsages = workspaceDoc?.supported_usages ?? ['auto', 'prompt']
               const indexes = ragIndexMap.get(document.id) ?? []
-              // Use saved model for status — don't mislead with draft model changes
+              // Use saved model for status â€” don't mislead with draft model changes
               const statusIndex = indexes.find((i) => i.model === savedEmbeddingModel) ?? indexes[0]
               const rawStatus = ragDraft.enabled
                 ? statusIndex?.status?.toLowerCase?.() ?? 'not_indexed'
@@ -733,7 +733,7 @@ export default function KnowledgeBaseTab({ agentId, agent, knowledgeBase, onUpda
 
                       {supportedUsages.length === 1 && supportedUsages[0] === 'prompt' && (
                         <p className="text-xs text-amber-600">
-                          Este documento solo admite modo prompt. ElevenLabs no lo puede indexar
+                          Este documento solo admite modo prompt. la plataforma no lo puede indexar
                           para RAG en su estado actual.
                         </p>
                       )}
@@ -752,7 +752,7 @@ export default function KnowledgeBaseTab({ agentId, agent, knowledgeBase, onUpda
           <div>
             <h3 className="text-sm font-semibold text-black">Configuracion RAG</h3>
             <p className="mt-1 text-xs text-black/50">
-              ElevenLabs recomienda RAG para bases grandes y deja el modo prompt para contexto
+              la plataforma recomienda RAG para bases grandes y deja el modo prompt para contexto
               critico o documentos pequenos.
             </p>
           </div>
@@ -896,7 +896,7 @@ export default function KnowledgeBaseTab({ agentId, agent, knowledgeBase, onUpda
         </div>
 
         <div className="mt-4 rounded-xl border border-[#e4e0f5] bg-[#f5f3ff] px-4 py-3 text-xs leading-6 text-black/50">
-          Indexing no es instantaneo. ElevenLabs indica que puede tardar unos minutos en documentos
+          Indexing no es instantaneo. la plataforma indica que puede tardar unos minutos en documentos
           grandes, y los archivos menores a 500 bytes se quedan en modo prompt.
         </div>
 
@@ -918,3 +918,5 @@ export default function KnowledgeBaseTab({ agentId, agent, knowledgeBase, onUpda
     </div>
   )
 }
+
+

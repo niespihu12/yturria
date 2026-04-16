@@ -1,4 +1,4 @@
-import { useState } from 'react'
+﻿import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowsRightLeftIcon,
@@ -13,7 +13,7 @@ import {
   getAgents,
   getPhoneNumbers,
   updatePhoneNumber,
-} from '@/api/ElevenLabsAPI'
+} from '@/api/VoiceRuntimeAPI'
 import type { AgentListItem, PhoneNumber } from '@/types/agent'
 
 type TwilioFormState = {
@@ -111,7 +111,7 @@ export default function PhoneNumbersView() {
               Numeros de telefono
             </h1>
             <p className="mt-2 max-w-2xl text-sm text-black/60">
-              Esta vista usa los phone numbers reales de ElevenLabs. Twilio se
+              Esta vista usa los phone numbers reales de la plataforma. Twilio se
               puede importar desde aqui y los numeros ya existentes, incluyendo
               SIP trunk, se pueden asignar a tus agentes.
             </p>
@@ -266,7 +266,7 @@ export default function PhoneNumbersView() {
             </h3>
           </div>
           <p className="text-sm leading-relaxed text-black/60">
-            ElevenLabs soporta dos tipos de numeros Twilio: numeros comprados en
+            la plataforma soporta dos tipos de numeros Twilio: numeros comprados en
             Twilio con inbound + outbound, y caller IDs verificados para
             outbound. Esta consola importa el numero con label, SID y Auth
             Token, y despues puedes asignarlo al agente si soporta inbound.
@@ -281,7 +281,7 @@ export default function PhoneNumbersView() {
             </h3>
           </div>
           <p className="text-sm leading-relaxed text-black/60">
-            ElevenLabs tambien lista phone numbers con provider{' '}
+            la plataforma tambien lista phone numbers con provider{' '}
             <span className="rounded bg-[#f0edff] px-1.5 py-0.5 font-mono text-[11px] text-black/80">
               sip_trunk
             </span>
@@ -371,3 +371,5 @@ export default function PhoneNumbersView() {
   </div>
   )
 }
+
+

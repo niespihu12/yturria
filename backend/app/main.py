@@ -77,6 +77,8 @@ def ensure_text_agents_content_columns() -> None:
     targets = [
         ("text_messages", "content"),
         ("text_knowledge_base_documents", "content"),
+        ("text_agents", "system_prompt"),
+        ("text_agents", "welcome_message"),
     ]
 
     with Session(engine) as session:

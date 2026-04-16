@@ -1,4 +1,4 @@
-import { useState } from 'react'
+﻿import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'react-toastify'
@@ -10,7 +10,7 @@ import {
   PhoneIcon,
   XMarkIcon,
 } from '@heroicons/react/24/outline'
-import { createAgent, deleteAgent, getAgents } from '@/api/ElevenLabsAPI'
+import { createAgent, deleteAgent, getAgents } from '@/api/VoiceRuntimeAPI'
 import type { AgentListItem } from '@/types/agent'
 
 type CreateForm = { name: string }
@@ -132,7 +132,7 @@ export default function VoiceAgentsView() {
           </div>
         ) : isError ? (
           <div className="flex h-48 items-center justify-center px-6 text-center text-black/60">
-            Error al cargar agentes. Revisa la configuracion de ElevenLabs y vuelve a intentar.
+            Error al cargar agentes. Revisa la configuracion de la plataforma y vuelve a intentar.
           </div>
         ) : agents.length === 0 ? (
           <div className="flex h-48 flex-col items-center justify-center gap-3">
@@ -279,3 +279,5 @@ export default function VoiceAgentsView() {
     </div>
   )
 }
+
+

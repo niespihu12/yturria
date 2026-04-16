@@ -1,7 +1,12 @@
 from datetime import datetime
 from uuid import uuid4
 
+from sqlalchemy import Column, Text
+from sqlalchemy.dialects.mysql import LONGTEXT
 from sqlmodel import Field, SQLModel
+
+
+LONG_TEXT = Text().with_variant(LONGTEXT(), "mysql")
 
 
 class TextAgent(SQLModel, table=True):
@@ -12,8 +17,14 @@ class TextAgent(SQLModel, table=True):
     name: str = Field(nullable=False)
     provider: str = Field(index=True, nullable=False)
     model: str = Field(nullable=False)
-    system_prompt: str = Field(default="", nullable=False)
-    welcome_message: str = Field(default="", nullable=False)
+    system_prompt: str = Field(
+        default="",
+        sa_column=Column(LONG_TEXT, nullable=False),
+    )
+    welcome_message: str = Field(
+        default="",
+        sa_column=Column(LONG_TEXT, nullable=False),
+    )
     language: str = Field(default="es", nullable=False)
     temperature: float = Field(default=0.7, nullable=False)
     max_tokens: int = Field(default=512, nullable=False)

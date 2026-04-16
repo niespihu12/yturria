@@ -2,6 +2,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   DevicePhoneMobileIcon,
   PhoneIcon,
+  Squares2X2Icon,
   ChatBubbleLeftRightIcon,
   ArrowRightStartOnRectangleIcon,
   Cog6ToothIcon,
@@ -9,11 +10,18 @@ import {
 import {
   DevicePhoneMobileIcon as DevicePhoneMobileSolid,
   PhoneIcon as PhoneSolid,
+  Squares2X2Icon as Squares2X2Solid,
   ChatBubbleLeftRightIcon as ChatBubbleLeftRightSolid,
 } from '@heroicons/react/24/solid'
 import Logo from '@/components/Logo'
 
 const navItems = [
+  {
+    label: 'Dashboard',
+    path: '/dashboard',
+    icon: Squares2X2Icon,
+    iconActive: Squares2X2Solid,
+  },
   {
     label: 'Agentes de Voz',
     path: '/agentes_voz',

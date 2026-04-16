@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+﻿import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
@@ -12,7 +12,7 @@ import {
   WrenchScrewdriverIcon,
   PencilIcon,
 } from '@heroicons/react/24/outline'
-import { getAgent, updateAgent } from '@/api/ElevenLabsAPI'
+import { getAgent, updateAgent } from '@/api/VoiceRuntimeAPI'
 import type { AgentDetail, AgentFormValues, KnowledgeBaseItem } from '@/types/agent'
 import AgentTab from '@/components/app/agent/tabs/AgentTab'
 import KnowledgeBaseTab from '@/components/app/agent/tabs/KnowledgeBaseTab'
@@ -23,7 +23,7 @@ import AgentPreview from '@/components/app/agent/AgentPreview'
 const TABS = [
   { id: 'agent', label: 'Agente', icon: CpuChipIcon },
   { id: 'knowledge', label: 'Bases de conocimiento', icon: BookOpenIcon },
-  { id: 'analysis', label: 'Análisis', icon: ChartBarIcon },
+  { id: 'analysis', label: 'AnÃ¡lisis', icon: ChartBarIcon },
   { id: 'tools', label: 'Herramientas', icon: WrenchScrewdriverIcon },
 ] as const
 
@@ -451,7 +451,7 @@ function buildUpdatePayload(
     const next = { ...currentBuiltInTools } as Record<string, unknown>
 
     // Keep unknown built-in tools untouched. For known tools, ensure we always
-    // send valid SystemToolConfig objects (name + params) expected by ElevenLabs.
+    // send valid SystemToolConfig objects (name + params) expected by la plataforma.
     for (const toolName of Object.keys(SYSTEM_TOOL_TYPE_BY_NAME)) {
       if (!enabledSet.has(toolName)) {
         delete next[toolName]
@@ -539,7 +539,7 @@ function buildUpdatePayload(
           tools: [...customTools, ...systemTools],
           tool_ids: selectedToolIds,
           ...(builtInTools !== undefined ? { built_in_tools: builtInTools } : {}),
-          // Preserve RAG as-is — managed exclusively by KnowledgeBaseTab
+          // Preserve RAG as-is â€” managed exclusively by KnowledgeBaseTab
           rag: currentRag,
         },
         first_message: values.first_message,
@@ -549,7 +549,7 @@ function buildUpdatePayload(
         ...(currentAgent.conversation_config.tts ?? {}),
         model_id: values.tts_model_id,
         voice_id: values.voice_id,
-        // Send flat (ElevenLabs may use either structure)
+        // Send flat (la plataforma may use either structure)
         stability: values.stability,
         similarity_boost: values.similarity_boost,
         style: values.style,
@@ -582,7 +582,7 @@ function buildUpdatePayload(
   }
 }
 
-// Inner component: only mounts after agent data is available → no flash
+// Inner component: only mounts after agent data is available â†’ no flash
 function VoiceAgentForm({ id, initialAgent }: { id: string; initialAgent: AgentDetail }) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -609,7 +609,7 @@ function VoiceAgentForm({ id, initialAgent }: { id: string; initialAgent: AgentD
   // Keep a ref to the latest agent for buildUpdatePayload (refreshed after background refetches)
   const agentRef = useRef<AgentDetail>(initialAgent)
 
-  // Subscribe to query updates — agent might refetch in background
+  // Subscribe to query updates â€” agent might refetch in background
   const { data: agent } = useQuery({
     queryKey: ['agent', id],
     queryFn: () => getAgent(id),
@@ -972,7 +972,7 @@ export default function VoiceAgentDetailView() {
           onClick={() => navigate('/agentes_voz')}
           className="text-[#271173] hover:text-[#1f0d5a] text-sm transition-colors"
         >
-          ← Volver
+          â† Volver
         </button>
       </div>
     )
@@ -980,3 +980,5 @@ export default function VoiceAgentDetailView() {
 
   return <VoiceAgentForm id={id!} initialAgent={agent} />
 }
+
+

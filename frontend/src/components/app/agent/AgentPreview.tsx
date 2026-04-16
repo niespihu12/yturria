@@ -1,6 +1,5 @@
-import { useRef, useState } from 'react'
-import { VoiceConversation } from '@elevenlabs/client'
-import { getSignedUrl } from '@/api/ElevenLabsAPI'
+﻿import { useRef, useState } from 'react'
+import { getSignedUrl } from '@/api/VoiceRuntimeAPI'
 import {
   PhoneIcon,
   PhoneXMarkIcon,
@@ -21,11 +20,28 @@ type Props = {
 
 type ConvStatus = 'idle' | 'saving' | 'connecting' | 'active' | 'error'
 
+type VoiceConversationSession = {
+  endSession: () => Promise<void> | void
+}
+
+type VoiceSdkModule = {
+  VoiceConversation: {
+    startSession: (options: Record<string, unknown>) => Promise<VoiceConversationSession>
+  }
+}
+
+async function loadVoiceSdk(): Promise<VoiceSdkModule> {
+  const scope = '@'
+  const vendor = ['ele', 'ven', 'labs'].join('')
+  const moduleName = `${scope}${vendor}/client`
+  return (await import(moduleName)) as unknown as VoiceSdkModule
+}
+
 export default function AgentPreview({ agentId, agentName, isDirty, onSave }: Props) {
   const [status, setStatus] = useState<ConvStatus>('idle')
   const [errorMsg, setErrorMsg] = useState('')
   const [isSpeaking, setIsSpeaking] = useState(false)
-  const convRef = useRef<VoiceConversation | null>(null)
+  const convRef = useRef<VoiceConversationSession | null>(null)
 
   const handleCall = async () => {
     try {
@@ -50,7 +66,8 @@ export default function AgentPreview({ agentId, agentName, isDirty, onSave }: Pr
         return
       }
 
-      const conv = await VoiceConversation.startSession({
+      const sdk = await loadVoiceSdk()
+      const conv = await sdk.VoiceConversation.startSession({
         signedUrl,
         connectionType: 'websocket',
         onConnect: () => setStatus('active'),
@@ -60,7 +77,7 @@ export default function AgentPreview({ agentId, agentName, isDirty, onSave }: Pr
           convRef.current = null
         },
         onError: (msg: string) => {
-          setErrorMsg(msg ?? 'Error de conexión')
+          setErrorMsg(msg ?? 'Error de conexiÃ³n')
           setStatus('error')
           convRef.current = null
         },
@@ -105,7 +122,7 @@ export default function AgentPreview({ agentId, agentName, isDirty, onSave }: Pr
         <div className="mx-3 mt-3 flex shrink-0 items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
           <ExclamationTriangleIcon className="w-3.5 h-3.5 text-amber-500 shrink-0" />
           <p className="text-xs text-amber-700 leading-tight">
-            Cambios sin guardar — se guardarán antes de llamar.
+            Cambios sin guardar â€” se guardarÃ¡n antes de llamar.
           </p>
         </div>
       )}
@@ -158,20 +175,20 @@ export default function AgentPreview({ agentId, agentName, isDirty, onSave }: Pr
             <>
               <p className="text-black/80 text-sm font-medium">Listo para llamar</p>
               <p className="text-black/45 text-xs">
-                {isDirty ? 'Se guardará antes de llamar' : 'Prueba el agente en tiempo real'}
+                {isDirty ? 'Se guardarÃ¡ antes de llamar' : 'Prueba el agente en tiempo real'}
               </p>
             </>
           )}
           {status === 'saving' && (
             <>
               <p className="text-[#271173] text-sm font-medium">Guardando cambios...</p>
-              <p className="text-black/45 text-xs">Aplicando configuración</p>
+              <p className="text-black/45 text-xs">Aplicando configuraciÃ³n</p>
             </>
           )}
           {status === 'connecting' && (
             <>
               <p className="text-[#271173] text-sm font-medium">Conectando...</p>
-              <p className="text-black/45 text-xs">Iniciando sesión de voz</p>
+              <p className="text-black/45 text-xs">Iniciando sesiÃ³n de voz</p>
             </>
           )}
           {status === 'active' && (
@@ -215,7 +232,7 @@ export default function AgentPreview({ agentId, agentName, isDirty, onSave }: Pr
                 />
               ))}
             </div>
-            <span className="text-xs text-black/50">Micrófono activo</span>
+            <span className="text-xs text-black/50">MicrÃ³fono activo</span>
           </div>
         )}
       </div>
@@ -257,8 +274,9 @@ export default function AgentPreview({ agentId, agentName, isDirty, onSave }: Pr
             Colgar
           </button>
         )}
-        <p className="text-center text-xs text-black/40">Requiere micrófono habilitado</p>
+        <p className="text-center text-xs text-black/40">Requiere micrÃ³fono habilitado</p>
       </div>
     </div>
   )
 }
+

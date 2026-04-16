@@ -16,7 +16,7 @@ import {
   TrashIcon,
   XMarkIcon,
 } from '@heroicons/react/24/outline'
-import { createTool, deleteTool, getAgents, getPhoneNumbers, getTools } from '@/api/ElevenLabsAPI'
+import { createTool, deleteTool, getAgents, getPhoneNumbers, getTools } from '@/api/VoiceRuntimeAPI'
 import { SYSTEM_TOOLS } from '@/types/agent'
 import type { AgentDetail, AgentListItem, PhoneNumber, WorkspaceTool } from '@/types/agent'
 
@@ -1552,7 +1552,7 @@ export default function ToolsTab({
             <CpuChipIcon className="h-4 w-4 text-[#271173]" />
             <div>
               <p className="text-sm font-medium text-black">Herramientas del sistema</p>
-              <p className="text-xs text-black/50">Acciones nativas del runtime de ElevenLabs.</p>
+              <p className="text-xs text-black/50">Acciones nativas del runtime de la plataforma.</p>
             </div>
           </div>
           <div className="inline-flex items-center gap-2 rounded-full border border-[#e4e0f5] bg-white px-2 py-1">
@@ -2116,6 +2116,8 @@ export default function ToolsTab({
     </div>
   )
 }
+
+
 
 
 
