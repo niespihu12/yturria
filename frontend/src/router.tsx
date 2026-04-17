@@ -14,6 +14,7 @@ import TextAgentsView from '@/views/app/TextAgentsView'
 import TextAgentDetailView from '@/views/app/TextAgentDetailView'
 import SettingsView from '@/views/app/SettingsView'
 import DashboardView from '@/views/app/DashboardView'
+import AdminUsersView from '@/views/app/AdminUsersView'
 
 export default function Router() {
   return (
@@ -37,6 +38,7 @@ export default function Router() {
           <Route path="/agentes_texto" element={<TextAgentsView />} />
           <Route path="/agentes_texto/:id" element={<TextAgentDetailView />} />
           <Route path="/numeros_telefono" element={<PhoneNumbersView />} />
+          <Route path="/admin/usuarios" element={<AdminUsersView />} />
           <Route path="/configuracion" element={<SettingsView />} />
           <Route index element={<Navigate to="/agentes_voz" replace />} />
           <Route path="*" element={<Navigate to="/agentes_voz" replace />} />

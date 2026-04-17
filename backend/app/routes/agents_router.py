@@ -8,8 +8,12 @@ agents_router = APIRouter(prefix="/agents", tags=["Agents"])
 
 
 @agents_router.get("")
-async def list_agents(current_user: CurrentUser, session: SessionDep):
-    return await AgentController.list_agents(current_user, session)
+async def list_agents(
+    current_user: CurrentUser,
+    session: SessionDep,
+    user_id: str | None = Query(default=None),
+):
+    return await AgentController.list_agents(current_user, session, user_id)
 
 
 @agents_router.post("")
@@ -119,8 +123,12 @@ async def compute_knowledge_base_rag_index(
 
 
 @agents_router.get("/phone-numbers")
-async def list_phone_numbers(current_user: CurrentUser, session: SessionDep):
-    return await AgentController.list_phone_numbers(current_user, session)
+async def list_phone_numbers(
+    current_user: CurrentUser,
+    session: SessionDep,
+    user_id: str | None = Query(default=None),
+):
+    return await AgentController.list_phone_numbers(current_user, session, user_id)
 
 
 @agents_router.post("/phone-numbers")

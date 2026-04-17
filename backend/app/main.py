@@ -12,6 +12,7 @@ from app.routes.auth_router import auth_router
 from app.routes.agents_router import agents_router
 from app.routes.text_agents_router import text_agents_router
 from app.routes.webhooks_router import webhooks_router
+from app.utils.roles import PLATFORM_SUPER_ADMIN_EMAILS, normalize_email
 
 
 def _column_exists(connection, table: str, column: str) -> bool:
@@ -47,6 +48,7 @@ def _table_exists(connection, table: str) -> bool:
 
 def ensure_user_auth_columns() -> None:
     columns = {
+        "role": "role VARCHAR(20) NOT NULL DEFAULT 'agent'",
         "mfa_enabled": "mfa_enabled BOOLEAN NOT NULL DEFAULT FALSE",
         "mfa_failed_attempts": "mfa_failed_attempts INT NOT NULL DEFAULT 0",
         "mfa_locked_until": "mfa_locked_until DATETIME NULL",
@@ -57,6 +59,36 @@ def ensure_user_auth_columns() -> None:
         for column_name, ddl in columns.items():
             if not _column_exists(connection, "users", column_name):
                 connection.execute(text(f"ALTER TABLE users ADD COLUMN {ddl}"))
+        session.commit()
+
+
+def ensure_platform_super_admin_role() -> None:
+    if not PLATFORM_SUPER_ADMIN_EMAILS:
+        return
+
+    with Session(engine) as session:
+        connection = session.connection()
+
+        if not _table_exists(connection, "users"):
+            session.commit()
+            return
+
+        if not _column_exists(connection, "users", "email"):
+            session.commit()
+            return
+
+        if not _column_exists(connection, "users", "role"):
+            session.commit()
+            return
+
+        for email in PLATFORM_SUPER_ADMIN_EMAILS:
+            connection.execute(
+                text(
+                    "UPDATE users SET role = 'super_admin' WHERE LOWER(TRIM(email)) = :email"
+                ),
+                {"email": normalize_email(email)},
+            )
+
         session.commit()
 
 
@@ -170,6 +202,7 @@ def ensure_kb_index_columns() -> None:
 async def lifespan(_: FastAPI):
     SQLModel.metadata.create_all(engine)
     ensure_user_auth_columns()
+    ensure_platform_super_admin_role()
     ensure_token_auth_columns()
     ensure_text_agents_content_columns()
     ensure_text_agent_tools_schema_columns()

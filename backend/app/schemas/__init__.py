@@ -1,4 +1,6 @@
 from app.schemas.auth import (
+    AdminUsersResponse,
+    AdminUserSummaryResponse,
     AuthenticatedUserResponse,
     CheckPasswordRequest,
     ConfirmAccountRequest,
@@ -17,6 +19,8 @@ from app.schemas.auth import (
 )
 
 __all__ = [
+    "AdminUsersResponse",
+    "AdminUserSummaryResponse",
     "AuthenticatedUserResponse",
     "CheckPasswordRequest",
     "ConfirmAccountRequest",

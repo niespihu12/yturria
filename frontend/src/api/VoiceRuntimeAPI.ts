@@ -12,6 +12,12 @@ import type {
   WorkspaceTool,
 } from '@/types/agent'
 
+type UserScopeOptions = {
+  userId?: string
+  user_id?: string
+  [key: string]: unknown
+}
+
 function getError(error: unknown): string {
   if (isAxiosError(error) && error.response) {
     const detail = error.response.data?.detail
@@ -22,9 +28,14 @@ function getError(error: unknown): string {
   return 'Error al conectar'
 }
 
-export async function getAgents() {
+export async function getAgents(options?: UserScopeOptions) {
+  const userId = options?.userId ?? options?.user_id
   try {
-    const { data } = await api.get('/agents')
+    const { data } = await api.get('/agents', {
+      params: {
+        user_id: userId || undefined,
+      },
+    })
     return data
   } catch (error) {
     throw new Error(getError(error))
@@ -328,9 +339,16 @@ export async function getAgentWidget(agentId: string) {
   }
 }
 
-export async function getPhoneNumbers(): Promise<PhoneNumber[]> {
+export async function getPhoneNumbers(
+  options?: UserScopeOptions
+): Promise<PhoneNumber[]> {
+  const userId = options?.userId ?? options?.user_id
   try {
-    const { data } = await api.get('/agents/phone-numbers')
+    const { data } = await api.get('/agents/phone-numbers', {
+      params: {
+        user_id: userId || undefined,
+      },
+    })
     const numbers = data?.phone_numbers ?? data
     if (Array.isArray(numbers)) {
       return numbers as PhoneNumber[]

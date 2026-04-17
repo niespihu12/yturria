@@ -1,9 +1,11 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import {
   DevicePhoneMobileIcon,
   PhoneIcon,
   Squares2X2Icon,
   ChatBubbleLeftRightIcon,
+  UserGroupIcon,
   ArrowRightStartOnRectangleIcon,
   Cog6ToothIcon,
 } from '@heroicons/react/24/outline'
@@ -12,10 +14,12 @@ import {
   PhoneIcon as PhoneSolid,
   Squares2X2Icon as Squares2X2Solid,
   ChatBubbleLeftRightIcon as ChatBubbleLeftRightSolid,
+  UserGroupIcon as UserGroupSolid,
 } from '@heroicons/react/24/solid'
 import Logo from '@/components/Logo'
+import { getAuthenticatedUser } from '@/api/AuthAPI'
 
-const navItems = [
+const baseNavItems = [
   {
     label: 'Dashboard',
     path: '/dashboard',
@@ -45,6 +49,26 @@ const navItems = [
 export default function Sidebar() {
   const location = useLocation()
   const navigate = useNavigate()
+
+  const { data: currentUser } = useQuery({
+    queryKey: ['auth-user'],
+    queryFn: getAuthenticatedUser,
+    staleTime: 60_000,
+  })
+
+  const navItems =
+    currentUser?.role === 'super_admin'
+      ? [
+          ...baseNavItems,
+          {
+            label: 'Administracion',
+            path: '/admin/usuarios',
+            icon: UserGroupIcon,
+            iconActive: UserGroupSolid,
+          },
+        ]
+      : baseNavItems
+
   const settingsActive =
     location.pathname === '/configuracion' ||
     location.pathname.startsWith('/configuracion/')

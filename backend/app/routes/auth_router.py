@@ -2,7 +2,7 @@ from fastapi import APIRouter
 from fastapi.responses import PlainTextResponse
 
 from app.controllers.AuthController import AuthController
-from app.schemas.auth import AuthenticatedUserResponse, MfaChallengeResponse
+from app.schemas.auth import AdminUsersResponse, AuthenticatedUserResponse, MfaChallengeResponse
 
 auth_router = APIRouter(prefix="/auth", tags=["Auth"])
 
@@ -42,3 +42,4 @@ auth_router.post("/check-password", response_class=PlainTextResponse)(
 )
 auth_router.post("/mfa/enable", response_class=PlainTextResponse)(AuthController.enable_mfa)
 auth_router.post("/mfa/disable", response_class=PlainTextResponse)(AuthController.disable_mfa)
+auth_router.get("/admin/users", response_model=AdminUsersResponse)(AuthController.admin_users)

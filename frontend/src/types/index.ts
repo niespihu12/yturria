@@ -31,7 +31,21 @@ export type AuthenticatedUser = {
     _id: string
     name: string
     email: string
+    role: 'agent' | 'supervisor' | 'admin' | 'super_admin'
     mfa_enabled: boolean
+}
+
+export type AdminUserSummary = {
+    _id: string
+    name: string
+    email: string
+    role: 'agent' | 'supervisor' | 'admin' | 'super_admin'
+    confirmed: boolean
+    mfa_enabled: boolean
+    created_at_unix_secs: number
+    voice_agents_count: number
+    text_agents_count: number
+    phone_numbers_count: number
 }
 
 

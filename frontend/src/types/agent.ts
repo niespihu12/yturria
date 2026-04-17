@@ -209,6 +209,14 @@ export const phoneNumberSchema = z.object({
       has_auth_credentials: z.boolean().optional(),
     })
     .optional(),
+  owner_info: z
+    .object({
+      user_id: z.string().optional(),
+      name: z.string().nullable().optional(),
+      email: z.string().nullable().optional(),
+      role: z.string().nullable().optional(),
+    })
+    .optional(),
 })
 
 export const agentFormSchema = z.object({
@@ -242,6 +250,8 @@ export const agentListItemSchema = z.object({
     .object({
       creator_email: z.string().optional(),
       creator_name: z.string().optional(),
+      owner_user_id: z.string().optional(),
+      role: z.string().optional(),
     })
     .optional(),
 })

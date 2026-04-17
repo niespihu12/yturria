@@ -14,6 +14,12 @@ import type {
   WhatsAppProvider,
 } from '@/types/textAgent'
 
+type UserScopeOptions = {
+  userId?: string
+  user_id?: string
+  [key: string]: unknown
+}
+
 function getError(error: unknown): string {
   if (isAxiosError(error) && error.response) {
     const detail = error.response.data?.detail
@@ -26,9 +32,16 @@ function getError(error: unknown): string {
 
 // ── Agents ────────────────────────────────────────────────────────────────────
 
-export async function getTextAgents(): Promise<{ agents: TextAgentSummary[] }> {
+export async function getTextAgents(
+  options?: UserScopeOptions
+): Promise<{ agents: TextAgentSummary[] }> {
+  const userId = options?.userId ?? options?.user_id
   try {
-    const { data } = await api.get('/text-agents')
+    const { data } = await api.get('/text-agents', {
+      params: {
+        user_id: userId || undefined,
+      },
+    })
     return data
   } catch (error) {
     throw new Error(getError(error))

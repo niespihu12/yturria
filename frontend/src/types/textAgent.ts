@@ -26,6 +26,10 @@ export type TextAgentSummary = {
   max_tokens: number
   created_at_unix_secs: number
   updated_at_unix_secs: number
+  owner_user_id?: string
+  owner_name?: string
+  owner_email?: string
+  owner_role?: string
 }
 
 export type ParametersSchema = {

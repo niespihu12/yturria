@@ -171,7 +171,27 @@ class AuthenticatedUserResponse(BaseModel):
     id: str = Field(alias="_id")
     name: str
     email: str
+    role: str
     mfa_enabled: bool
+
+
+class AdminUserSummaryResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    id: str = Field(alias="_id")
+    name: str
+    email: str
+    role: str
+    confirmed: bool
+    mfa_enabled: bool
+    created_at_unix_secs: int
+    voice_agents_count: int
+    text_agents_count: int
+    phone_numbers_count: int
+
+
+class AdminUsersResponse(BaseModel):
+    users: list[AdminUserSummaryResponse]
 
 
 class MfaChallengeResponse(BaseModel):

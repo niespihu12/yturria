@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
 import { toast } from 'react-toastify'
@@ -28,13 +28,16 @@ function formatDate(unixSecs: number) {
 
 export default function TextAgentsView() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const queryClient = useQueryClient()
   const [showModal, setShowModal] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
 
+  const scopedUserId = searchParams.get('user_id') || undefined
+
   const { data, isLoading, isError } = useQuery({
-    queryKey: ['text-agents'],
-    queryFn: getTextAgents,
+    queryKey: ['text-agents', scopedUserId ?? 'all'],
+    queryFn: () => getTextAgents({ userId: scopedUserId }),
   })
 
   const agents: TextAgentSummary[] = data?.agents ?? []
@@ -113,7 +116,9 @@ export default function TextAgentsView() {
       <div className="mb-5">
         <h2 className="text-lg font-semibold text-black">Listado</h2>
         <p className="mt-1 text-sm text-black/60">
-          Cada agente usa un proveedor activo y toma sus API keys desde tu perfil.
+          {scopedUserId
+            ? 'Vista filtrada por usuario para supervision del super admin.'
+            : 'Cada agente usa un proveedor activo y toma sus API keys desde tu perfil.'}
         </p>
       </div>
 
@@ -153,6 +158,9 @@ export default function TextAgentsView() {
                   Provider
                 </th>
                 <th className="px-6 py-3.5 text-left text-xs font-medium uppercase tracking-wider text-black/50">
+                  Propietario
+                </th>
+                <th className="px-6 py-3.5 text-left text-xs font-medium uppercase tracking-wider text-black/50">
                   Actualizado
                 </th>
                 <th className="px-6 py-3.5 text-right text-xs font-medium uppercase tracking-wider text-black/50">
@@ -178,6 +186,9 @@ export default function TextAgentsView() {
                     </div>
                   </td>
                   <td className="px-6 py-4 text-sm text-black/60">{agent.provider}</td>
+                  <td className="px-6 py-4 text-sm text-black/60">
+                    {agent.owner_email ?? '-'}
+                  </td>
                   <td className="px-6 py-4 text-sm text-black/60">
                     {formatDate(agent.updated_at_unix_secs)}
                   </td>

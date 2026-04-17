@@ -1,4 +1,5 @@
 ﻿import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowsRightLeftIcon,
@@ -50,19 +51,22 @@ function ProviderBadge({ provider }: { provider: string }) {
 }
 
 export default function PhoneNumbersView() {
+  const [searchParams] = useSearchParams()
   const queryClient = useQueryClient()
   const [showImportModal, setShowImportModal] = useState(false)
   const [form, setForm] = useState<TwilioFormState>(emptyForm)
   const [updatingPhoneId, setUpdatingPhoneId] = useState<string | null>(null)
 
+  const scopedUserId = searchParams.get('user_id') || undefined
+
   const { data: phoneNumbersData, isLoading } = useQuery({
-    queryKey: ['phone-numbers'],
-    queryFn: getPhoneNumbers,
+    queryKey: ['phone-numbers', scopedUserId ?? 'all'],
+    queryFn: () => getPhoneNumbers({ userId: scopedUserId }),
   })
 
   const { data: agentsData } = useQuery({
-    queryKey: ['agents'],
-    queryFn: getAgents,
+    queryKey: ['agents', scopedUserId ?? 'all'],
+    queryFn: () => getAgents({ userId: scopedUserId }),
   })
 
   const phoneNumbers: PhoneNumber[] = phoneNumbersData ?? []
@@ -131,8 +135,9 @@ export default function PhoneNumbersView() {
       <div className="mb-5">
         <h2 className="text-lg font-semibold text-black">Tus numeros</h2>
         <p className="mt-1 text-sm text-black/60">
-          Solo se muestran numeros asociados a tu cuenta para mantener el
-          aislamiento entre usuarios del workspace.
+          {scopedUserId
+            ? 'Vista filtrada por usuario para supervision administrativa.'
+            : 'Solo se muestran numeros asociados a tu cuenta para mantener el aislamiento entre usuarios del workspace.'}
         </p>
       </div>
 
@@ -176,6 +181,9 @@ export default function PhoneNumbersView() {
                   Provider
                 </th>
                 <th className="px-6 py-3.5 text-left text-xs font-medium uppercase tracking-wider text-black/50">
+                  Propietario
+                </th>
+                <th className="px-6 py-3.5 text-left text-xs font-medium uppercase tracking-wider text-black/50">
                   Capacidades
                 </th>
                 <th className="px-6 py-3.5 text-left text-xs font-medium uppercase tracking-wider text-black/50">
@@ -207,6 +215,9 @@ export default function PhoneNumbersView() {
                     </td>
                     <td className="px-6 py-4">
                       <ProviderBadge provider={phoneNumber.provider} />
+                    </td>
+                    <td className="px-6 py-4 text-sm text-black/60">
+                      {phoneNumber.owner_info?.email ?? '-'}
                     </td>
                     <td className="px-6 py-4 text-sm text-black/60">
                       <div className="flex flex-wrap gap-2">

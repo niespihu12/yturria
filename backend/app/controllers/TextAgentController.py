@@ -23,6 +23,8 @@ from app.models.TextKnowledgeBaseDocument import TextKnowledgeBaseDocument
 from app.models.TextMessage import TextMessage
 from app.models.TextProviderConfig import TextProviderConfig
 from app.utils.crypto import decrypt_secret, encrypt_secret, mask_secret
+from app.models.User import User
+from app.utils.roles import is_super_admin_user, role_as_value
 
 SUPPORTED_PROVIDERS = {"openai", "gemini"}
 SUPPORTED_TOOL_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE"}
@@ -88,13 +90,48 @@ def _commit_with_data_error_guard(session: SessionDep) -> None:
         ) from exc
 
 
+def _normalize_optional_user_id(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    return normalized or None
+
+
+def _resolve_user_scope(current_user: CurrentUser, requested_user_id: str | None) -> str | None:
+    normalized_requested = _normalize_optional_user_id(requested_user_id)
+
+    if not is_super_admin_user(current_user):
+        if normalized_requested and normalized_requested != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="No tienes permisos para consultar recursos de otro usuario",
+            )
+        return current_user.id
+
+    return normalized_requested
+
+
+def _build_user_lookup(session: SessionDep, user_ids: set[str]) -> dict[str, User]:
+    if not user_ids:
+        return {}
+
+    users = session.exec(select(User).where(User.id.in_(user_ids))).all()
+    return {user.id: user for user in users}
+
+
 def _require_owned_text_agent(
     text_agent_id: str,
     current_user: CurrentUser,
     session: SessionDep,
 ) -> TextAgent:
     row = session.get(TextAgent, text_agent_id)
-    if not row or row.user_id != current_user.id:
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Agente de texto no encontrado o sin permisos",
+        )
+
+    if row.user_id != current_user.id and not is_super_admin_user(current_user):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Agente de texto no encontrado o sin permisos",
@@ -108,7 +145,13 @@ def _require_owned_document(
     session: SessionDep,
 ) -> TextKnowledgeBaseDocument:
     row = session.get(TextKnowledgeBaseDocument, document_id)
-    if not row or row.user_id != current_user.id:
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Documento no encontrado o sin permisos",
+        )
+
+    if row.user_id != current_user.id and not is_super_admin_user(current_user):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Documento no encontrado o sin permisos",
@@ -229,8 +272,11 @@ def _serialize_tool(tool: TextAgentTool) -> dict[str, Any]:
     }
 
 
-def _serialize_document(doc: TextKnowledgeBaseDocument) -> dict[str, Any]:
-    return {
+def _serialize_document(
+    doc: TextKnowledgeBaseDocument,
+    owner: User | None = None,
+) -> dict[str, Any]:
+    payload = {
         "id": doc.id,
         "name": doc.name,
         "source_type": doc.source_type,
@@ -242,9 +288,20 @@ def _serialize_document(doc: TextKnowledgeBaseDocument) -> dict[str, Any]:
         "updated_at_unix_secs": _to_unix(doc.updated_at),
     }
 
+    if owner:
+        payload["owner_user_id"] = owner.id
+        payload["owner_name"] = owner.name
+        payload["owner_email"] = owner.email
+        payload["owner_role"] = role_as_value(owner.role)
 
-def _serialize_text_agent(agent: TextAgent) -> dict[str, Any]:
-    return {
+    return payload
+
+
+def _serialize_text_agent(
+    agent: TextAgent,
+    owner: User | None = None,
+) -> dict[str, Any]:
+    payload = {
         "agent_id": agent.id,
         "name": agent.name,
         "provider": agent.provider,
@@ -257,6 +314,14 @@ def _serialize_text_agent(agent: TextAgent) -> dict[str, Any]:
         "created_at_unix_secs": _to_unix(agent.created_at),
         "updated_at_unix_secs": _to_unix(agent.updated_at),
     }
+
+    if owner:
+        payload["owner_user_id"] = owner.id
+        payload["owner_name"] = owner.name
+        payload["owner_email"] = owner.email
+        payload["owner_role"] = role_as_value(owner.role)
+
+    return payload
 
 
 def _serialize_whatsapp(config: TextAgentWhatsApp) -> dict[str, Any]:
@@ -736,12 +801,28 @@ class TextAgentController:
     # ── Agents ───────────────────────────────────────────────────────────
 
     @staticmethod
-    async def list_agents(current_user: CurrentUser, session: SessionDep):
-        rows = session.exec(
-            select(TextAgent)
-            .where(TextAgent.user_id == current_user.id)
-            .order_by(TextAgent.updated_at.desc())
-        ).all()
+    async def list_agents(
+        current_user: CurrentUser,
+        session: SessionDep,
+        user_id: str | None = None,
+    ):
+        scoped_user_id = _resolve_user_scope(current_user, user_id)
+
+        statement = select(TextAgent)
+        if scoped_user_id:
+            statement = statement.where(TextAgent.user_id == scoped_user_id)
+
+        rows = session.exec(statement.order_by(TextAgent.updated_at.desc())).all()
+
+        if is_super_admin_user(current_user):
+            user_lookup = _build_user_lookup(session, {row.user_id for row in rows})
+            return {
+                "agents": [
+                    _serialize_text_agent(agent, user_lookup.get(agent.user_id))
+                    for agent in rows
+                ]
+            }
+
         return {"agents": [_serialize_text_agent(agent) for agent in rows]}
 
     @staticmethod
@@ -782,7 +863,11 @@ class TextAgentController:
     @staticmethod
     async def get_agent(text_agent_id: str, current_user: CurrentUser, session: SessionDep):
         agent = _require_owned_text_agent(text_agent_id, current_user, session)
-        payload = _serialize_text_agent(agent)
+        owner = None
+        if is_super_admin_user(current_user):
+            owner = session.get(User, agent.user_id)
+
+        payload = _serialize_text_agent(agent, owner)
         payload["tools"] = [_serialize_tool(tool) for tool in _list_agent_tools(session, agent.id)]
         payload["knowledge_base"] = _list_agent_knowledge_base(session, agent.id)
         return payload
@@ -1059,12 +1144,28 @@ class TextAgentController:
     # ── Knowledge base ────────────────────────────────────────────────────
 
     @staticmethod
-    async def list_knowledge_base_documents(current_user: CurrentUser, session: SessionDep):
-        rows = session.exec(
-            select(TextKnowledgeBaseDocument)
-            .where(TextKnowledgeBaseDocument.user_id == current_user.id)
-            .order_by(TextKnowledgeBaseDocument.updated_at.desc())
-        ).all()
+    async def list_knowledge_base_documents(
+        current_user: CurrentUser,
+        session: SessionDep,
+        user_id: str | None = None,
+    ):
+        scoped_user_id = _resolve_user_scope(current_user, user_id)
+
+        statement = select(TextKnowledgeBaseDocument)
+        if scoped_user_id:
+            statement = statement.where(TextKnowledgeBaseDocument.user_id == scoped_user_id)
+
+        rows = session.exec(statement.order_by(TextKnowledgeBaseDocument.updated_at.desc())).all()
+
+        if is_super_admin_user(current_user):
+            user_lookup = _build_user_lookup(session, {row.user_id for row in rows})
+            return {
+                "documents": [
+                    _serialize_document(doc, user_lookup.get(doc.user_id))
+                    for doc in rows
+                ]
+            }
+
         return {"documents": [_serialize_document(doc) for doc in rows]}
 
     @staticmethod

@@ -8,9 +8,11 @@ from sqlmodel import Session, select
 
 from app.controllers.deps.auth import CurrentUser
 from app.controllers.deps.db_session import SessionDep
+from app.models.User import User
 from app.models.UserAgent import UserAgent
 from app.models.UserPhoneNumber import UserPhoneNumber
 from app.models.UserTool import UserTool
+from app.utils.roles import is_super_admin_user, role_as_value
 
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")
 ELEVENLABS_BASE = "https://api.elevenlabs.io/v1"
@@ -98,15 +100,51 @@ def _elevenlabs_delete(path: str) -> Any:
     return _elevenlabs_request("DELETE", path)
 
 
+def _normalize_optional_user_id(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    return normalized or None
+
+
+def _resolve_user_scope(current_user: CurrentUser, requested_user_id: str | None) -> str | None:
+    normalized_requested = _normalize_optional_user_id(requested_user_id)
+
+    if not is_super_admin_user(current_user):
+        if normalized_requested and normalized_requested != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="No tienes permisos para consultar recursos de otro usuario",
+            )
+        return current_user.id
+
+    return normalized_requested
+
+
+def _build_user_lookup(session: Session, user_ids: set[str]) -> dict[str, User]:
+    if not user_ids:
+        return {}
+
+    users = session.exec(select(User).where(User.id.in_(user_ids))).all()
+    return {user.id: user for user in users}
+
+
 def _require_owned_agent(
     agent_id: str, current_user: CurrentUser, session: Session
 ) -> UserAgent:
-    row = session.exec(
-        select(UserAgent).where(
-            UserAgent.user_id == current_user.id,
-            UserAgent.agent_id == agent_id,
-        )
-    ).first()
+    if is_super_admin_user(current_user):
+        row = session.exec(
+            select(UserAgent).where(
+                UserAgent.agent_id == agent_id,
+            )
+        ).first()
+    else:
+        row = session.exec(
+            select(UserAgent).where(
+                UserAgent.user_id == current_user.id,
+                UserAgent.agent_id == agent_id,
+            )
+        ).first()
 
     if not row:
         raise HTTPException(
@@ -120,12 +158,19 @@ def _require_owned_agent(
 def _require_owned_phone_number(
     phone_number_id: str, current_user: CurrentUser, session: Session
 ) -> UserPhoneNumber:
-    row = session.exec(
-        select(UserPhoneNumber).where(
-            UserPhoneNumber.user_id == current_user.id,
-            UserPhoneNumber.phone_number_id == phone_number_id,
-        )
-    ).first()
+    if is_super_admin_user(current_user):
+        row = session.exec(
+            select(UserPhoneNumber).where(
+                UserPhoneNumber.phone_number_id == phone_number_id,
+            )
+        ).first()
+    else:
+        row = session.exec(
+            select(UserPhoneNumber).where(
+                UserPhoneNumber.user_id == current_user.id,
+                UserPhoneNumber.phone_number_id == phone_number_id,
+            )
+        ).first()
 
     if not row:
         raise HTTPException(
@@ -139,22 +184,70 @@ def _require_owned_phone_number(
 class AgentController:
 
     @staticmethod
-    async def list_agents(current_user: CurrentUser, session: SessionDep):
-        rows = session.exec(
-            select(UserAgent).where(UserAgent.user_id == current_user.id)
-        ).all()
+    async def list_agents(
+        current_user: CurrentUser,
+        session: SessionDep,
+        user_id: str | None = None,
+    ):
+        scoped_user_id = _resolve_user_scope(current_user, user_id)
+        is_super_admin = is_super_admin_user(current_user)
+
+        statement = select(UserAgent)
+        if scoped_user_id:
+            statement = statement.where(UserAgent.user_id == scoped_user_id)
+        rows = session.exec(statement).all()
 
         if not rows:
             return {"agents": []}
 
-        # Fetch all agents from ElevenLabs then filter to user-owned ones
         el_data = _elevenlabs_get("/convai/agents")
         el_agents: list[dict] = el_data.get("agents", [])
 
-        owned_ids = {row.agent_id for row in rows}
-        owned_agents = [a for a in el_agents if a["agent_id"] in owned_ids]
+        if not is_super_admin:
+            owned_ids = {row.agent_id for row in rows}
+            owned_agents = [a for a in el_agents if a.get("agent_id") in owned_ids]
+            return {"agents": owned_agents}
 
-        return {"agents": owned_agents}
+        ownership_by_agent: dict[str, UserAgent] = {}
+        for row in rows:
+            ownership_by_agent.setdefault(row.agent_id, row)
+
+        user_lookup = _build_user_lookup(session, {row.user_id for row in rows})
+
+        # In super-admin mode, only show agents that have local ownership in this platform.
+        allowed_agent_ids = {row.agent_id for row in rows}
+        normalized_agents: list[dict] = []
+        for agent in el_agents:
+            if not isinstance(agent, dict):
+                continue
+
+            agent_id = agent.get("agent_id")
+            if not isinstance(agent_id, str) or not agent_id:
+                continue
+
+            if agent_id not in allowed_agent_ids:
+                continue
+
+            normalized_agent = dict(agent)
+            owner_mapping = ownership_by_agent.get(agent_id)
+            if owner_mapping:
+                owner_user = user_lookup.get(owner_mapping.user_id)
+                access_info = normalized_agent.get("access_info")
+                if not isinstance(access_info, dict):
+                    access_info = {}
+
+                access_info["owner_user_id"] = owner_mapping.user_id
+
+                if owner_user:
+                    access_info["creator_email"] = owner_user.email
+                    access_info["creator_name"] = owner_user.name
+                    access_info["role"] = role_as_value(owner_user.role)
+
+                normalized_agent["access_info"] = access_info
+
+            normalized_agents.append(normalized_agent)
+
+        return {"agents": normalized_agents}
 
     @staticmethod
     async def get_agent(agent_id: str, current_user: CurrentUser, session: SessionDep):
@@ -341,12 +434,14 @@ class AgentController:
 
     @staticmethod
     async def list_tools(current_user: CurrentUser, session: SessionDep):
+        is_super_admin = is_super_admin_user(current_user)
+
         owned_tool_rows = session.exec(
             select(UserTool).where(UserTool.user_id == current_user.id)
         ).all()
         owned_tool_ids = {row.tool_id for row in owned_tool_rows}
 
-        if not owned_tool_ids:
+        if not is_super_admin and not owned_tool_ids:
             return {"tools": []}
 
         data = _elevenlabs_get(
@@ -382,14 +477,17 @@ class AgentController:
                 if tool_type != "webhook":
                     continue
 
-                if tool_id in owned_tool_ids:
+                if is_super_admin or tool_id in owned_tool_ids:
                     owned_tools.append(tool)
 
-            stale_rows = [row for row in owned_tool_rows if row.tool_id not in existing_tool_ids]
-            if stale_rows:
-                for row in stale_rows:
-                    session.delete(row)
-                session.commit()
+            if not is_super_admin:
+                stale_rows = [
+                    row for row in owned_tool_rows if row.tool_id not in existing_tool_ids
+                ]
+                if stale_rows:
+                    for row in stale_rows:
+                        session.delete(row)
+                    session.commit()
 
             return {
                 **data,
@@ -403,7 +501,10 @@ class AgentController:
                     continue
 
                 tool_id = tool.get("id")
-                if not isinstance(tool_id, str) or tool_id not in owned_tool_ids:
+                if not isinstance(tool_id, str):
+                    continue
+
+                if not is_super_admin and tool_id not in owned_tool_ids:
                     continue
 
                 tool_config = tool.get("tool_config")
@@ -466,14 +567,22 @@ class AgentController:
 
     @staticmethod
     async def delete_tool(tool_id: str, current_user: CurrentUser, session: SessionDep):
-        ownership = session.exec(
-            select(UserTool).where(
-                UserTool.user_id == current_user.id,
-                UserTool.tool_id == tool_id,
-            )
-        ).first()
+        is_super_admin = is_super_admin_user(current_user)
+        if is_super_admin:
+            ownership = session.exec(
+                select(UserTool).where(
+                    UserTool.tool_id == tool_id,
+                )
+            ).first()
+        else:
+            ownership = session.exec(
+                select(UserTool).where(
+                    UserTool.user_id == current_user.id,
+                    UserTool.tool_id == tool_id,
+                )
+            ).first()
 
-        if not ownership:
+        if not ownership and not is_super_admin:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Herramienta no encontrada o sin permisos",
@@ -485,8 +594,9 @@ class AgentController:
             if exc.status_code != status.HTTP_404_NOT_FOUND:
                 raise
 
-        session.delete(ownership)
-        session.commit()
+        if ownership:
+            session.delete(ownership)
+            session.commit()
         return {"deleted": True}
 
     @staticmethod
@@ -497,16 +607,13 @@ class AgentController:
         return _elevenlabs_get(f"/convai/agents/{agent_id}/widget")
 
     @staticmethod
-    async def list_phone_numbers(current_user: CurrentUser, session: SessionDep):
-        owned_numbers_rows = session.exec(
-            select(UserPhoneNumber).where(UserPhoneNumber.user_id == current_user.id)
-        ).all()
-        owned_number_ids = {row.phone_number_id for row in owned_numbers_rows}
-
-        owned_agents_rows = session.exec(
-            select(UserAgent).where(UserAgent.user_id == current_user.id)
-        ).all()
-        owned_agent_ids = {row.agent_id for row in owned_agents_rows}
+    async def list_phone_numbers(
+        current_user: CurrentUser,
+        session: SessionDep,
+        user_id: str | None = None,
+    ):
+        scoped_user_id = _resolve_user_scope(current_user, user_id)
+        is_super_admin = is_super_admin_user(current_user)
 
         el_data = _elevenlabs_get("/convai/phone-numbers")
         if isinstance(el_data, list):
@@ -516,6 +623,58 @@ class AgentController:
             all_numbers_raw = candidate if isinstance(candidate, list) else []
         else:
             all_numbers_raw = []
+
+        if is_super_admin:
+            number_rows_statement = select(UserPhoneNumber)
+            if scoped_user_id:
+                number_rows_statement = number_rows_statement.where(
+                    UserPhoneNumber.user_id == scoped_user_id
+                )
+
+            phone_number_rows = session.exec(number_rows_statement).all()
+            if not phone_number_rows:
+                return {"phone_numbers": []}
+
+            owner_by_phone_number = {
+                row.phone_number_id: row.user_id for row in phone_number_rows
+            }
+            owner_lookup = _build_user_lookup(session, set(owner_by_phone_number.values()))
+
+            visible_numbers: list[dict] = []
+            for phone_number in all_numbers_raw:
+                if not isinstance(phone_number, dict):
+                    continue
+
+                phone_number_id = phone_number.get("phone_number_id")
+                if not isinstance(phone_number_id, str) or not phone_number_id:
+                    continue
+
+                owner_user_id = owner_by_phone_number.get(phone_number_id)
+                if not owner_user_id:
+                    continue
+
+                owner = owner_lookup.get(owner_user_id)
+                owner_info = {
+                    "user_id": owner_user_id,
+                    "name": owner.name if owner else None,
+                    "email": owner.email if owner else None,
+                    "role": role_as_value(owner.role) if owner else None,
+                }
+                normalized_number = dict(phone_number)
+                normalized_number["owner_info"] = owner_info
+                visible_numbers.append(normalized_number)
+
+            return {"phone_numbers": visible_numbers}
+
+        owned_numbers_rows = session.exec(
+            select(UserPhoneNumber).where(UserPhoneNumber.user_id == current_user.id)
+        ).all()
+        owned_number_ids = {row.phone_number_id for row in owned_numbers_rows}
+
+        owned_agents_rows = session.exec(
+            select(UserAgent).where(UserAgent.user_id == current_user.id)
+        ).all()
+        owned_agent_ids = {row.agent_id for row in owned_agents_rows}
 
         should_commit = False
         visible_numbers: list[dict] = []
@@ -684,6 +843,25 @@ class AgentController:
     async def delete_agent(
         agent_id: str, current_user: CurrentUser, session: SessionDep
     ):
+        if is_super_admin_user(current_user):
+            rows = session.exec(
+                select(UserAgent).where(UserAgent.agent_id == agent_id)
+            ).all()
+
+            if not rows:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Agente no encontrado o sin permisos",
+                )
+
+            _elevenlabs_delete(f"/convai/agents/{agent_id}")
+
+            for row in rows:
+                session.delete(row)
+
+            session.commit()
+            return {"deleted": True}
+
         row = _require_owned_agent(agent_id, current_user, session)
 
         _elevenlabs_delete(f"/convai/agents/{agent_id}")

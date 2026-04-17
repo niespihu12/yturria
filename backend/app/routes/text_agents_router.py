@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, File, Form, Request, UploadFile
+from fastapi import APIRouter, File, Form, Query, Request, UploadFile
 
 from app.controllers.TextAgentController import TextAgentController
 from app.controllers.deps.auth import CurrentUser
@@ -35,8 +35,12 @@ async def delete_provider_config(
 
 
 @text_agents_router.get("")
-async def list_text_agents(current_user: CurrentUser, session: SessionDep):
-    return await TextAgentController.list_agents(current_user, session)
+async def list_text_agents(
+    current_user: CurrentUser,
+    session: SessionDep,
+    user_id: str | None = Query(default=None),
+):
+    return await TextAgentController.list_agents(current_user, session, user_id)
 
 
 @text_agents_router.post("")
@@ -48,8 +52,16 @@ async def create_text_agent(request: Request, current_user: CurrentUser, session
 # ── Knowledge base (global) ───────────────────────────────────────────────────
 
 @text_agents_router.get("/knowledge-base")
-async def list_knowledge_base_documents(current_user: CurrentUser, session: SessionDep):
-    return await TextAgentController.list_knowledge_base_documents(current_user, session)
+async def list_knowledge_base_documents(
+    current_user: CurrentUser,
+    session: SessionDep,
+    user_id: str | None = Query(default=None),
+):
+    return await TextAgentController.list_knowledge_base_documents(
+        current_user,
+        session,
+        user_id,
+    )
 
 
 @text_agents_router.post("/knowledge-base/file")

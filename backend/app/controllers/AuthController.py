@@ -4,12 +4,16 @@ from datetime import datetime, timedelta
 
 from fastapi import HTTPException, status
 from fastapi.responses import JSONResponse, PlainTextResponse
+from sqlalchemy import func
 from sqlmodel import delete, select
 
 from app.controllers.deps.auth import CurrentUser
 from app.controllers.deps.db_session import SessionDep
+from app.models.TextAgent import TextAgent
 from app.models.Token import Token
 from app.models.User import User
+from app.models.UserAgent import UserAgent
+from app.models.UserPhoneNumber import UserPhoneNumber
 from app.schemas.auth import (
     CheckPasswordRequest,
     ConfirmAccountRequest,
@@ -29,6 +33,12 @@ from app.services.AuthEmail import AuthEmail
 from app.utils.auth import check_password, hash_password
 from app.utils.jwt import decode_jwt, generate_jwt
 from app.utils.mfa import MFA_LOCK_MINUTES, MFA_MAX_ATTEMPTS, normalize_mfa_code
+from app.utils.roles import (
+    is_super_admin_user,
+    normalize_email,
+    resolve_default_user_role,
+    role_as_value,
+)
 from app.utils.token import generate_token
 
 ACCOUNT_CONFIRMATION = "account_confirmation"
@@ -38,8 +48,17 @@ MFA_LOGIN = "mfa_login"
 
 class AuthController:
     @staticmethod
+    def _require_super_admin(current_user: CurrentUser) -> None:
+        if not is_super_admin_user(current_user):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Solo el super admin puede realizar esta accion",
+            )
+
+    @staticmethod
     def _get_user_by_email(session: SessionDep, email: str) -> User | None:
-        statement = select(User).where(User.email == email)
+        normalized_email = normalize_email(email)
+        statement = select(User).where(func.lower(User.email) == normalized_email)
         return session.exec(statement).first()
 
     @staticmethod
@@ -146,7 +165,8 @@ class AuthController:
 
     @staticmethod
     def create_account(payload: CreateAccountRequest, session: SessionDep) -> str:
-        user_exists = AuthController._get_user_by_email(session, payload.email)
+        normalized_email = normalize_email(payload.email)
+        user_exists = AuthController._get_user_by_email(session, normalized_email)
         if user_exists:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -154,9 +174,10 @@ class AuthController:
             )
 
         user = User(
-            email=payload.email,
+            email=normalized_email,
             name=payload.name,
             password=hash_password(payload.password),
+            role=resolve_default_user_role(normalized_email),
         )
         session.add(user)
         session.flush()
@@ -385,7 +406,53 @@ class AuthController:
             "_id": current_user.id,
             "name": current_user.name,
             "email": current_user.email,
+            "role": role_as_value(current_user.role),
             "mfa_enabled": current_user.mfa_enabled,
+        }
+
+    @staticmethod
+    def admin_users(current_user: CurrentUser, session: SessionDep) -> dict:
+        AuthController._require_super_admin(current_user)
+
+        users = session.exec(select(User).order_by(User.created_at.desc())).all()
+
+        voice_counts = {
+            str(user_id): int(total)
+            for user_id, total in session.exec(
+                select(UserAgent.user_id, func.count(UserAgent.id)).group_by(UserAgent.user_id)
+            ).all()
+        }
+        text_counts = {
+            str(user_id): int(total)
+            for user_id, total in session.exec(
+                select(TextAgent.user_id, func.count(TextAgent.id)).group_by(TextAgent.user_id)
+            ).all()
+        }
+        phone_counts = {
+            str(user_id): int(total)
+            for user_id, total in session.exec(
+                select(UserPhoneNumber.user_id, func.count(UserPhoneNumber.id)).group_by(
+                    UserPhoneNumber.user_id
+                )
+            ).all()
+        }
+
+        return {
+            "users": [
+                {
+                    "_id": user.id,
+                    "name": user.name,
+                    "email": user.email,
+                    "role": role_as_value(user.role),
+                    "confirmed": user.confirmed,
+                    "mfa_enabled": user.mfa_enabled,
+                    "created_at_unix_secs": int(user.created_at.timestamp()),
+                    "voice_agents_count": voice_counts.get(user.id, 0),
+                    "text_agents_count": text_counts.get(user.id, 0),
+                    "phone_numbers_count": phone_counts.get(user.id, 0),
+                }
+                for user in users
+            ]
         }
 
     @staticmethod
@@ -394,7 +461,8 @@ class AuthController:
         current_user: CurrentUser,
         session: SessionDep,
     ) -> str:
-        user_exists = AuthController._get_user_by_email(session, payload.email)
+        normalized_email = normalize_email(payload.email)
+        user_exists = AuthController._get_user_by_email(session, normalized_email)
         if user_exists and user_exists.id != current_user.id:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -402,7 +470,7 @@ class AuthController:
             )
 
         current_user.name = payload.name
-        current_user.email = payload.email
+        current_user.email = normalized_email
 
         session.add(current_user)
         session.commit()

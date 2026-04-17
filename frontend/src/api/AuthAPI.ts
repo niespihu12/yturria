@@ -1,6 +1,7 @@
 import api from "@/lib/axios";
 import { isAxiosError } from "axios";
 import {
+    type AdminUserSummary,
     type AuthenticatedUser,
     mfaChallengeSchema,
     type ConfirmToken,
@@ -156,6 +157,15 @@ export async function enableMfa(formData: MfaToggleForm) {
 export async function disableMfa(formData: MfaToggleForm) {
     try {
         const { data } = await api.post<string>('/auth/mfa/disable', formData)
+        return data
+    } catch (error) {
+        throw new Error(getApiErrorMessage(error))
+    }
+}
+
+export async function getAdminUsers() {
+    try {
+        const { data } = await api.get<{ users: AdminUserSummary[] }>('/auth/admin/users')
         return data
     } catch (error) {
         throw new Error(getApiErrorMessage(error))

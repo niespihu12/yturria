@@ -1,5 +1,5 @@
 ﻿import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'react-toastify'
 import { useForm } from 'react-hook-form'
@@ -25,13 +25,16 @@ function formatDate(unixSecs: number) {
 
 export default function VoiceAgentsView() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const queryClient = useQueryClient()
   const [showModal, setShowModal] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
 
+  const scopedUserId = searchParams.get('user_id') || undefined
+
   const { data, isLoading, isError } = useQuery({
-    queryKey: ['agents'],
-    queryFn: getAgents,
+    queryKey: ['agents', scopedUserId ?? 'all'],
+    queryFn: () => getAgents({ userId: scopedUserId }),
   })
 
   const agents: AgentListItem[] = data?.agents ?? []
@@ -118,7 +121,9 @@ export default function VoiceAgentsView() {
       <div className="mb-5">
         <h2 className="text-lg font-semibold text-black">Listado</h2>
         <p className="mt-1 text-sm text-black/60">
-          La consola ahora abre por defecto en esta seccion justo despues del login.
+          {scopedUserId
+            ? 'Vista filtrada por usuario para revision administrativa.'
+            : 'La consola ahora abre por defecto en esta seccion justo despues del login.'}
         </p>
       </div>
 
