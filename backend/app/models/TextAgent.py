@@ -28,5 +28,7 @@ class TextAgent(SQLModel, table=True):
     language: str = Field(default="es", nullable=False)
     temperature: float = Field(default=0.7, nullable=False)
     max_tokens: int = Field(default=512, nullable=False)
+    sofia_mode: bool = Field(default=False, nullable=False)
+    sofia_config_json: str = Field(default="{}", nullable=False)
     created_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
     updated_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)

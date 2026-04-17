@@ -13,6 +13,7 @@ import {
   WrenchScrewdriverIcon,
   ChartBarIcon,
   PencilIcon,
+  SparklesIcon,
 } from '@heroicons/react/24/outline'
 import { getTextAgent, listProviderConfigs, updateTextAgent } from '@/api/TextAgentsAPI'
 import TextAgentPreview from '@/components/app/text-agent/TextAgentPreview'
@@ -22,12 +23,14 @@ import TextAgentToolsTab from '@/components/app/text-agent/tabs/TextAgentToolsTa
 import TextAgentKnowledgeBaseTab from '@/components/app/text-agent/tabs/TextAgentKnowledgeBaseTab'
 import TextAgentAnalysisTab from '@/components/app/text-agent/tabs/TextAgentAnalysisTab'
 import TextAgentWhatsAppTab from '@/components/app/text-agent/tabs/TextAgentWhatsAppTab'
+import TextAgentSofiaTab from '@/components/app/text-agent/tabs/TextAgentSofiaTab'
 import { TEXT_PROVIDER_MODELS, type TextAgentFormValues, type TextProvider } from '@/types/textAgent'
 
 const BASE_TABS = [
   { id: 'config', label: 'Agente', icon: ChatBubbleLeftRightIcon },
   { id: 'tools', label: 'Herramientas', icon: WrenchScrewdriverIcon },
   { id: 'knowledge', label: 'Conocimiento', icon: BookOpenIcon },
+  { id: 'sofia', label: 'Sofía IA', icon: SparklesIcon },
   { id: 'whatsapp', label: 'WhatsApp', icon: DevicePhoneMobileIcon },
   { id: 'analysis', label: 'Análisis', icon: ChartBarIcon },
 ] as const
@@ -83,6 +86,8 @@ export default function TextAgentDetailView() {
       welcome_message: '',
       temperature: 0.7,
       max_tokens: 512,
+      sofia_mode: false,
+      sofia_config_json: '{}',
     },
   })
 
@@ -95,6 +100,8 @@ export default function TextAgentDetailView() {
       welcome_message: agent.welcome_message,
       temperature: agent.temperature,
       max_tokens: agent.max_tokens,
+      sofia_mode: agent.sofia_mode ?? false,
+      sofia_config_json: agent.sofia_config_json ?? '{}',
     })
   }, [agent, reset])
 
@@ -119,6 +126,8 @@ export default function TextAgentDetailView() {
         welcome_message: values.welcome_message,
         temperature: values.temperature,
         max_tokens: values.max_tokens,
+        sofia_mode: values.sofia_mode,
+        sofia_config_json: values.sofia_config_json,
       }),
     onSuccess: () => {
       toast.success('Cambios guardados')
@@ -137,6 +146,8 @@ export default function TextAgentDetailView() {
   const watchedWelcomeMessage = watch('welcome_message')
   const watchedTemperature = watch('temperature') ?? 0.7
   const watchedMaxTokens = watch('max_tokens') ?? 512
+  const watchedSofiaMode = watch('sofia_mode') ?? false
+  const watchedSofiaConfigJson = watch('sofia_config_json') ?? '{}'
   const previewWelcomeMessage = watchedWelcomeMessage?.trim()
     ? watchedWelcomeMessage
     : agent?.welcome_message ?? ''
@@ -275,6 +286,18 @@ export default function TextAgentDetailView() {
 
           {activeTab === 'whatsapp' && (
             <TextAgentWhatsAppTab agentId={id!} />
+          )}
+
+          {activeTab === 'sofia' && (
+            <TextAgentSofiaTab
+              agentId={id!}
+              sofiaMode={watchedSofiaMode}
+              sofiaConfigJson={watchedSofiaConfigJson}
+              onSofiaChange={(mode, configJson) => {
+                setValue('sofia_mode', mode, { shouldDirty: true })
+                setValue('sofia_config_json', configJson, { shouldDirty: true })
+              }}
+            />
           )}
 
           {activeTab === 'analysis' && <TextAgentAnalysisTab agentId={id!} />}

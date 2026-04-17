@@ -12,6 +12,8 @@ import type {
   TextKnowledgeBaseDocument,
   TextProvider,
   WhatsAppProvider,
+  EscalatedConversation,
+  EscalationStatus,
 } from '@/types/textAgent'
 
 type UserScopeOptions = {
@@ -76,6 +78,8 @@ export async function updateTextAgent(
     language: string
     temperature: number
     max_tokens: number
+    sofia_mode: boolean
+    sofia_config_json: string
   }>
 ) {
   try {
@@ -343,6 +347,35 @@ export async function getTextConversations(agentId: string): Promise<{ conversat
 export async function getTextConversationDetail(conversationId: string): Promise<TextConversationDetail> {
   try {
     const { data } = await api.get(`/text-agents/conversations/${conversationId}`)
+    return data
+  } catch (error) {
+    throw new Error(getError(error))
+  }
+}
+
+// ── Escalations (Sofia) ───────────────────────────────────────────────────────
+
+export async function getEscalations(
+  agentId: string
+): Promise<{ escalations: EscalatedConversation[] }> {
+  try {
+    const { data } = await api.get(`/text-agents/${agentId}/escalations`)
+    return data
+  } catch (error) {
+    throw new Error(getError(error))
+  }
+}
+
+export async function updateEscalation(
+  agentId: string,
+  conversationId: string,
+  payload: { status: EscalationStatus }
+): Promise<{ updated: boolean }> {
+  try {
+    const { data } = await api.patch(
+      `/text-agents/${agentId}/escalations/${conversationId}`,
+      payload
+    )
     return data
   } catch (error) {
     throw new Error(getError(error))

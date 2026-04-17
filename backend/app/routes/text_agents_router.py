@@ -9,6 +9,34 @@ from app.controllers.deps.db_session import SessionDep
 text_agents_router = APIRouter(prefix="/text-agents", tags=["Text Agents"])
 
 
+# ── Escalation management ────────────────────────────────────────────────────
+
+@text_agents_router.get("/{text_agent_id}/escalations")
+async def list_escalations(
+    text_agent_id: str,
+    current_user: CurrentUser,
+    session: SessionDep,
+    status: str | None = Query(default=None),
+):
+    return await TextAgentController.list_escalations(
+        text_agent_id, current_user, session, status_filter=status
+    )
+
+
+@text_agents_router.patch("/{text_agent_id}/escalations/{conversation_id}")
+async def update_escalation(
+    text_agent_id: str,
+    conversation_id: str,
+    request: Request,
+    current_user: CurrentUser,
+    session: SessionDep,
+):
+    payload = await request.json()
+    return await TextAgentController.update_escalation(
+        text_agent_id, conversation_id, payload, current_user, session
+    )
+
+
 @text_agents_router.get("/provider-configs")
 async def list_provider_configs(current_user: CurrentUser, session: SessionDep):
     return await TextAgentController.list_provider_configs(current_user, session)

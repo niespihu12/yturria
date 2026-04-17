@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import secrets
 from datetime import datetime
@@ -25,6 +26,10 @@ from app.models.TextProviderConfig import TextProviderConfig
 from app.utils.crypto import decrypt_secret, encrypt_secret, mask_secret
 from app.models.User import User
 from app.utils.roles import is_super_admin_user, role_as_value
+from app.services.sofia_graph import run_sofia
+from app.services.sofia_prompts import ADVISOR_NOTIFICATION_TEMPLATE
+
+logger = logging.getLogger(__name__)
 
 SUPPORTED_PROVIDERS = {"openai", "gemini"}
 SUPPORTED_TOOL_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE"}
@@ -301,6 +306,11 @@ def _serialize_text_agent(
     agent: TextAgent,
     owner: User | None = None,
 ) -> dict[str, Any]:
+    try:
+        sofia_config = json.loads(agent.sofia_config_json or "{}")
+    except (json.JSONDecodeError, TypeError):
+        sofia_config = {}
+
     payload = {
         "agent_id": agent.id,
         "name": agent.name,
@@ -311,6 +321,8 @@ def _serialize_text_agent(
         "language": agent.language,
         "temperature": agent.temperature,
         "max_tokens": agent.max_tokens,
+        "sofia_mode": agent.sofia_mode,
+        "sofia_config": sofia_config,
         "created_at_unix_secs": _to_unix(agent.created_at),
         "updated_at_unix_secs": _to_unix(agent.updated_at),
     }
@@ -841,6 +853,13 @@ class TextAgentController:
         max_tokens = int(payload.get("max_tokens") or 512)
         now = _utcnow()
 
+        sofia_mode = bool(payload.get("sofia_mode", False))
+        sofia_config_raw = payload.get("sofia_config") or {}
+        try:
+            sofia_config_json = json.dumps(sofia_config_raw) if isinstance(sofia_config_raw, dict) else str(sofia_config_raw)
+        except (TypeError, ValueError):
+            sofia_config_json = "{}"
+
         agent = TextAgent(
             user_id=current_user.id,
             name=name,
@@ -851,6 +870,8 @@ class TextAgentController:
             language=str(payload.get("language") or "es"),
             temperature=max(0.0, min(2.0, temperature)),
             max_tokens=max(64, min(8192, max_tokens)),
+            sofia_mode=sofia_mode,
+            sofia_config_json=sofia_config_json,
             created_at=now,
             updated_at=now,
         )
@@ -910,6 +931,16 @@ class TextAgentController:
             value = int(payload.get("max_tokens") or 512)
             agent.max_tokens = max(64, min(8192, value))
 
+        if "sofia_mode" in payload:
+            agent.sofia_mode = bool(payload.get("sofia_mode", False))
+
+        if "sofia_config" in payload:
+            raw = payload.get("sofia_config") or {}
+            try:
+                agent.sofia_config_json = json.dumps(raw) if isinstance(raw, dict) else str(raw)
+            except (TypeError, ValueError):
+                agent.sofia_config_json = "{}"
+
         agent.updated_at = _utcnow()
         session.add(agent)
         _commit_with_data_error_guard(session)
@@ -919,6 +950,91 @@ class TextAgentController:
         response["tools"] = [_serialize_tool(tool) for tool in _list_agent_tools(session, agent.id)]
         response["knowledge_base"] = _list_agent_knowledge_base(session, agent.id)
         return response
+
+    # ── Escalation management ─────────────────────────────────────────────────
+
+    @staticmethod
+    async def list_escalations(
+        text_agent_id: str,
+        current_user: CurrentUser,
+        session: SessionDep,
+        status_filter: str | None = None,
+    ):
+        """List conversations that have been escalated for this agent."""
+        agent = _require_owned_text_agent(text_agent_id, current_user, session)
+
+        query = (
+            select(TextConversation)
+            .where(
+                TextConversation.text_agent_id == agent.id,
+                TextConversation.escalation_status != "none",
+            )
+            .order_by(TextConversation.escalated_at.desc())
+        )
+
+        if status_filter and status_filter in {"pending", "in_progress", "resolved"}:
+            query = query.where(TextConversation.escalation_status == status_filter)
+
+        rows = session.exec(query).all()
+
+        escalations = []
+        for conv in rows:
+            last_msg = session.exec(
+                select(TextMessage)
+                .where(TextMessage.conversation_id == conv.id, TextMessage.role == "user")
+                .order_by(TextMessage.created_at.desc())
+            ).first()
+
+            escalations.append({
+                "conversation_id": conv.id,
+                "title": conv.title,
+                "escalation_status": conv.escalation_status,
+                "escalation_reason": conv.escalation_reason,
+                "escalated_at_unix_secs": _to_unix(conv.escalated_at) if conv.escalated_at else None,
+                "last_user_message": last_msg.content[:200] if last_msg else "",
+                "created_at_unix_secs": _to_unix(conv.created_at),
+            })
+
+        return {"escalations": escalations}
+
+    @staticmethod
+    async def update_escalation(
+        text_agent_id: str,
+        conversation_id: str,
+        payload: dict,
+        current_user: CurrentUser,
+        session: SessionDep,
+    ):
+        """Update the status of an escalated conversation."""
+        agent = _require_owned_text_agent(text_agent_id, current_user, session)
+
+        conversation = session.get(TextConversation, conversation_id)
+        if not conversation or conversation.text_agent_id != agent.id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Conversación escalada no encontrada",
+            )
+
+        new_status = str(payload.get("status") or "").strip().lower()
+        if new_status not in {"pending", "in_progress", "resolved"}:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Status inválido. Usa: pending, in_progress, resolved",
+            )
+
+        conversation.escalation_status = new_status
+        conversation.updated_at = _utcnow()
+        session.add(conversation)
+        session.commit()
+        session.refresh(conversation)
+
+        return {
+            "conversation_id": conversation.id,
+            "escalation_status": conversation.escalation_status,
+            "escalation_reason": conversation.escalation_reason,
+            "escalated_at_unix_secs": _to_unix(conversation.escalated_at) if conversation.escalated_at else None,
+            "updated": True,
+        }
 
     @staticmethod
     async def delete_agent(text_agent_id: str, current_user: CurrentUser, session: SessionDep):
@@ -1603,8 +1719,23 @@ class TextAgentController:
             if row.role in {"user", "assistant"}
         ]
 
-        tools = _list_agent_tools(session, agent.id)
         rag_context = _retrieve_rag_context(session, agent.id, user_message)
+
+        if agent.sofia_mode:
+            sofia_result = await _run_sofia_chat(
+                agent, conversation, history, user_message, rag_context, session
+            )
+            return {
+                "conversation_id": conversation.id,
+                "response": sofia_result["response"],
+                "provider": agent.provider,
+                "model": agent.model,
+                "token_usage": None,
+                "escalated": sofia_result.get("should_escalate", False),
+                "intent": sofia_result.get("intent", ""),
+            }
+
+        tools = _list_agent_tools(session, agent.id)
         tools_desc = _build_tools_description(tools)
 
         system_prompt = agent.system_prompt.strip() or "Eres un asistente util y claro."
@@ -1708,8 +1839,20 @@ class TextAgentController:
             if row.role in {"user", "assistant"}
         ]
 
-        tools = _list_agent_tools(session, agent.id)
         rag_context = _retrieve_rag_context(session, agent.id, message_text)
+
+        if agent.sofia_mode:
+            try:
+                sofia_result = await _run_sofia_chat(
+                    agent, conversation, history, message_text, rag_context, session,
+                    sender_phone=sender,
+                )
+                return sofia_result["response"]
+            except Exception:
+                logger.exception("Sofia graph error")
+                return "Lo siento, ocurrió un error. En breve un asesor se comunicará con usted."
+
+        tools = _list_agent_tools(session, agent.id)
         tools_desc = _build_tools_description(tools)
 
         system_prompt = agent.system_prompt.strip() or "Eres un asistente util y claro."
@@ -1749,3 +1892,107 @@ class TextAgentController:
         session.commit()
 
         return assistant_content
+
+
+# ── Sofia helpers ────────────────────────────────────────────────────────────
+
+async def _run_sofia_chat(
+    agent: TextAgent,
+    conversation: TextConversation,
+    history: list[dict[str, str]],
+    user_message: str,
+    rag_context: str,
+    session: SessionDep,
+    sender_phone: str = "",
+) -> dict[str, Any]:
+    try:
+        sofia_config = json.loads(agent.sofia_config_json or "{}")
+    except (json.JSONDecodeError, TypeError):
+        sofia_config = {}
+
+    user_msg_count = sum(1 for m in history if m["role"] == "user")
+
+    sofia_result = await run_sofia(
+        user_message=user_message,
+        history=history,
+        rag_context=rag_context,
+        message_count=user_msg_count,
+        system_prompt_override=agent.system_prompt.strip(),
+        config=sofia_config,
+    )
+
+    assistant_content = sofia_result.get("response", "")
+
+    session.add(
+        TextMessage(
+            conversation_id=conversation.id,
+            role="assistant",
+            content=assistant_content,
+            provider=agent.provider,
+            model=agent.model,
+        )
+    )
+
+    if sofia_result.get("should_escalate"):
+        now = _utcnow()
+        conversation.escalation_status = "pending"
+        conversation.escalation_reason = sofia_result.get("escalation_reason", "user_request")
+        conversation.escalated_at = now
+
+        if sender_phone:
+            _notify_advisor_whatsapp(
+                agent, session, sender_phone,
+                sofia_result.get("escalation_reason", ""),
+                user_message,
+            )
+
+    conversation.updated_at = _utcnow()
+    session.add(conversation)
+    session.commit()
+
+    return sofia_result
+
+
+def _notify_advisor_whatsapp(
+    agent: TextAgent,
+    session: SessionDep,
+    sender_phone: str,
+    reason: str,
+    summary: str,
+) -> None:
+    try:
+        sofia_config = json.loads(agent.sofia_config_json or "{}")
+    except (json.JSONDecodeError, TypeError):
+        sofia_config = {}
+
+    advisor_phone = sofia_config.get("advisor_phone", "")
+    if not advisor_phone:
+        return
+
+    wa_config = session.exec(
+        select(TextAgentWhatsApp).where(
+            TextAgentWhatsApp.text_agent_id == agent.id,
+            TextAgentWhatsApp.active == True,
+        )
+    ).first()
+
+    if not wa_config:
+        return
+
+    notification = ADVISOR_NOTIFICATION_TEMPLATE.format(
+        sender_phone=sender_phone,
+        reason=reason,
+        summary=summary[:200],
+    )
+
+    try:
+        if wa_config.provider == "meta" and wa_config.access_token_encrypted and wa_config.phone_number_id:
+            access_token = decrypt_secret(wa_config.access_token_encrypted)
+            _send_meta_message(access_token, wa_config.phone_number_id, advisor_phone, notification)
+        elif wa_config.provider == "twilio" and wa_config.account_sid and wa_config.auth_token_encrypted:
+            auth_token = decrypt_secret(wa_config.auth_token_encrypted)
+            from_number = f"whatsapp:{wa_config.phone_number}"
+            to_number = f"whatsapp:{advisor_phone}"
+            _send_twilio_message(wa_config.account_sid, auth_token, from_number, to_number, notification)
+    except Exception:
+        logger.exception("Failed to notify advisor via WhatsApp")

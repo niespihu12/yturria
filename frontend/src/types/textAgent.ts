@@ -24,6 +24,8 @@ export type TextAgentSummary = {
   language: string
   temperature: number
   max_tokens: number
+  sofia_mode: boolean
+  sofia_config_json: string
   created_at_unix_secs: number
   updated_at_unix_secs: number
   owner_user_id?: string
@@ -81,6 +83,26 @@ export type TextConversation = {
   updated_at_unix_secs: number
   message_count: number
   last_message_preview: string
+  escalation_status?: 'none' | 'pending' | 'in_progress' | 'resolved'
+  escalation_reason?: string
+  escalated_at_unix_secs?: number | null
+}
+
+export type EscalationStatus = 'pending' | 'in_progress' | 'resolved'
+
+export type EscalatedConversation = TextConversation & {
+  escalation_status: EscalationStatus
+  escalation_reason: string
+  escalated_at_unix_secs: number
+}
+
+export type SofiaConfig = {
+  advisor_phone: string
+  advisor_name: string
+  business_name: string
+  business_hours: string
+  escalation_phrases: string[]
+  max_response_lines: number
 }
 
 export type TextConversationDetail = {
@@ -127,6 +149,8 @@ export type TextAgentFormValues = {
   welcome_message: string
   temperature: number
   max_tokens: number
+  sofia_mode: boolean
+  sofia_config_json: string
 }
 
 export type TextAgentDetail = TextAgentSummary & {

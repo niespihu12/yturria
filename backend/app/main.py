@@ -15,6 +15,10 @@ from app.routes.webhooks_router import webhooks_router
 from app.utils.roles import PLATFORM_SUPER_ADMIN_EMAILS, normalize_email
 
 
+def _is_mysql_engine() -> bool:
+    return engine.dialect.name == "mysql"
+
+
 def _column_exists(connection, table: str, column: str) -> bool:
     return (
         connection.execute(
@@ -201,12 +205,13 @@ def ensure_kb_index_columns() -> None:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     SQLModel.metadata.create_all(engine)
-    ensure_user_auth_columns()
-    ensure_platform_super_admin_role()
-    ensure_token_auth_columns()
-    ensure_text_agents_content_columns()
-    ensure_text_agent_tools_schema_columns()
-    ensure_kb_index_columns()
+    if _is_mysql_engine():
+        ensure_user_auth_columns()
+        ensure_platform_super_admin_role()
+        ensure_token_auth_columns()
+        ensure_text_agents_content_columns()
+        ensure_text_agent_tools_schema_columns()
+        ensure_kb_index_columns()
     yield
 
 

@@ -8,6 +8,7 @@ import {
   UserGroupIcon,
   ArrowRightStartOnRectangleIcon,
   Cog6ToothIcon,
+  InboxIcon,
 } from '@heroicons/react/24/outline'
 import {
   DevicePhoneMobileIcon as DevicePhoneMobileSolid,
@@ -15,6 +16,7 @@ import {
   Squares2X2Icon as Squares2X2Solid,
   ChatBubbleLeftRightIcon as ChatBubbleLeftRightSolid,
   UserGroupIcon as UserGroupSolid,
+  InboxIcon as InboxSolid,
 } from '@heroicons/react/24/solid'
 import Logo from '@/components/Logo'
 import { getAuthenticatedUser } from '@/api/AuthAPI'
@@ -37,6 +39,12 @@ const baseNavItems = [
     path: '/agentes_texto',
     icon: ChatBubbleLeftRightIcon,
     iconActive: ChatBubbleLeftRightSolid,
+  },
+  {
+    label: 'Bandeja (Escalamientos)',
+    path: '/escalamientos',
+    icon: InboxIcon,
+    iconActive: InboxSolid,
   },
   {
     label: 'Numeros de telefono',
