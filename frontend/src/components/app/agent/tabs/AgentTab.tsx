@@ -45,27 +45,27 @@ const LLM_DESCRIPTIONS: Record<string, string> = {
 const TTS_MODEL_OPTIONS = [
   {
     value: 'eleven_turbo_v2_5',
-    label: 'Turbo v2.5 Â· Ultra baja latencia Â· Recomendado',
+    label: 'Turbo v2.5 · Ultra baja latencia · Recomendado',
   },
   {
     value: 'eleven_flash_v2_5',
-    label: 'Flash v2.5 Â· ~75ms Â· Maxima velocidad',
+    label: 'Flash v2.5 · ~75ms · Maxima velocidad',
   },
   {
     value: 'eleven_multilingual_v2',
-    label: 'Multilingual v2 Â· Alta calidad Â· Multiidioma',
+    label: 'Multilingual v2 · Alta calidad · Multiidioma',
   },
   {
     value: 'eleven_v3',
-    label: 'v3 Â· Mas expresivo Â· 70+ idiomas',
+    label: 'v3 · Mas expresivo · 70+ idiomas',
   },
 ]
 
 const TTS_MODEL_DESCRIPTION: Record<string, string> = {
-  eleven_turbo_v2_5: 'Turbo v2.5 Â· Ultra baja latencia Â· Recomendado',
-  eleven_flash_v2_5: 'Flash v2.5 Â· ~75ms Â· Maxima velocidad',
-  eleven_multilingual_v2: 'Multilingual v2 Â· Alta calidad Â· Multiidioma',
-  eleven_v3: 'v3 Â· Mas expresivo Â· 70+ idiomas',
+  eleven_turbo_v2_5: 'Turbo v2.5 · Ultra baja latencia · Recomendado',
+  eleven_flash_v2_5: 'Flash v2.5 · ~75ms · Maxima velocidad',
+  eleven_multilingual_v2: 'Multilingual v2 · Alta calidad · Multiidioma',
+  eleven_v3: 'v3 · Mas expresivo · 70+ idiomas',
 }
 
 const ChevronDown = () => (
@@ -275,7 +275,7 @@ export default function AgentTab({ register, watch, setValue, errors }: Props) {
                   {voices.map((v) => (
                     <option key={v.voice_id} value={v.voice_id}>
                       {v.name}
-                      {v.category ? ` Â· ${v.category}` : ''}
+                      {v.category ? ` · ${v.category}` : ''}
                     </option>
                   ))}
                 </select>

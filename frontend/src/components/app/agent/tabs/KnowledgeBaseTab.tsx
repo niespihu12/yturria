@@ -633,7 +633,7 @@ export default function KnowledgeBaseTab({ agentId, agent, knowledgeBase, onUpda
               const workspaceDoc = workspaceDocumentMap.get(document.id)
               const supportedUsages = workspaceDoc?.supported_usages ?? ['auto', 'prompt']
               const indexes = ragIndexMap.get(document.id) ?? []
-              // Use saved model for status â€” don't mislead with draft model changes
+              // Use saved model for status - don't mislead with draft model changes
               const statusIndex = indexes.find((i) => i.model === savedEmbeddingModel) ?? indexes[0]
               const rawStatus = ragDraft.enabled
                 ? statusIndex?.status?.toLowerCase?.() ?? 'not_indexed'

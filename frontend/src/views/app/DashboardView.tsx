@@ -455,15 +455,15 @@ export default function DashboardView() {
 
         return {
           time: formatClock(item.timestamp),
-          title: `${agentName ?? item.agentId} Â· ${isVoice ? 'Voz' : 'Texto'}`,
+          title: `${agentName ?? item.agentId} · ${isVoice ? 'Voz' : 'Texto'}`,
           detail: isVoice
             ? `Estado: ${item.status}${
                 typeof item.durationSecs === 'number' && item.durationSecs > 0
-                  ? ` Â· Duracion ${formatDuration(item.durationSecs)}`
+                  ? ` · Duracion ${formatDuration(item.durationSecs)}`
                   : ''
               }`
             : `Canal: ${item.channel}${
-                typeof item.messageCount === 'number' ? ` Â· ${item.messageCount} mensajes` : ''
+                typeof item.messageCount === 'number' ? ` · ${item.messageCount} mensajes` : ''
               }`,
           tag: isVoice ? 'Voz' : item.channel,
         }
@@ -497,7 +497,7 @@ export default function DashboardView() {
       timeline,
       recommendation,
       recommendationBadge,
-      snapshotSummary: `${data.voiceAgents.length} agentes de voz Â· ${data.textAgents.length} agentes de texto Â· ${data.phoneNumbers.length} numeros`,
+      snapshotSummary: `${data.voiceAgents.length} agentes de voz · ${data.textAgents.length} agentes de texto · ${data.phoneNumbers.length} numeros`,
       loadedAtText: formatClock(Math.floor(data.loadedAt / 1000)),
     }
   }, [data])
@@ -725,7 +725,7 @@ export default function DashboardView() {
                       <div className="mb-1.5 flex items-center justify-between text-sm">
                         <p className="font-medium text-[#1a1a2f]/80">{item.label}</p>
                         <p className="font-semibold text-[#1a1a2f]">
-                          {item.value}% Â· {item.detail}
+                          {item.value}% · {item.detail}
                         </p>
                       </div>
                       <div className="h-2.5 rounded-full bg-[#f1eefc]">

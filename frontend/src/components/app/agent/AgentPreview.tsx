@@ -31,10 +31,7 @@ type VoiceSdkModule = {
 }
 
 async function loadVoiceSdk(): Promise<VoiceSdkModule> {
-  const scope = '@'
-  const vendor = ['ele', 'ven', 'labs'].join('')
-  const moduleName = `${scope}${vendor}/client`
-  return (await import(moduleName)) as unknown as VoiceSdkModule
+  return (await import('@elevenlabs/client')) as unknown as VoiceSdkModule
 }
 
 export default function AgentPreview({ agentId, agentName, isDirty, onSave }: Props) {
@@ -77,7 +74,7 @@ export default function AgentPreview({ agentId, agentName, isDirty, onSave }: Pr
           convRef.current = null
         },
         onError: (msg: string) => {
-          setErrorMsg(msg ?? 'Error de conexiÃ³n')
+          setErrorMsg(msg ?? 'Error de conexion')
           setStatus('error')
           convRef.current = null
         },
@@ -122,7 +119,7 @@ export default function AgentPreview({ agentId, agentName, isDirty, onSave }: Pr
         <div className="mx-3 mt-3 flex shrink-0 items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
           <ExclamationTriangleIcon className="w-3.5 h-3.5 text-amber-500 shrink-0" />
           <p className="text-xs text-amber-700 leading-tight">
-            Cambios sin guardar â€” se guardarÃ¡n antes de llamar.
+            Cambios sin guardar - se guardaran antes de llamar.
           </p>
         </div>
       )}
@@ -175,20 +172,20 @@ export default function AgentPreview({ agentId, agentName, isDirty, onSave }: Pr
             <>
               <p className="text-black/80 text-sm font-medium">Listo para llamar</p>
               <p className="text-black/45 text-xs">
-                {isDirty ? 'Se guardarÃ¡ antes de llamar' : 'Prueba el agente en tiempo real'}
+                {isDirty ? 'Se guardara antes de llamar' : 'Prueba el agente en tiempo real'}
               </p>
             </>
           )}
           {status === 'saving' && (
             <>
               <p className="text-[#271173] text-sm font-medium">Guardando cambios...</p>
-              <p className="text-black/45 text-xs">Aplicando configuraciÃ³n</p>
+              <p className="text-black/45 text-xs">Aplicando configuracion</p>
             </>
           )}
           {status === 'connecting' && (
             <>
               <p className="text-[#271173] text-sm font-medium">Conectando...</p>
-              <p className="text-black/45 text-xs">Iniciando sesiÃ³n de voz</p>
+              <p className="text-black/45 text-xs">Iniciando sesion de voz</p>
             </>
           )}
           {status === 'active' && (
@@ -232,7 +229,7 @@ export default function AgentPreview({ agentId, agentName, isDirty, onSave }: Pr
                 />
               ))}
             </div>
-            <span className="text-xs text-black/50">MicrÃ³fono activo</span>
+            <span className="text-xs text-black/50">Microfono activo</span>
           </div>
         )}
       </div>
@@ -274,7 +271,7 @@ export default function AgentPreview({ agentId, agentName, isDirty, onSave }: Pr
             Colgar
           </button>
         )}
-        <p className="text-center text-xs text-black/40">Requiere micrÃ³fono habilitado</p>
+        <p className="text-center text-xs text-black/40">Requiere microfono habilitado</p>
       </div>
     </div>
   )

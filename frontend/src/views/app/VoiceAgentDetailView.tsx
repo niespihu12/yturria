@@ -23,7 +23,7 @@ import AgentPreview from '@/components/app/agent/AgentPreview'
 const TABS = [
   { id: 'agent', label: 'Agente', icon: CpuChipIcon },
   { id: 'knowledge', label: 'Bases de conocimiento', icon: BookOpenIcon },
-  { id: 'analysis', label: 'AnÃ¡lisis', icon: ChartBarIcon },
+  { id: 'analysis', label: 'Analisis', icon: ChartBarIcon },
   { id: 'tools', label: 'Herramientas', icon: WrenchScrewdriverIcon },
 ] as const
 
@@ -539,7 +539,7 @@ function buildUpdatePayload(
           tools: [...customTools, ...systemTools],
           tool_ids: selectedToolIds,
           ...(builtInTools !== undefined ? { built_in_tools: builtInTools } : {}),
-          // Preserve RAG as-is â€” managed exclusively by KnowledgeBaseTab
+          // Preserve RAG as-is - managed exclusively by KnowledgeBaseTab
           rag: currentRag,
         },
         first_message: values.first_message,
@@ -582,7 +582,7 @@ function buildUpdatePayload(
   }
 }
 
-// Inner component: only mounts after agent data is available â†’ no flash
+// Inner component: only mounts after agent data is available -> no flash
 function VoiceAgentForm({ id, initialAgent }: { id: string; initialAgent: AgentDetail }) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -609,7 +609,7 @@ function VoiceAgentForm({ id, initialAgent }: { id: string; initialAgent: AgentD
   // Keep a ref to the latest agent for buildUpdatePayload (refreshed after background refetches)
   const agentRef = useRef<AgentDetail>(initialAgent)
 
-  // Subscribe to query updates â€” agent might refetch in background
+  // Subscribe to query updates - agent might refetch in background
   const { data: agent } = useQuery({
     queryKey: ['agent', id],
     queryFn: () => getAgent(id),
@@ -972,7 +972,7 @@ export default function VoiceAgentDetailView() {
           onClick={() => navigate('/agentes_voz')}
           className="text-[#271173] hover:text-[#1f0d5a] text-sm transition-colors"
         >
-          â† Volver
+          ← Volver
         </button>
       </div>
     )

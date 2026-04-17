@@ -427,7 +427,7 @@ function ConversationDetailModal({
                             Audio de la llamada
                           </p>
                           <p className="text-xs text-black/60">
-                            Reproduce y valida esta conversaciÃ³n sin salir del anÃ¡lisis.
+                            Reproduce y valida esta conversacion sin salir del analisis.
                           </p>
                         </div>
                       </div>
@@ -460,7 +460,7 @@ function ConversationDetailModal({
                           rel="noreferrer"
                           className="inline-flex items-center gap-1.5 rounded-lg border border-[#271173]/30 bg-white px-3 py-1.5 text-xs font-medium text-[#271173] transition-colors hover:bg-[#f5f3ff]"
                         >
-                          Abrir en pestaÃ±a
+                          Abrir en pestana
                         </a>
                         <a
                           href={conversationAudioUrl}
