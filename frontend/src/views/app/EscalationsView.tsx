@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { InboxIcon, ClockIcon, CheckCircleIcon, ExclamationCircleIcon } from '@heroicons/react/24/outline'
+import { CheckCircleIcon, ExclamationCircleIcon } from '@heroicons/react/24/outline'
 import { getTextAgents, getEscalations } from '@/api/TextAgentsAPI'
 import type { TextAgentSummary, EscalatedConversation } from '@/types/textAgent'
 import EscalationDetailModal from '@/components/app/escalations/EscalationDetailModal'
@@ -66,7 +66,7 @@ export default function EscalationsView() {
                 value={selectedAgentId}
                 onChange={(e) => setSelectedAgentId(e.target.value)}
                 disabled={isLoadingAgents || agents.length === 0}
-                className="rounded-xl border border-[#e4e0f5] bg-white px-3 py-2.5 text-sm text-black transition-colors focus:border-[#271173] focus:outline-none min-w-[200px]"
+                className="min-w-50 rounded-xl border border-[#e4e0f5] bg-white px-3 py-2.5 text-sm text-black transition-colors focus:border-[#271173] focus:outline-none"
               >
                 {isLoadingAgents && <option value="">Cargando agentes...</option>}
                 {!isLoadingAgents && agents.length === 0 && <option value="">No hay agentes disponibles</option>}

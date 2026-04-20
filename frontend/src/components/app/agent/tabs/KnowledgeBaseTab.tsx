@@ -33,6 +33,7 @@ type Props = {
   agent: AgentDetail
   knowledgeBase: KnowledgeBaseItem[]
   onUpdate: () => void
+  isClient?: boolean
 }
 
 type UploadMode = 'file' | 'url' | 'text'
@@ -142,7 +143,7 @@ function TogglePill({
   )
 }
 
-export default function KnowledgeBaseTab({ agentId, agent, knowledgeBase, onUpdate }: Props) {
+export default function KnowledgeBaseTab({ agentId, agent, knowledgeBase, onUpdate, isClient = false }: Props) {
   const fileRef = useRef<HTMLInputElement>(null)
   const queryClient = useQueryClient()
   const [uploadMode, setUploadMode] = useState<UploadMode>('file')
@@ -747,6 +748,7 @@ export default function KnowledgeBaseTab({ agentId, agent, knowledgeBase, onUpda
       </section>
 
       {/* RAG Config */}
+      {!isClient && (
       <section className="rounded-2xl border border-[#e4e0f5] bg-white p-5 shadow-sm">
         <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -915,6 +917,7 @@ export default function KnowledgeBaseTab({ agentId, agent, knowledgeBase, onUpda
           </button>
         </div>
       </section>
+      )}
     </div>
   )
 }

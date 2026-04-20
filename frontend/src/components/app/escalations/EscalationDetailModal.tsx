@@ -38,7 +38,7 @@ export default function EscalationDetailModal({ agentId, conversationId, onClose
         <div className="flex items-center justify-between border-b border-[#e4e0f5] px-6 py-4">
           <div>
             <h2 className="text-xl font-bold text-black">Detalle de Conversación</h2>
-            <p className="mt-1 text-sm text-black/60 font-mono text-xs">{conversationId}</p>
+            <p className="mt-1 text-xs text-black/60 font-mono">{conversationId}</p>
           </div>
           <button
             onClick={onClose}
@@ -65,7 +65,6 @@ export default function EscalationDetailModal({ agentId, conversationId, onClose
               ) : (
                 detail.transcript.map((msg, idx) => {
                   const isSystem = msg.role === 'system'
-                  const isAssistant = msg.role === 'assistant'
                   const isUser = msg.role === 'user'
                   
                   if (isSystem) return null

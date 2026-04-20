@@ -15,6 +15,7 @@ class TextAgentTool(SQLModel, table=True):
     endpoint_url: str = Field(nullable=False)
     http_method: str = Field(default="POST", nullable=False)
     headers_json: str = Field(default="{}", nullable=False)
+    body_template: str = Field(default="", nullable=False)
     parameters_schema_json: str = Field(sa_column=Column(Text, nullable=False), default="{}")
     response_mapping_json: str = Field(sa_column=Column(Text, nullable=False), default="{}")
     enabled: bool = Field(default=True, nullable=False)

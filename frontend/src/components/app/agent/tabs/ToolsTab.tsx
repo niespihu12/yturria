@@ -31,6 +31,7 @@ type Props = {
     params: Record<string, unknown>
   ) => void
   onWorkspaceToolToggle: (toolId: string, enabled: boolean) => void
+  isClient?: boolean
 }
 
 type CreateToolPayload = Parameters<typeof createTool>[0]
@@ -1399,6 +1400,7 @@ export default function ToolsTab({
   onSystemToolToggle,
   onSystemToolParamsChange,
   onWorkspaceToolToggle,
+  isClient = false,
 }: Props) {
   const queryClient = useQueryClient()
   const [search, setSearch] = useState('')
@@ -1476,7 +1478,9 @@ export default function ToolsTab({
     )
   })
 
+  const CLIENT_ALLOWED_SYSTEM_TOOLS = ['end_call', 'transfer_to_number', 'voicemail_detection']
   const filteredSystemTools = SYSTEM_TOOLS.filter((tool) => {
+    if (isClient && !CLIENT_ALLOWED_SYSTEM_TOOLS.includes(tool.name)) return false
     if (!search) return true
     const query = search.toLowerCase()
     return (
@@ -1880,6 +1884,7 @@ export default function ToolsTab({
       </div>
 
       {/* Workspace tools */}
+      {!isClient && (
       <div className="overflow-hidden rounded-xl border border-[#e4e0f5] bg-white">
         <div className="flex items-center justify-between border-b border-[#e4e0f5] bg-linear-to-r from-[#f5f3ff] to-white px-5 py-4">
           <div className="flex items-center gap-2.5">
@@ -1902,14 +1907,16 @@ export default function ToolsTab({
               </span>
               <span className="text-xs font-medium text-black/60">adjuntas</span>
             </div>
-            <button
-              type="button"
-              onClick={() => setShowCreateModal(true)}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-[#271173]/20 bg-[#f5f3ff] px-3 py-1.5 text-xs font-medium text-[#271173] transition-colors hover:bg-[#ede9ff]"
-            >
-              <PlusIcon className="h-3.5 w-3.5" />
-              Nueva
-            </button>
+            {!isClient && (
+              <button
+                type="button"
+                onClick={() => setShowCreateModal(true)}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-[#271173]/20 bg-[#f5f3ff] px-3 py-1.5 text-xs font-medium text-[#271173] transition-colors hover:bg-[#ede9ff]"
+              >
+                <PlusIcon className="h-3.5 w-3.5" />
+                Nueva
+              </button>
+            )}
           </div>
         </div>
 
@@ -2026,6 +2033,7 @@ export default function ToolsTab({
           )}
         </div>
       </div>
+      )}
 
       {/* Embedded tools */}
       <div className="rounded-xl border border-[#e4e0f5] bg-white p-5">
@@ -2107,7 +2115,7 @@ export default function ToolsTab({
         </div>
       </div>
 
-      {showCreateModal && (
+      {showCreateModal && !isClient && (
         <CreateToolModal
           onClose={() => setShowCreateModal(false)}
           onCreated={() => queryClient.invalidateQueries({ queryKey: ['workspace-tools'] })}

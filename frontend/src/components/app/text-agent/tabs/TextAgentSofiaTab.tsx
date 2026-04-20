@@ -31,8 +31,8 @@ const labelClass = 'mb-1.5 block text-xs font-semibold uppercase tracking-wide t
 const DEFAULT_CONFIG: SofiaConfig = {
   advisor_phone: '',
   advisor_name: '',
-  business_name: 'Yturria Seguros',
-  business_hours: 'Lun-Vie 9:00-18:00',
+  business_name: '',
+  business_hours: '',
   escalation_phrases: [
     'quiero hablar con alguien',
     'necesito un asesor',
@@ -40,6 +40,11 @@ const DEFAULT_CONFIG: SofiaConfig = {
     'hablar con una persona',
   ],
   max_response_lines: 3,
+  escalation_threshold: 4,
+  company_name: '',
+  company_years: '',
+  carriers: '',
+  legal_disclaimer: '',
 }
 
 const STATUS_CONFIG: Record<EscalationStatus, { label: string; color: string; icon: typeof CheckCircleIcon }> = {
@@ -54,7 +59,9 @@ export default function TextAgentSofiaTab({ agentId, sofiaMode, sofiaConfigJson,
   const [config, setConfig] = useState<SofiaConfig>(() => {
     try {
       const parsed = JSON.parse(sofiaConfigJson || '{}')
-      return { ...DEFAULT_CONFIG, ...parsed }
+      const merged = { ...DEFAULT_CONFIG, ...parsed }
+      if (!merged.company_name && merged.business_name) merged.company_name = merged.business_name
+      return merged
     } catch {
       return DEFAULT_CONFIG
     }
@@ -65,7 +72,9 @@ export default function TextAgentSofiaTab({ agentId, sofiaMode, sofiaConfigJson,
   useEffect(() => {
     try {
       const parsed = JSON.parse(sofiaConfigJson || '{}')
-      setConfig({ ...DEFAULT_CONFIG, ...parsed })
+      const merged = { ...DEFAULT_CONFIG, ...parsed }
+      if (!merged.company_name && merged.business_name) merged.company_name = merged.business_name
+      setConfig(merged)
     } catch {
       setConfig(DEFAULT_CONFIG)
     }
@@ -149,18 +158,31 @@ export default function TextAgentSofiaTab({ agentId, sofiaMode, sofiaConfigJson,
           <div className="space-y-4 rounded-xl border border-[#e4e0f5] bg-white p-5">
             <h4 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-black/50">
               <BuildingOffice2Icon className="h-4 w-4" />
-              Información del Negocio
+              Perfil del Negocio
             </h4>
+            <p className="text-xs text-black/40">
+              Vacío = usa el perfil de tenant configurado en el servidor. Rellena para sobrescribir por agente.
+            </p>
 
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
-                <label className={labelClass}>Nombre del negocio</label>
+                <label className={labelClass}>Nombre de la empresa</label>
                 <input
                   type="text"
                   className={inputClass}
-                  value={config.business_name}
-                  onChange={(e) => updateConfig({ business_name: e.target.value })}
-                  placeholder="Yturria Seguros"
+                  value={config.company_name ?? ''}
+                  onChange={(e) => updateConfig({ company_name: e.target.value, business_name: e.target.value })}
+                  placeholder="Ej. Yturria Agente de Seguros"
+                />
+              </div>
+              <div>
+                <label className={labelClass}>Años en el mercado</label>
+                <input
+                  type="text"
+                  className={inputClass}
+                  value={config.company_years ?? ''}
+                  onChange={(e) => updateConfig({ company_years: e.target.value })}
+                  placeholder="Ej. 75"
                 />
               </div>
               <div>
@@ -176,6 +198,27 @@ export default function TextAgentSofiaTab({ agentId, sofiaMode, sofiaConfigJson,
                   placeholder="Lun-Vie 9:00-18:00"
                 />
               </div>
+              <div>
+                <label className={labelClass}>Aseguradoras con las que trabaja</label>
+                <input
+                  type="text"
+                  className={inputClass}
+                  value={config.carriers ?? ''}
+                  onChange={(e) => updateConfig({ carriers: e.target.value })}
+                  placeholder="GNP, AXA, Chubb, MetLife…"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className={labelClass}>Aviso legal (se agrega al primer mensaje)</label>
+              <textarea
+                className={`${inputClass} resize-none`}
+                rows={3}
+                value={config.legal_disclaimer ?? ''}
+                onChange={(e) => updateConfig({ legal_disclaimer: e.target.value })}
+                placeholder="Ej. Los rangos de precio son orientativos y no constituyen una oferta formal…"
+              />
             </div>
           </div>
 
@@ -238,6 +281,32 @@ export default function TextAgentSofiaTab({ agentId, sofiaMode, sofiaConfigJson,
               />
               <div className="mt-1 flex justify-between text-[10px] text-black/40">
                 <span>1</span><span>10</span>
+              </div>
+            </div>
+
+            <div>
+              <div className="mb-2 flex items-center justify-between">
+                <div>
+                  <label className={labelClass}>Mensajes antes de escalar automáticamente</label>
+                  <p className="text-[10px] text-black/40">
+                    Si el usuario envía este número de mensajes sin resolver, se escala al asesor
+                  </p>
+                </div>
+                <span className="ml-3 shrink-0 rounded-lg bg-[#ede9ff] px-2.5 py-0.5 text-xs font-semibold tabular-nums text-[#271173]">
+                  {config.escalation_threshold}
+                </span>
+              </div>
+              <input
+                type="range"
+                min={1}
+                max={20}
+                step={1}
+                value={config.escalation_threshold}
+                onChange={(e) => updateConfig({ escalation_threshold: parseInt(e.target.value, 10) })}
+                className="w-full h-1.5 rounded-full appearance-none bg-[#e4e0f5] cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[#271173] [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:shadow-md [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white"
+              />
+              <div className="mt-1 flex justify-between text-[10px] text-black/40">
+                <span>1</span><span>20</span>
               </div>
             </div>
           </div>

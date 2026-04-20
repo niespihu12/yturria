@@ -1,5 +1,8 @@
 from app.models.Token import Token
+from app.models.AuditTrailEvent import AuditTrailEvent
+from app.models.DataPrivacyRequest import DataPrivacyRequest
 from app.models.TextAgent import TextAgent
+from app.models.TextAppointment import TextAppointment
 from app.models.TextAgentKnowledgeBase import TextAgentKnowledgeBase
 from app.models.TextAgentTool import TextAgentTool
 from app.models.TextAgentWhatsApp import TextAgentWhatsApp
@@ -15,7 +18,10 @@ from app.models.UserTool import UserTool
 
 __all__ = [
 	"Token",
+	"AuditTrailEvent",
+	"DataPrivacyRequest",
 	"TextAgent",
+	"TextAppointment",
 	"TextAgentKnowledgeBase",
 	"TextAgentTool",
 	"TextAgentWhatsApp",

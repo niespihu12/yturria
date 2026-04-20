@@ -19,6 +19,7 @@ import KnowledgeBaseTab from '@/components/app/agent/tabs/KnowledgeBaseTab'
 import AnalysisTab from '@/components/app/agent/tabs/AnalysisTab'
 import ToolsTab from '@/components/app/agent/tabs/ToolsTab'
 import AgentPreview from '@/components/app/agent/AgentPreview'
+import { useCurrentUser } from '@/hooks/useCurrentUser'
 
 const TABS = [
   { id: 'agent', label: 'Agente', icon: CpuChipIcon },
@@ -251,6 +252,32 @@ const SYSTEM_TOOL_TYPE_BY_NAME: Record<string, string> = {
   transfer_to_number: 'transfer_to_number',
   dtmf: 'play_keypad_touch_tone',
   voicemail_detection: 'voicemail_detection',
+}
+
+const CLIENT_ALLOWED_SYSTEM_TOOLS = [
+  'end_call',
+  'transfer_to_number',
+  'voicemail_detection',
+]
+
+function normalizeClientEnabledSystemTools(tools: string[]): string[] {
+  const next = tools.filter((tool) => CLIENT_ALLOWED_SYSTEM_TOOLS.includes(tool))
+  for (const required of CLIENT_ALLOWED_SYSTEM_TOOLS) {
+    if (!next.includes(required)) {
+      next.push(required)
+    }
+  }
+  return next
+}
+
+function filterClientSystemToolParams(
+  paramsByName: SystemToolParamsMap
+): SystemToolParamsMap {
+  const next: SystemToolParamsMap = {}
+  for (const toolName of CLIENT_ALLOWED_SYSTEM_TOOLS) {
+    next[toolName] = normalizeSystemToolParams(toolName, paramsByName[toolName])
+  }
+  return next
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -586,6 +613,8 @@ function buildUpdatePayload(
 function VoiceAgentForm({ id, initialAgent }: { id: string; initialAgent: AgentDetail }) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const { isSuperAdmin } = useCurrentUser()
+  const isClient = !isSuperAdmin
   const [activeTab, setActiveTab] = useState<TabId>('agent')
   const [editingName, setEditingName] = useState(false)
   const [enabledSystemTools, setEnabledSystemTools] = useState<string[]>(() =>
@@ -635,6 +664,15 @@ function VoiceAgentForm({ id, initialAgent }: { id: string; initialAgent: AgentD
   })
 
   const autoLanguageDetection = watch('auto_language_detection')
+
+  useEffect(() => {
+    if (!isClient) return
+
+    setEnabledSystemTools((prev) => normalizeClientEnabledSystemTools(prev))
+    setInitialSystemTools((prev) => normalizeClientEnabledSystemTools(prev))
+    setSystemToolParamsByName((prev) => filterClientSystemToolParams(prev))
+    setInitialSystemToolParamsByName((prev) => filterClientSystemToolParams(prev))
+  }, [isClient])
 
   // Keep Agent tab toggle in sync with the language_detection system tool.
   useEffect(() => {
@@ -693,24 +731,32 @@ function VoiceAgentForm({ id, initialAgent }: { id: string; initialAgent: AgentD
 
   const { mutate: save, mutateAsync: saveAsync, isPending: isSaving } = useMutation({
     mutationFn: (values: AgentFormValues) => {
+      const systemToolsForSave = isClient
+        ? normalizeClientEnabledSystemTools(enabledSystemTools)
+        : enabledSystemTools
+
       const configError = getSystemToolsConfigError(
-        enabledSystemTools,
+        systemToolsForSave,
         systemToolParamsByName
       )
       if (configError) {
         throw new Error(configError)
       }
 
-      return updateAgent(
-        id,
-        buildUpdatePayload(
-          agentRef.current,
-          values,
-          enabledSystemTools,
-          selectedToolIds,
-          systemToolParamsByName
-        )
+      const payload = buildUpdatePayload(
+        agentRef.current,
+        values,
+        systemToolsForSave,
+        selectedToolIds,
+        systemToolParamsByName
       )
+
+      if (isClient) {
+        payload.conversation_config.agent.prompt.llm = 'gpt-4.1-mini'
+        payload.conversation_config.tts.model_id = 'eleven_turbo_v2_5'
+      }
+
+      return updateAgent(id, payload)
     },
     onSuccess: (updatedAgent, values) => {
       toast.success('Cambios guardados')
@@ -728,8 +774,12 @@ function VoiceAgentForm({ id, initialAgent }: { id: string; initialAgent: AgentD
       if (hasAgentShape) {
         const nextAgent = updatedAgent as AgentDetail
         const nextDefaults = buildDefaultValues(nextAgent, values)
-        const nextSystemTools = buildSystemTools(nextAgent)
-        const nextSystemToolParams = buildSystemToolParamsMap(nextAgent)
+        const nextSystemTools = isClient
+          ? normalizeClientEnabledSystemTools(buildSystemTools(nextAgent))
+          : buildSystemTools(nextAgent)
+        const nextSystemToolParams = isClient
+          ? filterClientSystemToolParams(buildSystemToolParamsMap(nextAgent))
+          : buildSystemToolParamsMap(nextAgent)
         const nextToolIds = buildToolIds(nextAgent)
 
         agentRef.current = nextAgent
@@ -895,6 +945,7 @@ function VoiceAgentForm({ id, initialAgent }: { id: string; initialAgent: AgentD
                 watch={watch}
                 setValue={setValue}
                 errors={errors}
+                isClient={isClient}
               />
             </div>
           )}
@@ -905,6 +956,7 @@ function VoiceAgentForm({ id, initialAgent }: { id: string; initialAgent: AgentD
                 agent={agent}
                 knowledgeBase={knowledgeBase}
                 onUpdate={() => queryClient.invalidateQueries({ queryKey: ['agent', id] })}
+                isClient={isClient}
               />
             </div>
           )}
@@ -914,6 +966,7 @@ function VoiceAgentForm({ id, initialAgent }: { id: string; initialAgent: AgentD
                 agentId={id}
                 agent={agent}
                 onUpdate={() => queryClient.invalidateQueries({ queryKey: ['agent', id] })}
+                isClient={isClient}
               />
             </div>
           )}
@@ -927,6 +980,7 @@ function VoiceAgentForm({ id, initialAgent }: { id: string; initialAgent: AgentD
                 onSystemToolToggle={handleSystemToolToggle}
                 onSystemToolParamsChange={handleSystemToolParamsChange}
                 onWorkspaceToolToggle={handleWorkspaceToolToggle}
+                isClient={isClient}
               />
             </div>
           )}

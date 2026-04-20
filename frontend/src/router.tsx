@@ -16,11 +16,15 @@ import SettingsView from '@/views/app/SettingsView'
 import DashboardView from '@/views/app/DashboardView'
 import AdminUsersView from '@/views/app/AdminUsersView'
 import EscalationsView from '@/views/app/EscalationsView'
+import AppointmentsView from '@/views/app/AppointmentsView'
+import TextAgentEmbedView from '@/views/embed/TextAgentEmbedView'
 
 export default function Router() {
   return (
     <BrowserRouter>
       <Routes>
+        <Route path="/embed/text-agent/:id" element={<TextAgentEmbedView />} />
+
         {/* Auth routes */}
         <Route element={<AuthLayout />}>
           <Route path="/auth/login" element={<LoginView />} />
@@ -39,6 +43,7 @@ export default function Router() {
           <Route path="/agentes_texto" element={<TextAgentsView />} />
           <Route path="/agentes_texto/:id" element={<TextAgentDetailView />} />
           <Route path="/escalamientos" element={<EscalationsView />} />
+          <Route path="/citas" element={<AppointmentsView />} />
           <Route path="/numeros_telefono" element={<PhoneNumbersView />} />
           <Route path="/admin/usuarios" element={<AdminUsersView />} />
           <Route path="/configuracion" element={<SettingsView />} />

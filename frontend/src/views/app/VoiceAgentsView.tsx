@@ -12,6 +12,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { createAgent, deleteAgent, getAgents } from '@/api/VoiceRuntimeAPI'
 import type { AgentListItem } from '@/types/agent'
+import { useCurrentUser } from '@/hooks/useCurrentUser'
 
 type CreateForm = { name: string }
 
@@ -29,6 +30,7 @@ export default function VoiceAgentsView() {
   const queryClient = useQueryClient()
   const [showModal, setShowModal] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const { isSuperAdmin } = useCurrentUser()
 
   const scopedUserId = searchParams.get('user_id') || undefined
 
@@ -38,6 +40,7 @@ export default function VoiceAgentsView() {
   })
 
   const agents: AgentListItem[] = data?.agents ?? []
+  const canCreate = isSuperAdmin || agents.length < 1
 
   const {
     register,
@@ -108,13 +111,15 @@ export default function VoiceAgentsView() {
             </p>
           </div>
 
-          <button
-            onClick={() => setShowModal(true)}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#271173] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#1f0d5a]"
-          >
-            <PlusIcon className="w-4 h-4" />
-            Nuevo agente
-          </button>
+          {canCreate && (
+            <button
+              onClick={() => setShowModal(true)}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#271173] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#1f0d5a]"
+            >
+              <PlusIcon className="w-4 h-4" />
+              Nuevo agente
+            </button>
+          )}
         </div>
       </section>
 
@@ -145,12 +150,14 @@ export default function VoiceAgentsView() {
               <PhoneIcon className="h-6 w-6 text-[#271173]" />
             </div>
             <p className="text-sm text-black/60">No hay agentes todavia</p>
-            <button
-              onClick={() => setShowModal(true)}
-              className="text-sm font-medium text-[#271173] transition-colors hover:text-[#1f0d5a]"
-            >
-              Crea tu primer agente
-            </button>
+            {canCreate && (
+              <button
+                onClick={() => setShowModal(true)}
+                className="text-sm font-medium text-[#271173] transition-colors hover:text-[#1f0d5a]"
+              >
+                Crea tu primer agente
+              </button>
+            )}
           </div>
         ) : (
           <table className="w-full">

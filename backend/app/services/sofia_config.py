@@ -1,10 +1,16 @@
 from dataclasses import dataclass, field
 
+from app.utils.client_defaults import TENANT
+
 
 @dataclass
 class SofiaConfig:
-    company_name: str = "Yturria Agente de Seguros"
-    company_years: str = "75"
+    company_name: str = field(default_factory=lambda: TENANT.company_name)
+    company_years: str = field(default_factory=lambda: TENANT.company_years)
+    business_hours: str = field(default_factory=lambda: TENANT.business_hours)
+    company_context: str = field(default_factory=lambda: TENANT.company_context)
+    carriers: str = field(default_factory=lambda: TENANT.carriers)
+    legal_disclaimer: str = field(default_factory=lambda: TENANT.legal_disclaimer)
     escalation_threshold: int = 4
     temperature: float = 0.3
     max_tokens: int = 256

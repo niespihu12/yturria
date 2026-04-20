@@ -16,6 +16,7 @@ import {
   updatePhoneNumber,
 } from '@/api/VoiceRuntimeAPI'
 import type { AgentListItem, PhoneNumber } from '@/types/agent'
+import { useCurrentUser } from '@/hooks/useCurrentUser'
 
 type TwilioFormState = {
   label: string
@@ -56,6 +57,7 @@ export default function PhoneNumbersView() {
   const [showImportModal, setShowImportModal] = useState(false)
   const [form, setForm] = useState<TwilioFormState>(emptyForm)
   const [updatingPhoneId, setUpdatingPhoneId] = useState<string | null>(null)
+  const { isSuperAdmin } = useCurrentUser()
 
   const scopedUserId = searchParams.get('user_id') || undefined
 
@@ -71,6 +73,7 @@ export default function PhoneNumbersView() {
 
   const phoneNumbers: PhoneNumber[] = phoneNumbersData ?? []
   const agents: AgentListItem[] = agentsData?.agents ?? []
+  const canImport = isSuperAdmin || phoneNumbers.length < 1
 
   const { mutate: importTwilioNumber, isPending: isImporting } = useMutation({
     mutationFn: () => createTwilioPhoneNumber(form),
@@ -121,14 +124,16 @@ export default function PhoneNumbersView() {
             </p>
           </div>
 
-          <button
-            type="button"
-            onClick={() => setShowImportModal(true)}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#271173] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#1f0d5a]"
-          >
-            <PlusIcon className="h-4 w-4" />
-            Importar Twilio
-          </button>
+          {canImport && (
+            <button
+              type="button"
+              onClick={() => setShowImportModal(true)}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#271173] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#1f0d5a]"
+            >
+              <PlusIcon className="h-4 w-4" />
+              Importar Twilio
+            </button>
+          )}
         </div>
       </section>
 
@@ -162,13 +167,15 @@ export default function PhoneNumbersView() {
               SIP trunk que ya existan en tu workspace tambien apareceran aqui
               para asignarlos al agente correcto.
             </p>
-            <button
-              type="button"
-              onClick={() => setShowImportModal(true)}
-              className="text-sm font-medium text-[#271173] transition-colors hover:text-[#1f0d5a]"
-            >
-              Importar primer numero
-            </button>
+            {canImport && (
+              <button
+                type="button"
+                onClick={() => setShowImportModal(true)}
+                className="text-sm font-medium text-[#271173] transition-colors hover:text-[#1f0d5a]"
+              >
+                Importar primer numero
+              </button>
+            )}
           </div>
         ) : (
           <table className="w-full">

@@ -3,3 +3,61 @@ claude.md
 skills-lock.json
 /.agents
 /.claude
+
+# ── Secrets & environment files ──────────────────────────────────────────────
+# NEVER commit these. Use .env.example as the tracked template.
+.env
+.env.local
+.env.*.local
+.env.production
+.env.staging
+.env.test
+backend/.env
+backend/.env.*
+frontend/.env
+frontend/.env.*
+!backend/.env.example
+!frontend/.env.example
+
+# Private keys, certificates, credentials
+*.pem
+*.p12
+*.pfx
+*.key
+*.cert
+*.crt
+id_rsa
+id_ed25519
+*.keystore
+
+# Secret stores / vaults
+secrets/
+.secrets/
+.vault-token
+vault-token
+
+# OS & editor artifacts
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# Node / frontend
+node_modules/
+frontend/dist/
+frontend/.vite/

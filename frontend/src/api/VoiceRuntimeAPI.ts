@@ -11,6 +11,7 @@ import type {
   RagIndex,
   WorkspaceTool,
 } from '@/types/agent'
+import type { TextAppointment, TextAppointmentStatus } from '@/types/textAgent'
 
 type UserScopeOptions = {
   userId?: string
@@ -49,6 +50,18 @@ export async function createAgent(payload: {
   try {
     const { data } = await api.post('/agents', payload)
     return data
+  } catch (error) {
+    throw new Error(getError(error))
+  }
+}
+
+export async function bootstrapClientAgents() {
+  try {
+    const { data } = await api.post('/agents/bootstrap')
+    return data as {
+      voice?: { created?: boolean; agent_id?: string | null; skipped?: string; error?: string }
+      text?: { created?: boolean; agent_id?: string | null; skipped?: string; error?: string }
+    }
   } catch (error) {
     throw new Error(getError(error))
   }
@@ -167,6 +180,93 @@ export async function runConversationAnalysis(conversationId: string) {
       `/agents/conversations/${conversationId}/analysis/run`
     )
     return data
+  } catch (error) {
+    throw new Error(getError(error))
+  }
+}
+
+// ── Voice appointments ──────────────────────────────────────────────────────
+
+export async function getVoiceAgentAppointments(
+  agentId: string,
+  options?: {
+    status?: TextAppointmentStatus
+    from_unix?: number
+    to_unix?: number
+    limit?: number
+  }
+): Promise<{ appointments: TextAppointment[] }> {
+  try {
+    const safeLimit =
+      typeof options?.limit === 'number'
+        ? Math.max(1, Math.min(Math.trunc(options.limit), 200))
+        : undefined
+
+    const { data } = await api.get(`/agents/${agentId}/appointments`, {
+      params: {
+        status: options?.status,
+        from_unix: options?.from_unix,
+        to_unix: options?.to_unix,
+        limit: safeLimit,
+      },
+    })
+    return data
+  } catch (error) {
+    throw new Error(getError(error))
+  }
+}
+
+export async function createVoiceAgentAppointment(
+  agentId: string,
+  payload: {
+    appointment_date: string | number
+    contact_name?: string
+    contact_phone?: string
+    contact_email?: string
+    conversation_id?: string
+    timezone?: string
+    status?: TextAppointmentStatus
+    source?: 'manual' | 'agent' | 'embed' | 'phone' | 'voice'
+    notes?: string
+  }
+): Promise<TextAppointment> {
+  try {
+    const { data } = await api.post(`/agents/${agentId}/appointments`, payload)
+    return data
+  } catch (error) {
+    throw new Error(getError(error))
+  }
+}
+
+export async function updateVoiceAgentAppointment(
+  agentId: string,
+  appointmentId: string,
+  payload: Partial<{
+    appointment_date: string | number
+    contact_name: string
+    contact_phone: string
+    contact_email: string
+    conversation_id: string
+    timezone: string
+    status: TextAppointmentStatus
+    notes: string
+  }>
+): Promise<TextAppointment> {
+  try {
+    const { data } = await api.patch(
+      `/agents/${agentId}/appointments/${appointmentId}`,
+      payload
+    )
+    return data
+  } catch (error) {
+    throw new Error(getError(error))
+  }
+}
+
+export async function deleteVoiceAgentAppointment(agentId: string, appointmentId: string) {
+  try {
+    const { data } = await api.delete(`/agents/${agentId}/appointments/${appointmentId}`)
+    return data as { deleted: boolean }
   } catch (error) {
     throw new Error(getError(error))
   }

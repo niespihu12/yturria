@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Install dependencies
+        working-directory: backend
+        run: uv sync
+
+      - name: Run tests
+        working-directory: backend
+        env:
+          # Las claves de prueba son mínimas — no son producción.
+          # El startup check se omite porque SKIP_STARTUP_CHECK=true.
+          SKIP_STARTUP_CHECK: "true"
+          DATABASE_URL: "sqlite://"
+          JWT_SECRET: "ci-test-secret-key-not-used-in-production-padding"
+          OPENAI_API_KEY: ""
+          ELEVENLABS_API_KEY: ""
+          MAIL_PASSWORD: ""
+        run: uv run pytest tests/ -q --tb=short
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect hardcoded secrets (gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}  # opcional para repos privados

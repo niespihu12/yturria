@@ -1,5 +1,7 @@
+import logging
 import os
 import re
+from datetime import datetime, timezone
 from typing import Any
 
 import httpx
@@ -10,13 +12,30 @@ from app.controllers.deps.auth import CurrentUser
 from app.controllers.deps.db_session import SessionDep
 from app.models.User import User
 from app.models.UserAgent import UserAgent
+from app.models.TextAppointment import TextAppointment
 from app.models.UserPhoneNumber import UserPhoneNumber
 from app.models.UserTool import UserTool
+from app.services.google_calendar import sync_google_calendar_for_appointment
+from app.utils.client_defaults import (
+    apply_client_voice_defaults,
+    build_client_voice_payload,
+)
 from app.utils.roles import is_super_admin_user, role_as_value
 
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")
 ELEVENLABS_BASE = "https://api.elevenlabs.io/v1"
 E164_PHONE_PATTERN = re.compile(r"^\+[1-9]\d{7,15}$")
+logger = logging.getLogger(__name__)
+
+SUPPORTED_APPOINTMENT_STATUSES = {
+    "scheduled",
+    "confirmed",
+    "completed",
+    "cancelled",
+    "no_show",
+}
+
+SUPPORTED_APPOINTMENT_SOURCES = {"manual", "agent", "embed", "phone", "voice"}
 
 
 def _headers(*, json_body: bool = False) -> dict[str, str]:
@@ -181,6 +200,95 @@ def _require_owned_phone_number(
     return row
 
 
+def _utcnow() -> datetime:
+    return datetime.utcnow()
+
+
+def _to_unix(value: datetime | None) -> int | None:
+    if value is None:
+        return None
+    if value.tzinfo is not None:
+        return int(value.astimezone(timezone.utc).timestamp())
+    return int(value.replace(tzinfo=timezone.utc).timestamp())
+
+
+def _parse_optional_datetime(value: Any) -> datetime | None:
+    if value is None:
+        return None
+
+    if isinstance(value, datetime):
+        return value
+
+    if isinstance(value, (int, float)):
+        if value <= 0:
+            return None
+        return datetime.utcfromtimestamp(int(value))
+
+    raw = str(value).strip()
+    if not raw:
+        return None
+
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="appointment_date debe ser ISO8601 o unix timestamp",
+        ) from exc
+
+    return parsed.replace(tzinfo=None) if parsed.tzinfo else parsed
+
+
+def _serialize_appointment(appointment: TextAppointment) -> dict[str, Any]:
+    return {
+        "id": appointment.id,
+        "text_agent_id": appointment.text_agent_id,
+        "voice_agent_id": appointment.voice_agent_id,
+        "conversation_id": appointment.conversation_id,
+        "contact_name": appointment.contact_name,
+        "contact_phone": appointment.contact_phone,
+        "contact_email": appointment.contact_email,
+        "appointment_date_unix_secs": _to_unix(appointment.appointment_date),
+        "timezone": appointment.timezone,
+        "status": appointment.status,
+        "source": appointment.source,
+        "notes": appointment.notes,
+        "google_event_id": appointment.google_event_id,
+        "google_calendar_id": appointment.google_calendar_id,
+        "google_sync_status": appointment.google_sync_status,
+        "google_sync_error": appointment.google_sync_error,
+        "created_at_unix_secs": _to_unix(appointment.created_at),
+        "updated_at_unix_secs": _to_unix(appointment.updated_at),
+    }
+
+
+def _apply_google_calendar_sync(
+    session: SessionDep,
+    appointment: TextAppointment,
+    *,
+    operation: str = "upsert",
+) -> None:
+    try:
+        result = sync_google_calendar_for_appointment(appointment, operation=operation)
+    except Exception:
+        logger.exception("No se pudo sincronizar cita de voz con Google Calendar")
+        appointment.google_sync_status = "error"
+        appointment.google_sync_error = "Error inesperado al sincronizar Google Calendar"
+        appointment.updated_at = _utcnow()
+        session.add(appointment)
+        return
+
+    appointment.google_sync_status = str(result.get("status") or "error")[:50]
+    appointment.google_event_id = str(result.get("event_id") or "")[:255]
+    appointment.google_calendar_id = str(result.get("calendar_id") or "")[:255]
+    appointment.google_sync_error = str(result.get("error") or "")[:500]
+    appointment.updated_at = _utcnow()
+    session.add(appointment)
+
+
 class AgentController:
 
     @staticmethod
@@ -270,6 +378,25 @@ class AgentController:
 
     @staticmethod
     async def create_agent(payload: dict, current_user: CurrentUser, session: SessionDep):
+        is_super_admin = is_super_admin_user(current_user)
+
+        if not is_super_admin:
+            existing_count = len(
+                session.exec(
+                    select(UserAgent).where(UserAgent.user_id == current_user.id)
+                ).all()
+            )
+            if existing_count >= 1:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        "Tu plan permite un único agente de voz. "
+                        "Edita el existente o contacta al administrador."
+                    ),
+                )
+
+            payload = apply_client_voice_defaults(payload)
+
         # ElevenLabs requires eleven_turbo_v2_5 for non-English agents.
         # Always set it as default to avoid validation errors.
         conv_cfg: dict = payload.get("conversation_config", {})
@@ -288,10 +415,43 @@ class AgentController:
         return el_agent
 
     @staticmethod
+    async def bootstrap_client(current_user: CurrentUser, session: SessionDep) -> dict:
+        """Crea 1 agente de voz por defecto para un cliente si no existe.
+
+        Pensado para super_admin + cliente final. No duplica si ya hay un agente.
+        Devuelve el agent_id y si se creó o ya existía.
+        """
+        existing_rows = session.exec(
+            select(UserAgent).where(UserAgent.user_id == current_user.id)
+        ).all()
+
+        if existing_rows:
+            return {"created": False, "agent_id": existing_rows[0].agent_id}
+
+        display_name = (current_user.name or "").strip() or "Sofía - Yturria"
+        payload = build_client_voice_payload(display_name)
+
+        try:
+            el_agent = _elevenlabs_post("/convai/agents/create", payload)
+        except HTTPException:
+            # ElevenLabs sin credenciales o caído: no bloquear el resto del onboarding.
+            return {"created": False, "agent_id": None, "error": "elevenlabs_unavailable"}
+
+        agent_id: str = el_agent.get("agent_id", "")
+        if not agent_id:
+            return {"created": False, "agent_id": None, "error": "elevenlabs_invalid_response"}
+
+        session.add(UserAgent(user_id=current_user.id, agent_id=agent_id))
+        session.commit()
+        return {"created": True, "agent_id": agent_id}
+
+    @staticmethod
     async def update_agent(
         agent_id: str, payload: dict, current_user: CurrentUser, session: SessionDep
     ):
         _require_owned_agent(agent_id, current_user, session)
+        if not is_super_admin_user(current_user):
+            payload = apply_client_voice_defaults(payload)
         return _elevenlabs_patch(f"/convai/agents/{agent_id}", payload)
 
     @staticmethod
@@ -379,6 +539,228 @@ class AgentController:
         if isinstance(agent_id, str):
             _require_owned_agent(agent_id, current_user, session)
         return _elevenlabs_post(f"/convai/conversations/{conversation_id}/analysis/run", {})
+
+    @staticmethod
+    async def list_appointments(
+        agent_id: str,
+        current_user: CurrentUser,
+        session: SessionDep,
+        status_filter: str | None = None,
+        from_unix: int | None = None,
+        to_unix: int | None = None,
+        limit: int = 100,
+    ):
+        _require_owned_agent(agent_id, current_user, session)
+
+        statement = select(TextAppointment).where(
+            TextAppointment.voice_agent_id == agent_id,
+            TextAppointment.deleted_at == None,
+        )
+
+        if status_filter is not None:
+            normalized_status = str(status_filter).strip().lower()
+            if normalized_status not in SUPPORTED_APPOINTMENT_STATUSES:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        "status invalido. Usa: scheduled, confirmed, completed, "
+                        "cancelled o no_show"
+                    ),
+                )
+            statement = statement.where(TextAppointment.status == normalized_status)
+
+        if isinstance(from_unix, int) and from_unix > 0:
+            statement = statement.where(
+                TextAppointment.appointment_date >= datetime.utcfromtimestamp(from_unix)
+            )
+
+        if isinstance(to_unix, int) and to_unix > 0:
+            statement = statement.where(
+                TextAppointment.appointment_date <= datetime.utcfromtimestamp(to_unix)
+            )
+
+        safe_limit = max(1, min(int(limit or 100), 200))
+        rows = session.exec(
+            statement
+            .order_by(TextAppointment.appointment_date.asc(), TextAppointment.created_at.desc())
+            .limit(safe_limit)
+        ).all()
+
+        return {"appointments": [_serialize_appointment(row) for row in rows]}
+
+    @staticmethod
+    async def create_appointment(
+        agent_id: str,
+        payload: dict,
+        current_user: CurrentUser,
+        session: SessionDep,
+    ):
+        owner_mapping = _require_owned_agent(agent_id, current_user, session)
+
+        appointment_date = _parse_optional_datetime(payload.get("appointment_date"))
+        if appointment_date is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="appointment_date es requerido (ISO8601 o unix timestamp)",
+            )
+
+        contact_name = str(payload.get("contact_name") or "").strip()[:120]
+        contact_phone = str(payload.get("contact_phone") or "").strip()[:40]
+        contact_email = str(payload.get("contact_email") or "").strip()[:160]
+
+        if not contact_name and not contact_phone and not contact_email:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Debes registrar al menos contact_name, contact_phone o contact_email",
+            )
+
+        normalized_status = str(payload.get("status") or "scheduled").strip().lower()
+        if normalized_status not in SUPPORTED_APPOINTMENT_STATUSES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="status invalido para cita",
+            )
+
+        source = str(payload.get("source") or "voice").strip().lower()
+        if source not in SUPPORTED_APPOINTMENT_SOURCES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="source invalido para cita",
+            )
+
+        now = _utcnow()
+        appointment = TextAppointment(
+            text_agent_id=None,
+            voice_agent_id=agent_id,
+            user_id=owner_mapping.user_id,
+            conversation_id=str(payload.get("conversation_id") or "").strip() or None,
+            contact_name=contact_name,
+            contact_phone=contact_phone,
+            contact_email=contact_email,
+            appointment_date=appointment_date,
+            timezone=str(payload.get("timezone") or "America/Bogota").strip()[:64]
+            or "America/Bogota",
+            status=normalized_status,
+            source=source,
+            notes=str(payload.get("notes") or "").strip()[:500],
+            created_at=now,
+            updated_at=now,
+        )
+
+        session.add(appointment)
+        _apply_google_calendar_sync(session, appointment, operation="upsert")
+        session.commit()
+        session.refresh(appointment)
+        return _serialize_appointment(appointment)
+
+    @staticmethod
+    async def update_appointment(
+        agent_id: str,
+        appointment_id: str,
+        payload: dict,
+        current_user: CurrentUser,
+        session: SessionDep,
+    ):
+        _require_owned_agent(agent_id, current_user, session)
+
+        appointment = session.exec(
+            select(TextAppointment).where(
+                TextAppointment.id == appointment_id,
+                TextAppointment.voice_agent_id == agent_id,
+                TextAppointment.deleted_at == None,
+            )
+        ).first()
+
+        if not appointment:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Cita no encontrada",
+            )
+
+        if "appointment_date" in payload:
+            updated_date = _parse_optional_datetime(payload.get("appointment_date"))
+            if updated_date is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="appointment_date no puede ser null",
+                )
+            appointment.appointment_date = updated_date
+
+        if "status" in payload:
+            next_status = str(payload.get("status") or "").strip().lower()
+            if next_status not in SUPPORTED_APPOINTMENT_STATUSES:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="status invalido para cita",
+                )
+            appointment.status = next_status
+
+        if "contact_name" in payload:
+            appointment.contact_name = str(payload.get("contact_name") or "").strip()[:120]
+
+        if "contact_phone" in payload:
+            appointment.contact_phone = str(payload.get("contact_phone") or "").strip()[:40]
+
+        if "contact_email" in payload:
+            appointment.contact_email = str(payload.get("contact_email") or "").strip()[:160]
+
+        if not appointment.contact_name and not appointment.contact_phone and not appointment.contact_email:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="La cita debe conservar al menos un dato de contacto",
+            )
+
+        if "conversation_id" in payload:
+            conversation_id = str(payload.get("conversation_id") or "").strip()
+            appointment.conversation_id = conversation_id or None
+
+        if "timezone" in payload:
+            appointment.timezone = (
+                str(payload.get("timezone") or "").strip()[:64] or appointment.timezone
+            )
+
+        if "notes" in payload:
+            appointment.notes = str(payload.get("notes") or "").strip()[:500]
+
+        appointment.updated_at = _utcnow()
+        session.add(appointment)
+        _apply_google_calendar_sync(session, appointment, operation="upsert")
+        session.commit()
+        session.refresh(appointment)
+        return _serialize_appointment(appointment)
+
+    @staticmethod
+    async def delete_appointment(
+        agent_id: str,
+        appointment_id: str,
+        current_user: CurrentUser,
+        session: SessionDep,
+    ):
+        _require_owned_agent(agent_id, current_user, session)
+
+        appointment = session.exec(
+            select(TextAppointment).where(
+                TextAppointment.id == appointment_id,
+                TextAppointment.voice_agent_id == agent_id,
+                TextAppointment.deleted_at == None,
+            )
+        ).first()
+
+        if not appointment:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Cita no encontrada",
+            )
+
+        now = _utcnow()
+        appointment.deleted_at = now
+        appointment.updated_at = now
+        if appointment.status != "completed":
+            appointment.status = "cancelled"
+        session.add(appointment)
+        _apply_google_calendar_sync(session, appointment, operation="delete")
+        session.commit()
+        return {"deleted": True}
 
     @staticmethod
     async def list_knowledge_base_documents(_: CurrentUser):
@@ -521,6 +903,15 @@ class AgentController:
 
     @staticmethod
     async def create_tool(payload: dict, current_user: CurrentUser, session: SessionDep):
+        if not is_super_admin_user(current_user):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    "La creación de herramientas webhook está reservada al "
+                    "administrador de la plataforma."
+                ),
+            )
+
         tool_config = payload.get("tool_config")
         if not isinstance(tool_config, dict):
             raise HTTPException(
@@ -690,6 +1081,10 @@ class AgentController:
                 visible_numbers.append(phone_number)
                 continue
 
+            # Cliente final: no auto-adoptar más de 1 número aunque esté asignado a un agente suyo.
+            if len(owned_number_ids) >= 1:
+                continue
+
             assigned_agent = phone_number.get("assigned_agent")
             if not isinstance(assigned_agent, dict):
                 continue
@@ -713,6 +1108,25 @@ class AgentController:
 
     @staticmethod
     async def create_phone_number(payload: dict, current_user: CurrentUser, session: SessionDep):
+        is_super_admin = is_super_admin_user(current_user)
+
+        if not is_super_admin:
+            existing_count = len(
+                session.exec(
+                    select(UserPhoneNumber).where(
+                        UserPhoneNumber.user_id == current_user.id
+                    )
+                ).all()
+            )
+            if existing_count >= 1:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        "Tu plan permite un único número telefónico. "
+                        "Edita el existente o contacta al administrador."
+                    ),
+                )
+
         agent_id = payload.get("agent_id")
         if isinstance(agent_id, str) and agent_id:
             _require_owned_agent(agent_id, current_user, session)

@@ -15,9 +15,11 @@ import {
   getConversations,
   getPhoneNumbers,
 } from '@/api/VoiceRuntimeAPI'
-import { getTextAgents, getTextConversations } from '@/api/TextAgentsAPI'
+import { getTextAgents, getTextConversations, getUpcomingRenewals } from '@/api/TextAgentsAPI'
 import type { AgentListItem, Conversation, PhoneNumber } from '@/types/agent'
-import type { TextAgentSummary, TextConversation } from '@/types/textAgent'
+import type { TextAgentSummary, TextConversation, UpcomingRenewal } from '@/types/textAgent'
+import { useCurrentUser } from '@/hooks/useCurrentUser'
+import SecretaryDashboard from '@/components/app/dashboard/SecretaryDashboard'
 
 type KpiCard = {
   label: string
@@ -57,6 +59,7 @@ type DashboardData = {
   phoneNumbers: PhoneNumber[]
   voiceConversations: Conversation[]
   textConversations: TextConversation[]
+  upcomingRenewals: UpcomingRenewal[]
   loadedAt: number
 }
 
@@ -189,6 +192,8 @@ async function fetchDashboardData(): Promise<DashboardData> {
     ),
   ])
 
+  const upcomingRenewalsResult = await Promise.allSettled([getUpcomingRenewals(30)])
+
   const voiceConversations = voiceConversationResults.flatMap((result) =>
     result.status === 'fulfilled' ? result.value : []
   )
@@ -199,17 +204,27 @@ async function fetchDashboardData(): Promise<DashboardData> {
       : []
   )
 
+  const upcomingRenewals = upcomingRenewalsResult.flatMap((result) =>
+    result.status === 'fulfilled' && Array.isArray(result.value.renewals)
+      ? result.value.renewals
+      : []
+  )
+
   return {
     voiceAgents,
     textAgents,
     phoneNumbers,
     voiceConversations,
     textConversations,
+    upcomingRenewals,
     loadedAt: Date.now(),
   }
 }
 
 export default function DashboardView() {
+  const { user } = useCurrentUser()
+  const isClientView = Boolean(user && user.role !== 'super_admin')
+
   const { data, isLoading, isFetching, isError, error, refetch } = useQuery({
     queryKey: ['dashboard-real-data'],
     queryFn: fetchDashboardData,
@@ -510,40 +525,42 @@ export default function DashboardView() {
       style={{ fontFamily: "'Sora', sans-serif" }}
     >
       <div className="mx-auto w-full max-w-360 space-y-6 px-8 py-8">
-        <section className="section-enter relative overflow-hidden rounded-[30px] border border-[#d8d3ee] bg-white p-8 shadow-sm">
-          <div className="pointer-events-none absolute -right-24 -top-24 h-64 w-64 rounded-full bg-[#271173]/10 blur-3xl" />
-          <div className="pointer-events-none absolute -bottom-28 left-1/3 h-72 w-72 rounded-full bg-[#0ea5e9]/10 blur-3xl" />
+        {!isClientView && (
+          <section className="section-enter relative overflow-hidden rounded-[30px] border border-[#d8d3ee] bg-white p-8 shadow-sm">
+            <div className="pointer-events-none absolute -right-24 -top-24 h-64 w-64 rounded-full bg-[#271173]/10 blur-3xl" />
+            <div className="pointer-events-none absolute -bottom-28 left-1/3 h-72 w-72 rounded-full bg-[#0ea5e9]/10 blur-3xl" />
 
-          <div className="relative flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-            <div className="max-w-3xl">
-              <p className="inline-flex items-center gap-1.5 rounded-full border border-[#d8d3ee] bg-[#f7f5ff] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#271173]">
-                <SparklesIcon className="h-3.5 w-3.5" />
-                Pulse Control Center
-              </p>
-              <h1 className="mt-4 text-4xl font-semibold leading-tight text-[#1a1a2f]">
-                Dashboard operativo con data real,
-                <span className="text-[#271173]"> en voz, texto y telefonia</span>
-              </h1>
-              <p className="mt-3 max-w-2xl text-sm leading-6 text-[#23233d]/70">
-                {computed.snapshotSummary}. Actualizacion automatica cada 45 segundos para
-                seguimiento continuo del estado operativo.
-              </p>
-            </div>
+            <div className="relative flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+              <div className="max-w-3xl">
+                <p className="inline-flex items-center gap-1.5 rounded-full border border-[#d8d3ee] bg-[#f7f5ff] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#271173]">
+                  <SparklesIcon className="h-3.5 w-3.5" />
+                  Pulse Control Center
+                </p>
+                <h1 className="mt-4 text-4xl font-semibold leading-tight text-[#1a1a2f]">
+                  Dashboard operativo con data real,
+                  <span className="text-[#271173]"> en voz, texto y telefonia</span>
+                </h1>
+                <p className="mt-3 max-w-2xl text-sm leading-6 text-[#23233d]/70">
+                  {computed.snapshotSummary}. Actualizacion automatica cada 45 segundos para
+                  seguimiento continuo del estado operativo.
+                </p>
+              </div>
 
-            <div className="grid w-full gap-3 sm:grid-cols-2 lg:w-auto lg:grid-cols-1">
-              <button
-                onClick={() => refetch()}
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#271173] px-4 py-2.5 text-sm font-semibold text-white transition-transform duration-200 ease-(--ease-out-strong) hover:-translate-y-px hover:bg-[#1f0d5a]"
-              >
-                <ArrowPathIcon className={`h-4 w-4 ${isFetching ? 'animate-spin' : ''}`} />
-                Refrescar metricas
-              </button>
-              <div className="inline-flex items-center justify-center rounded-xl border border-[#d8d3ee] bg-white px-4 py-2.5 text-sm font-semibold text-[#1a1a2f]">
-                Ultima carga: {computed.loadedAtText}
+              <div className="grid w-full gap-3 sm:grid-cols-2 lg:w-auto lg:grid-cols-1">
+                <button
+                  onClick={() => refetch()}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#271173] px-4 py-2.5 text-sm font-semibold text-white transition-transform duration-200 ease-(--ease-out-strong) hover:-translate-y-px hover:bg-[#1f0d5a]"
+                >
+                  <ArrowPathIcon className={`h-4 w-4 ${isFetching ? 'animate-spin' : ''}`} />
+                  Refrescar metricas
+                </button>
+                <div className="inline-flex items-center justify-center rounded-xl border border-[#d8d3ee] bg-white px-4 py-2.5 text-sm font-semibold text-[#1a1a2f]">
+                  Ultima carga: {computed.loadedAtText}
+                </div>
               </div>
             </div>
-          </div>
-        </section>
+          </section>
+        )}
 
         {isLoading && (
           <section className="rounded-2xl border border-[#e4e0f5] bg-white p-10 text-center text-sm text-[#1a1a2f]/60 shadow-sm">
@@ -561,6 +578,10 @@ export default function DashboardView() {
 
         {!isLoading && !isError && (
           <>
+            {isClientView ? (
+              data ? <SecretaryDashboard data={data} loadedAtText={computed.loadedAtText} /> : null
+            ) : (
+              <>
             <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               {computed.kpis.map((item, index) => (
                 <article
@@ -797,6 +818,8 @@ export default function DashboardView() {
                 </p>
               </div>
             </section>
+              </>
+            )}
           </>
         )}
       </div>

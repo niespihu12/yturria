@@ -28,6 +28,7 @@ class User(SQLModel, table=True):
     mfa_enabled: bool = Field(default=False, nullable=False)
     mfa_failed_attempts: int = Field(default=0, nullable=False)
     mfa_locked_until: datetime | None = Field(default=None, nullable=True)
+    deleted_at: datetime | None = Field(default=None, nullable=True)
     created_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
 
     tokens: list["Token"] = Relationship(back_populates="user")

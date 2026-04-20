@@ -31,22 +31,131 @@ class SofiaState(TypedDict):
     response: str
     system_prompt_override: str
     config: dict[str, Any]
+    already_escalated: bool
+    has_open_appointment: bool
+
+
+def _coerce_config(raw_config: dict[str, Any] | None) -> SofiaConfig:
+    if not isinstance(raw_config, dict):
+        return DEFAULT_CONFIG
+
+    normalized: dict[str, Any] = {}
+    allowed_keys = set(SofiaConfig.__dataclass_fields__.keys())
+
+    for key in allowed_keys:
+        if key in raw_config:
+            normalized[key] = raw_config[key]
+
+    # Compatibilidad con configuraciones guardadas desde UI previa.
+    if "business_name" in raw_config and "company_name" not in normalized:
+        normalized["company_name"] = raw_config.get("business_name")
+
+    if "escalation_phrases" in raw_config and "extra_escalation_phrases" not in normalized:
+        phrases = raw_config.get("escalation_phrases")
+        if isinstance(phrases, list):
+            normalized["extra_escalation_phrases"] = [
+                str(item).strip() for item in phrases if str(item).strip()
+            ]
+
+    if "escalation_threshold" in normalized:
+        try:
+            normalized["escalation_threshold"] = max(1, min(20, int(normalized["escalation_threshold"])))
+        except (TypeError, ValueError):
+            normalized.pop("escalation_threshold", None)
+
+    try:
+        return SofiaConfig(**normalized)
+    except TypeError:
+        logger.warning("Configuración Sofía inválida, usando defaults", exc_info=True)
+        return DEFAULT_CONFIG
 
 
 # ── Nodes ────────────────────────────────────────────────────────────────────
 
 def classify(state: SofiaState) -> dict:
     user_msg = state["user_message"]
-    config = SofiaConfig(**state.get("config", {}))
+    config = _coerce_config(state.get("config"))
+    already_escalated = bool(state.get("already_escalated", False))
+    has_open_appointment = bool(state.get("has_open_appointment", False))
 
     lower_msg = user_msg.lower()
+    compact_msg = lower_msg.strip()
+
+    scheduling_followup_keywords = [
+        "horario",
+        "hora",
+        "disponible",
+        "llamada",
+        "whatsapp",
+        "mañana",
+        "tarde",
+        "noche",
+        "si porfavor",
+        "sí por favor",
+        "por favor",
+    ]
+
+    if has_open_appointment and (
+        compact_msg in {"si", "sí", "si porfavor", "sí por favor", "por favor"}
+        or any(keyword in lower_msg for keyword in scheduling_followup_keywords)
+    ):
+        return {"intent": "otro"}
+
+    quote_keywords = [
+        "cotiz",
+        "precio",
+        "costo",
+        "contratar",
+        "poliza",
+        "asegurar",
+    ]
+    claim_keywords = [
+        "siniestro",
+        "accidente",
+        "robo",
+        "choque",
+        "reclamo",
+        "reclamacion",
+        "reclamación",
+    ]
+    renewal_keywords = [
+        "renov",
+        "venc",
+        "vigencia",
+        "continuidad",
+        "renueva",
+    ]
+
+    if any(keyword in lower_msg for keyword in claim_keywords):
+        return {"intent": "siniestro"}
+    if any(keyword in lower_msg for keyword in renewal_keywords):
+        return {"intent": "renovacion"}
+
     for phrase in ESCALATION_PHRASES + config.extra_escalation_phrases:
         if phrase in lower_msg:
-            return {"intent": "escalate"}
+            if already_escalated:
+                return {"intent": "otro"}
 
-    if state["message_count"] >= config.escalation_threshold:
+            phrase_intent = "cotizacion" if any(
+                keyword in lower_msg for keyword in quote_keywords
+            ) else "otro"
+            return {
+                "intent": phrase_intent,
+                "should_escalate": True,
+                "escalation_reason": "user_request",
+            }
+
+    if any(keyword in lower_msg for keyword in quote_keywords):
+        return {"intent": "cotizacion"}
+
+    if (
+        state["message_count"] >= config.escalation_threshold
+        and not already_escalated
+        and not has_open_appointment
+    ):
         return {
-            "intent": "escalate",
+            "intent": "otro",
+            "should_escalate": True,
             "escalation_reason": "auto_threshold",
         }
 
@@ -60,8 +169,8 @@ def classify(state: SofiaState) -> dict:
     result = llm.invoke([HumanMessage(content=prompt)])
     raw = result.content.strip().lower()
 
-    valid = {"greeting", "faq", "quote", "escalate", "general"}
-    intent = raw if raw in valid else "general"
+    valid = {"cotizacion", "siniestro", "renovacion", "otro"}
+    intent = raw if raw in valid else "otro"
 
     return {"intent": intent}
 
@@ -87,17 +196,32 @@ def respond(state: SofiaState) -> dict:
     if state.get("should_escalate"):
         return {}
 
-    config = SofiaConfig(**state.get("config", {}))
+    config = _coerce_config(state.get("config"))
 
     system_base = state.get("system_prompt_override") or SOFIA_SYSTEM_PROMPT
     rag = state.get("rag_context") or ""
     extra = f"Contexto de base de conocimiento:\n{rag}" if rag else ""
 
+    legal_notice_section = (
+        f"\nAVISO LEGAL: {config.legal_disclaimer}" if config.legal_disclaimer.strip() else ""
+    )
     system_text = system_base.format(
         company_name=config.company_name,
         company_years=config.company_years,
+        business_hours=config.business_hours,
+        company_context=config.company_context,
+        carriers=config.carriers,
         extra_context=extra,
+        legal_notice_section=legal_notice_section,
     )
+
+    if state.get("has_open_appointment"):
+        system_text += (
+            "\n\nContexto operativo: Ya existe una cita o solicitud registrada para este cliente. "
+            "No repitas el mensaje de escalación en cada turno. "
+            f"Si el cliente pregunta por horarios/disponibilidad, responde usando este horario: {config.business_hours}. "
+            "Después pide su preferencia concreta (día/hora/canal)."
+        )
 
     llm = ChatOpenAI(
         model=config.model,
@@ -119,7 +243,7 @@ def guard(state: SofiaState) -> dict:
     if not response:
         return {}
 
-    config = SofiaConfig(**state.get("config", {}))
+    config = _coerce_config(state.get("config"))
     llm = ChatOpenAI(
         model=config.model,
         temperature=0.0,
@@ -139,12 +263,15 @@ def guard(state: SofiaState) -> dict:
 # ── Routing ──────────────────────────────────────────────────────────────────
 
 def route_intent(state: SofiaState) -> str:
-    intent = state.get("intent", "general")
-    if intent == "escalate":
+    if state.get("should_escalate"):
         return "escalate_to_human"
-    if intent == "quote":
+
+    intent = state.get("intent", "general")
+    if intent == "siniestro":
+        return "escalate_to_human"
+    if intent == "cotizacion":
         return "quote_price"
-    if intent == "faq":
+    if intent == "renovacion":
         return "answer_faq"
     return "respond"
 
@@ -193,6 +320,8 @@ async def run_sofia(
     message_count: int,
     system_prompt_override: str = "",
     config: dict[str, Any] | None = None,
+    already_escalated: bool = False,
+    has_open_appointment: bool = False,
 ) -> dict[str, Any]:
     from langchain_core.messages import HumanMessage as HM, AIMessage
 
@@ -216,6 +345,8 @@ async def run_sofia(
         "response": "",
         "system_prompt_override": system_prompt_override,
         "config": config or {},
+        "already_escalated": already_escalated,
+        "has_open_appointment": has_open_appointment,
     }
 
     result = sofia_app.invoke(initial_state)

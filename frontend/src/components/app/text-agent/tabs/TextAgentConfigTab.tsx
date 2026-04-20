@@ -8,6 +8,7 @@ type Props = {
   provider: TextProvider
   temperature: number
   maxTokens: number
+  isClient?: boolean
 }
 
 const inputClass =
@@ -24,7 +25,7 @@ const sliderClass =
   '[&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:shadow-md ' +
   '[&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white'
 
-export default function TextAgentConfigTab({ register, setValue, errors, provider, temperature, maxTokens }: Props) {
+export default function TextAgentConfigTab({ register, setValue, errors, provider, temperature, maxTokens, isClient = false }: Props) {
   const modelOptions = TEXT_PROVIDER_MODELS[provider] ?? TEXT_PROVIDER_MODELS.openai
 
   const providerBadge: Record<string, { label: string; color: string }> = {
@@ -61,66 +62,82 @@ export default function TextAgentConfigTab({ register, setValue, errors, provide
 
         <div>
           <label className={labelClass}>Modelo</label>
-          <select className={inputClass} {...register('model')}>
-            {modelOptions.map((item) => (
-              <option key={item.value} value={item.value}>
-                {item.label}
-              </option>
-            ))}
-          </select>
+          {isClient ? (
+            <div className="flex h-10.5 items-center rounded-xl border border-[#e4e0f5] bg-[#fafafa] px-3 text-sm font-semibold text-[#271173]">
+              GPT-4.1 Mini
+            </div>
+          ) : (
+            <select className={inputClass} {...register('model')}>
+              {modelOptions.map((item) => (
+                <option key={item.value} value={item.value}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
       </div>
 
       {/* Sliders */}
-      <div className="rounded-xl border border-[#e4e0f5] bg-[#fafafa] p-5 space-y-5">
-        <div>
-          <div className="mb-2 flex items-center justify-between">
-            <label className={labelClass}>Temperatura</label>
-            <span className="rounded-lg bg-[#ede9ff] px-2.5 py-0.5 text-xs font-semibold tabular-nums text-[#271173]">
-              {temperature.toFixed(1)}
-            </span>
+      {!isClient && (
+        <div className="rounded-xl border border-[#e4e0f5] bg-[#fafafa] p-5 space-y-5">
+          <div>
+            <div className="mb-2 flex items-center justify-between">
+              <label className={labelClass}>Temperatura</label>
+              <span className="rounded-lg bg-[#ede9ff] px-2.5 py-0.5 text-xs font-semibold tabular-nums text-[#271173]">
+                {temperature.toFixed(1)}
+              </span>
+            </div>
+            <input
+              type="range" min={0} max={2} step={0.1}
+              value={temperature}
+              className={sliderClass}
+              onChange={(e) => setValue('temperature', parseFloat(e.target.value), { shouldDirty: true, shouldTouch: true })}
+            />
+            <div className="mt-1 flex justify-between text-[10px] text-black/40">
+              <span>0</span><span>2</span>
+            </div>
           </div>
-          <input
-            type="range" min={0} max={2} step={0.1}
-            value={temperature}
-            className={sliderClass}
-            onChange={(e) => setValue('temperature', parseFloat(e.target.value), { shouldDirty: true, shouldTouch: true })}
-          />
-          <div className="mt-1 flex justify-between text-[10px] text-black/40">
-            <span>0</span><span>2</span>
+
+          <div className="border-t border-[#e4e0f5]" />
+
+          <div>
+            <div className="mb-2 flex items-center justify-between">
+              <label className={labelClass}>Máx. tokens</label>
+              <span className="rounded-lg bg-[#ede9ff] px-2.5 py-0.5 text-xs font-semibold tabular-nums text-[#271173]">
+                {maxTokens.toLocaleString()}
+              </span>
+            </div>
+            <input
+              type="range" min={64} max={8192} step={64}
+              value={maxTokens}
+              className={sliderClass}
+              onChange={(e) => setValue('max_tokens', parseInt(e.target.value, 10), { shouldDirty: true, shouldTouch: true })}
+            />
+            <div className="mt-1 flex justify-between text-[10px] text-black/40">
+              <span>64</span><span>8 192</span>
+            </div>
           </div>
         </div>
-
-        <div className="border-t border-[#e4e0f5]" />
-
-        <div>
-          <div className="mb-2 flex items-center justify-between">
-            <label className={labelClass}>Máx. tokens</label>
-            <span className="rounded-lg bg-[#ede9ff] px-2.5 py-0.5 text-xs font-semibold tabular-nums text-[#271173]">
-              {maxTokens.toLocaleString()}
-            </span>
-          </div>
-          <input
-            type="range" min={64} max={8192} step={64}
-            value={maxTokens}
-            className={sliderClass}
-            onChange={(e) => setValue('max_tokens', parseInt(e.target.value, 10), { shouldDirty: true, shouldTouch: true })}
-          />
-          <div className="mt-1 flex justify-between text-[10px] text-black/40">
-            <span>64</span><span>8 192</span>
-          </div>
-        </div>
-      </div>
+      )}
 
       {/* System prompt */}
       <div>
         <label className={labelClass}>Prompt del sistema</label>
         <textarea
           rows={9}
-          className={textAreaClass}
+          className={`${textAreaClass} ${
+            isClient ? 'cursor-not-allowed bg-[#fafafa] text-black/65' : ''
+          }`}
+          readOnly={isClient}
           placeholder="Define el comportamiento del agente, tono, idioma, reglas y objetivos."
           {...register('system_prompt')}
         />
+        {isClient && (
+          <p className="mt-1.5 text-xs text-black/45">
+            Este prompt está bloqueado por política para cliente final.
+          </p>
+        )}
       </div>
 
       {/* Welcome message */}
@@ -128,7 +145,10 @@ export default function TextAgentConfigTab({ register, setValue, errors, provide
         <label className={labelClass}>Primer mensaje</label>
         <textarea
           rows={3}
-          className={textAreaClass}
+          className={`${textAreaClass} ${
+            isClient ? 'cursor-not-allowed bg-[#fafafa] text-black/65' : ''
+          }`}
+          readOnly={isClient}
           placeholder="Hola, soy tu asistente. ¿En qué te puedo ayudar hoy?"
           {...register('welcome_message')}
         />

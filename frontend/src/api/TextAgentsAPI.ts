@@ -14,6 +14,9 @@ import type {
   WhatsAppProvider,
   EscalatedConversation,
   EscalationStatus,
+  UpcomingRenewal,
+  TextAppointment,
+  TextAppointmentStatus,
 } from '@/types/textAgent'
 
 type UserScopeOptions = {
@@ -32,6 +35,45 @@ function getError(error: unknown): string {
   return 'Error al conectar'
 }
 
+type SofiaConfigCarrier = {
+  sofia_config_json?: unknown
+  sofia_config?: unknown
+  [key: string]: unknown
+}
+
+function normalizeSofiaConfigJson(value: unknown): string {
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (!trimmed) return '{}'
+    try {
+      const parsed = JSON.parse(trimmed)
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? JSON.stringify(parsed)
+        : '{}'
+    } catch {
+      return '{}'
+    }
+  }
+
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    try {
+      return JSON.stringify(value)
+    } catch {
+      return '{}'
+    }
+  }
+
+  return '{}'
+}
+
+function normalizeAgentSofiaConfig<T extends SofiaConfigCarrier>(agent: T): T {
+  const configSource = agent.sofia_config_json ?? agent.sofia_config
+  return {
+    ...agent,
+    sofia_config_json: normalizeSofiaConfigJson(configSource),
+  }
+}
+
 // ── Agents ────────────────────────────────────────────────────────────────────
 
 export async function getTextAgents(
@@ -44,7 +86,10 @@ export async function getTextAgents(
         user_id: userId || undefined,
       },
     })
-    return data
+    const agents = Array.isArray(data?.agents)
+      ? data.agents.map((agent: SofiaConfigCarrier) => normalizeAgentSofiaConfig(agent))
+      : []
+    return { ...data, agents }
   } catch (error) {
     throw new Error(getError(error))
   }
@@ -62,7 +107,7 @@ export async function createTextAgent(payload: { name: string; provider: TextPro
 export async function getTextAgent(agentId: string): Promise<TextAgentDetail> {
   try {
     const { data } = await api.get(`/text-agents/${agentId}`)
-    return data
+    return normalizeAgentSofiaConfig(data)
   } catch (error) {
     throw new Error(getError(error))
   }
@@ -83,8 +128,16 @@ export async function updateTextAgent(
   }>
 ) {
   try {
-    const { data } = await api.patch(`/text-agents/${agentId}`, payload)
-    return data as TextAgentDetail
+    const requestPayload: Record<string, unknown> = { ...payload }
+
+    if (payload.sofia_config_json !== undefined) {
+      const normalizedSofiaConfigJson = normalizeSofiaConfigJson(payload.sofia_config_json)
+      requestPayload.sofia_config_json = normalizedSofiaConfigJson
+      requestPayload.sofia_config = JSON.parse(normalizedSofiaConfigJson)
+    }
+
+    const { data } = await api.patch(`/text-agents/${agentId}`, requestPayload)
+    return normalizeAgentSofiaConfig(data) as TextAgentDetail
   } catch (error) {
     throw new Error(getError(error))
   }
@@ -347,6 +400,215 @@ export async function getTextConversations(agentId: string): Promise<{ conversat
 export async function getTextConversationDetail(conversationId: string): Promise<TextConversationDetail> {
   try {
     const { data } = await api.get(`/text-agents/conversations/${conversationId}`)
+    return data
+  } catch (error) {
+    throw new Error(getError(error))
+  }
+}
+
+export async function getUpcomingRenewals(
+  days = 30,
+  options?: UserScopeOptions
+): Promise<{ renewals: UpcomingRenewal[] }> {
+  const userId = options?.userId ?? options?.user_id
+  try {
+    const { data } = await api.get('/text-agents/renewals/upcoming', {
+      params: {
+        days,
+        user_id: userId || undefined,
+      },
+    })
+    return data
+  } catch (error) {
+    throw new Error(getError(error))
+  }
+}
+
+export async function updateConversationRenewal(
+  agentId: string,
+  conversationId: string,
+  payload: Partial<{
+    renewal_date: string | number | null
+    renewal_status:
+      | 'none'
+      | 'scheduled'
+      | 'reminder_sent'
+      | 'contacted'
+      | 'renewed'
+      | 'expired'
+      | 'cancelled'
+    renewal_note: string
+    clear_reminder: boolean
+  }>
+) {
+  try {
+    const { data } = await api.patch(
+      `/text-agents/${agentId}/conversations/${conversationId}/renewal`,
+      payload
+    )
+    return data as {
+      conversation_id: string
+      renewal_date_unix_secs: number | null
+      renewal_status:
+        | 'none'
+        | 'scheduled'
+        | 'reminder_sent'
+        | 'contacted'
+        | 'renewed'
+        | 'expired'
+        | 'cancelled'
+      renewal_note: string
+      renewal_reminder_sent_at_unix_secs: number | null
+      updated: boolean
+    }
+  } catch (error) {
+    throw new Error(getError(error))
+  }
+}
+
+// ── Appointments ─────────────────────────────────────────────────────────────
+
+export async function getTextAgentAppointments(
+  agentId: string,
+  options?: {
+    status?: TextAppointmentStatus
+    from_unix?: number
+    to_unix?: number
+    limit?: number
+  }
+): Promise<{ appointments: TextAppointment[] }> {
+  try {
+    const safeLimit =
+      typeof options?.limit === 'number'
+        ? Math.max(1, Math.min(Math.trunc(options.limit), 200))
+        : undefined
+
+    const { data } = await api.get(`/text-agents/${agentId}/appointments`, {
+      params: {
+        status: options?.status,
+        from_unix: options?.from_unix,
+        to_unix: options?.to_unix,
+        limit: safeLimit,
+      },
+    })
+    return data
+  } catch (error) {
+    throw new Error(getError(error))
+  }
+}
+
+export async function createTextAgentAppointment(
+  agentId: string,
+  payload: {
+    appointment_date: string | number
+    contact_name?: string
+    contact_phone?: string
+    contact_email?: string
+    conversation_id?: string
+    timezone?: string
+    status?: TextAppointmentStatus
+    source?: 'manual' | 'agent' | 'embed' | 'phone' | 'voice'
+    notes?: string
+  }
+): Promise<TextAppointment> {
+  try {
+    const { data } = await api.post(`/text-agents/${agentId}/appointments`, payload)
+    return data
+  } catch (error) {
+    throw new Error(getError(error))
+  }
+}
+
+export async function updateTextAgentAppointment(
+  agentId: string,
+  appointmentId: string,
+  payload: Partial<{
+    appointment_date: string | number
+    contact_name: string
+    contact_phone: string
+    contact_email: string
+    conversation_id: string
+    timezone: string
+    status: TextAppointmentStatus
+    notes: string
+  }>
+): Promise<TextAppointment> {
+  try {
+    const { data } = await api.patch(
+      `/text-agents/${agentId}/appointments/${appointmentId}`,
+      payload
+    )
+    return data
+  } catch (error) {
+    throw new Error(getError(error))
+  }
+}
+
+export async function deleteTextAgentAppointment(agentId: string, appointmentId: string) {
+  try {
+    const { data } = await api.delete(`/text-agents/${agentId}/appointments/${appointmentId}`)
+    return data as { deleted: boolean }
+  } catch (error) {
+    throw new Error(getError(error))
+  }
+}
+
+export async function getTextAgentEmbedConfig(agentId: string): Promise<{
+  agent_id: string
+  agent_name: string
+  embed_enabled: boolean
+  iframe_url: string
+  iframe_snippet: string
+  script_snippet: string
+  public_chat_endpoint: string
+}> {
+  try {
+    const { data } = await api.get(`/text-agents/${agentId}/embed-config`)
+    return data
+  } catch (error) {
+    throw new Error(getError(error))
+  }
+}
+
+export async function getPublicTextAgentEmbedInfo(
+  agentId: string,
+  token: string
+): Promise<{
+  agent_id: string
+  name: string
+  welcome_message: string
+  language: string
+}> {
+  try {
+    const { data } = await api.get(`/text-agents/public/${agentId}/embed-info`, {
+      params: { token },
+    })
+    return data
+  } catch (error) {
+    throw new Error(getError(error))
+  }
+}
+
+export async function chatWithPublicTextAgentEmbed(
+  agentId: string,
+  payload: {
+    token: string
+    message: string
+    conversation_id?: string
+    session_id?: string
+  }
+): Promise<{
+  conversation_id: string
+  session_id: string
+  response: string
+  provider: string
+  model: string
+  token_usage: number | null
+  escalated?: boolean
+  intent?: string
+}> {
+  try {
+    const { data } = await api.post(`/text-agents/public/${agentId}/chat`, payload)
     return data
   } catch (error) {
     throw new Error(getError(error))

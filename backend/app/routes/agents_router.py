@@ -1,10 +1,35 @@
 from fastapi import APIRouter, File, Form, Query, Request, UploadFile
 
 from app.controllers.AgentController import AgentController
+from app.controllers.TextAgentController import TextAgentController
 from app.controllers.deps.auth import CurrentUser
 from app.controllers.deps.db_session import SessionDep
+from app.utils.roles import is_super_admin_user
 
 agents_router = APIRouter(prefix="/agents", tags=["Agents"])
+
+
+async def _safe_json_payload(request: Request) -> dict:
+    try:
+        payload = await request.json()
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+@agents_router.post("/bootstrap")
+async def bootstrap_client(current_user: CurrentUser, session: SessionDep):
+    """Idempotent: crea 1 agente de voz + 1 agente de texto para cliente final.
+
+    Super admin no necesita bootstrap — solo devuelve estado vacío.
+    """
+    if is_super_admin_user(current_user):
+        return {"voice": {"created": False, "skipped": "super_admin"},
+                "text": {"created": False, "skipped": "super_admin"}}
+
+    voice = await AgentController.bootstrap_client(current_user, session)
+    text = await TextAgentController.bootstrap_client(current_user, session)
+    return {"voice": voice, "text": text}
 
 
 @agents_router.get("")
@@ -209,6 +234,71 @@ async def list_conversations(
         session,
         cursor,
         page_size,
+    )
+
+
+@agents_router.get("/{agent_id}/appointments")
+async def list_agent_appointments(
+    agent_id: str,
+    current_user: CurrentUser,
+    session: SessionDep,
+    status: str | None = Query(default=None),
+    from_unix: int | None = Query(default=None, ge=1),
+    to_unix: int | None = Query(default=None, ge=1),
+    limit: int = Query(default=100, ge=1, le=200),
+):
+    return await AgentController.list_appointments(
+        agent_id,
+        current_user,
+        session,
+        status_filter=status,
+        from_unix=from_unix,
+        to_unix=to_unix,
+        limit=limit,
+    )
+
+
+@agents_router.post("/{agent_id}/appointments")
+async def create_agent_appointment(
+    agent_id: str,
+    request: Request,
+    current_user: CurrentUser,
+    session: SessionDep,
+):
+    payload = await _safe_json_payload(request)
+    return await AgentController.create_appointment(agent_id, payload, current_user, session)
+
+
+@agents_router.patch("/{agent_id}/appointments/{appointment_id}")
+async def update_agent_appointment(
+    agent_id: str,
+    appointment_id: str,
+    request: Request,
+    current_user: CurrentUser,
+    session: SessionDep,
+):
+    payload = await _safe_json_payload(request)
+    return await AgentController.update_appointment(
+        agent_id,
+        appointment_id,
+        payload,
+        current_user,
+        session,
+    )
+
+
+@agents_router.delete("/{agent_id}/appointments/{appointment_id}")
+async def delete_agent_appointment(
+    agent_id: str,
+    appointment_id: str,
+    current_user: CurrentUser,
+    session: SessionDep,
+):
+    return await AgentController.delete_appointment(
+        agent_id,
+        appointment_id,
+        current_user,
+        session,
     )
 
 

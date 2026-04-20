@@ -23,6 +23,7 @@ type Props = {
   watch: UseFormWatch<AgentFormValues>
   setValue: UseFormSetValue<AgentFormValues>
   errors: FieldErrors<AgentFormValues>
+  isClient?: boolean
 }
 
 const inputClass =
@@ -119,7 +120,7 @@ function TogglePill({
   )
 }
 
-export default function AgentTab({ register, watch, setValue, errors }: Props) {
+export default function AgentTab({ register, watch, setValue, errors, isClient = false }: Props) {
   const voiceField = register('voice_id')
   const ttsModelField = register('tts_model_id')
   const languageField = register('language')
@@ -202,9 +203,17 @@ export default function AgentTab({ register, watch, setValue, errors }: Props) {
             <textarea
               rows={10}
               placeholder="Eres un asistente de voz amigable y profesional. Tu objetivo es..."
-              className={inputClass}
+              className={`${inputClass} ${
+                isClient ? 'cursor-not-allowed bg-[#fafafa] text-black/65' : ''
+              }`}
+              readOnly={isClient}
               {...register('prompt')}
             />
+            {isClient && (
+              <p className="mt-1 text-xs text-black/45">
+                Este campo está bloqueado por política para cliente final.
+              </p>
+            )}
             <p className="mt-1 text-right text-xs text-black/40">{promptLength} caracteres</p>
             {errors.prompt && (
               <p className="text-red-500 text-xs mt-1">{errors.prompt.message}</p>
@@ -221,27 +230,37 @@ export default function AgentTab({ register, watch, setValue, errors }: Props) {
             <textarea
               rows={3}
               placeholder="Hola, en que puedo ayudarte hoy?"
-              className={inputClass}
+              className={`${inputClass} ${
+                isClient ? 'cursor-not-allowed bg-[#fafafa] text-black/65' : ''
+              }`}
+              readOnly={isClient}
               {...register('first_message')}
             />
+            {isClient && (
+              <p className="mt-1 text-xs text-black/45">
+                Este saludo está bloqueado por política para cliente final.
+              </p>
+            )}
           </div>
 
-          <div className="flex items-center justify-between gap-4 rounded-xl border border-[#e4e0f5] bg-white p-4">
-            <div>
-              <p className="text-sm font-medium text-black">Ignorar personalidad por defecto</p>
-              <p className="mt-1 text-xs text-black/50">
-                El agente no adoptara la personalidad amigable predeterminada de la plataforma
-              </p>
+          {!isClient && (
+            <div className="flex items-center justify-between gap-4 rounded-xl border border-[#e4e0f5] bg-white p-4">
+              <div>
+                <p className="text-sm font-medium text-black">Ignorar personalidad por defecto</p>
+                <p className="mt-1 text-xs text-black/50">
+                  El agente no adoptara la personalidad amigable predeterminada de la plataforma
+                </p>
+              </div>
+              <TogglePill
+                enabled={Boolean(ignorePersonality)}
+                onClick={() =>
+                  setValue('ignore_default_personality', !ignorePersonality, {
+                    shouldDirty: true,
+                  })
+                }
+              />
             </div>
-            <TogglePill
-              enabled={Boolean(ignorePersonality)}
-              onClick={() =>
-                setValue('ignore_default_personality', !ignorePersonality, {
-                  shouldDirty: true,
-                })
-              }
-            />
-          </div>
+          )}
         </div>
       </section>
 
@@ -307,35 +326,38 @@ export default function AgentTab({ register, watch, setValue, errors }: Props) {
             )}
           </div>
 
-          <div>
-            <label className={labelClass}>Modelo TTS</label>
-            <div className="relative">
-              <select
-                className={selectClass}
-                name={ttsModelField.name}
-                ref={ttsModelField.ref}
-                onBlur={ttsModelField.onBlur}
-                value={selectedTtsModel ?? 'eleven_turbo_v2_5'}
-                onChange={(e) => {
-                  ttsModelField.onChange(e)
-                  setValue('tts_model_id', e.target.value, { shouldDirty: true })
-                }}
-              >
-                {TTS_MODEL_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-              <div className="pointer-events-none absolute inset-y-0 right-3 flex items-center">
-                <ChevronDown />
+          {!isClient && (
+            <div>
+              <label className={labelClass}>Modelo TTS</label>
+              <div className="relative">
+                <select
+                  className={selectClass}
+                  name={ttsModelField.name}
+                  ref={ttsModelField.ref}
+                  onBlur={ttsModelField.onBlur}
+                  value={selectedTtsModel ?? 'eleven_turbo_v2_5'}
+                  onChange={(e) => {
+                    ttsModelField.onChange(e)
+                    setValue('tts_model_id', e.target.value, { shouldDirty: true })
+                  }}
+                >
+                  {TTS_MODEL_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <div className="pointer-events-none absolute inset-y-0 right-3 flex items-center">
+                  <ChevronDown />
+                </div>
+              </div>
+              <div className="mt-2 inline-flex rounded-full bg-[#ede9ff] px-2 py-1 text-xs text-[#271173]">
+                {selectedTtsDescription}
               </div>
             </div>
-            <div className="mt-2 inline-flex rounded-full bg-[#ede9ff] px-2 py-1 text-xs text-[#271173]">
-              {selectedTtsDescription}
-            </div>
-          </div>
+          )}
 
+          {!isClient && (
           <div className="space-y-5 rounded-xl border border-[#e4e0f5] bg-white p-4">
             <p className="text-sm font-medium text-black">Parametros de voz</p>
 
@@ -436,6 +458,7 @@ export default function AgentTab({ register, watch, setValue, errors }: Props) {
             </div>
 
           </div>
+          )}
         </div>
       </section>
 
@@ -447,7 +470,7 @@ export default function AgentTab({ register, watch, setValue, errors }: Props) {
         />
 
         <div className="space-y-5">
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <div className={isClient ? '' : 'grid grid-cols-1 gap-4 md:grid-cols-2'}>
             <div>
               <label className={labelClass}>Idioma</label>
               <div className="relative">
@@ -473,80 +496,87 @@ export default function AgentTab({ register, watch, setValue, errors }: Props) {
                   <ChevronDown />
                 </div>
               </div>
-              {autoLanguageDetection && (
+              {autoLanguageDetection && !isClient && (
                 <p className="mt-1 text-xs text-black/45">
                   Desactiva la deteccion automatica para fijar un idioma.
                 </p>
               )}
             </div>
 
-            <div>
-              <label className={labelClass}>Modelo de lenguaje (LLM)</label>
-              <div className="relative">
-                <select
-                  className={selectClass}
-                  name={llmField.name}
-                  ref={llmField.ref}
-                  onBlur={llmField.onBlur}
-                  value={selectedLlm ?? 'gemini-2.5-flash'}
-                  onChange={(e) => {
-                    llmField.onChange(e)
-                    setValue('llm', e.target.value, { shouldDirty: true })
-                  }}
-                >
-                  {SUPPORTED_LLMS.map((llm) => (
-                    <option key={llm.value} value={llm.value}>
-                      {llm.label}
-                    </option>
-                  ))}
-                </select>
-                <div className="pointer-events-none absolute inset-y-0 right-3 flex items-center">
-                  <ChevronDown />
-                </div>
-              </div>
-              <p className="mt-1.5 text-xs text-black/50">{llmDescription}</p>
-            </div>
-          </div>
-
-          <div>
-            <div className="mb-2 flex items-center justify-between">
+            {!isClient && (
               <div>
-                <p className="text-sm font-medium text-black">Temperatura</p>
-                <p className="text-xs text-black/50">Mayor = respuestas mas creativas y variadas</p>
+                <label className={labelClass}>Modelo de lenguaje (LLM)</label>
+                <div className="relative">
+                  <select
+                    className={selectClass}
+                    name={llmField.name}
+                    ref={llmField.ref}
+                    onBlur={llmField.onBlur}
+                    value={selectedLlm ?? 'gemini-2.5-flash'}
+                    onChange={(e) => {
+                      llmField.onChange(e)
+                      setValue('llm', e.target.value, { shouldDirty: true })
+                    }}
+                  >
+                    {SUPPORTED_LLMS.map((llm) => (
+                      <option key={llm.value} value={llm.value}>
+                        {llm.label}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="pointer-events-none absolute inset-y-0 right-3 flex items-center">
+                    <ChevronDown />
+                  </div>
+                </div>
+                <p className="mt-1.5 text-xs text-black/50">{llmDescription}</p>
               </div>
-              <span className="min-w-12 rounded-lg bg-[#ede9ff] px-2.5 py-1 text-center text-sm font-semibold text-[#271173]">
-                {llmTemperature.toFixed(2)}
-              </span>
-            </div>
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.05}
-              className="w-full h-1.5 rounded-full appearance-none bg-[#e4e0f5] [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[#271173] [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:shadow-md"
-              {...register('llm_temperature', { valueAsNumber: true })}
-            />
-            <div className="mt-1 flex justify-between text-xs text-black/40">
-              <span>Preciso</span>
-              <span>Creativo</span>
-            </div>
+            )}
           </div>
 
-          <div>
-            <label className={labelClass}>Maximo de tokens</label>
-            <p className="mb-2 text-xs text-black/50">Limite de tokens por respuesta del LLM</p>
-            <input
-              type="number"
-              min={-1}
-              max={8192}
-              step={256}
-              className={inputClass}
-              {...register('max_tokens', { valueAsNumber: true })}
-            />
-          </div>
+          {!isClient && (
+            <div>
+              <div className="mb-2 flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-black">Temperatura</p>
+                  <p className="text-xs text-black/50">Mayor = respuestas mas creativas y variadas</p>
+                </div>
+                <span className="min-w-12 rounded-lg bg-[#ede9ff] px-2.5 py-1 text-center text-sm font-semibold text-[#271173]">
+                  {llmTemperature.toFixed(2)}
+                </span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                className="w-full h-1.5 rounded-full appearance-none bg-[#e4e0f5] [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[#271173] [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:shadow-md"
+                {...register('llm_temperature', { valueAsNumber: true })}
+              />
+              <div className="mt-1 flex justify-between text-xs text-black/40">
+                <span>Preciso</span>
+                <span>Creativo</span>
+              </div>
+            </div>
+          )}
+
+          {!isClient && (
+            <div>
+              <label className={labelClass}>Maximo de tokens</label>
+              <p className="mb-2 text-xs text-black/50">Limite de tokens por respuesta del LLM</p>
+              <input
+                type="number"
+                min={-1}
+                max={8192}
+                step={256}
+                className={inputClass}
+                {...register('max_tokens', { valueAsNumber: true })}
+              />
+            </div>
+          )}
         </div>
       </section>
 
+      {!isClient && (
       <section className="border-t border-[#e4e0f5] pt-8">
         <SectionHeader
           icon={ChatBubbleLeftRightIcon}
@@ -605,6 +635,7 @@ export default function AgentTab({ register, watch, setValue, errors }: Props) {
           </div>
         </div>
       </section>
+      )}
     </div>
   )
 }

@@ -9,6 +9,7 @@ import {
   ArrowRightStartOnRectangleIcon,
   Cog6ToothIcon,
   InboxIcon,
+  CalendarDaysIcon,
 } from '@heroicons/react/24/outline'
 import {
   DevicePhoneMobileIcon as DevicePhoneMobileSolid,
@@ -17,6 +18,7 @@ import {
   ChatBubbleLeftRightIcon as ChatBubbleLeftRightSolid,
   UserGroupIcon as UserGroupSolid,
   InboxIcon as InboxSolid,
+  CalendarDaysIcon as CalendarDaysSolid,
 } from '@heroicons/react/24/solid'
 import Logo from '@/components/Logo'
 import { getAuthenticatedUser } from '@/api/AuthAPI'
@@ -45,6 +47,12 @@ const baseNavItems = [
     path: '/escalamientos',
     icon: InboxIcon,
     iconActive: InboxSolid,
+  },
+  {
+    label: 'Citas',
+    path: '/citas',
+    icon: CalendarDaysIcon,
+    iconActive: CalendarDaysSolid,
   },
   {
     label: 'Numeros de telefono',

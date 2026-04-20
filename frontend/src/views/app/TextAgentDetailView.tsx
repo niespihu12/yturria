@@ -14,6 +14,8 @@ import {
   ChartBarIcon,
   PencilIcon,
   SparklesIcon,
+  GlobeAltIcon,
+  CalendarDaysIcon,
 } from '@heroicons/react/24/outline'
 import { getTextAgent, listProviderConfigs, updateTextAgent } from '@/api/TextAgentsAPI'
 import TextAgentPreview from '@/components/app/text-agent/TextAgentPreview'
@@ -24,20 +26,33 @@ import TextAgentKnowledgeBaseTab from '@/components/app/text-agent/tabs/TextAgen
 import TextAgentAnalysisTab from '@/components/app/text-agent/tabs/TextAgentAnalysisTab'
 import TextAgentWhatsAppTab from '@/components/app/text-agent/tabs/TextAgentWhatsAppTab'
 import TextAgentSofiaTab from '@/components/app/text-agent/tabs/TextAgentSofiaTab'
+import TextAgentIntegrationTab from '@/components/app/text-agent/tabs/TextAgentIntegrationTab'
+import TextAgentAppointmentsTab from '@/components/app/text-agent/tabs/TextAgentAppointmentsTab'
 import { TEXT_PROVIDER_MODELS, type TextAgentFormValues, type TextProvider } from '@/types/textAgent'
+import { useCurrentUser } from '@/hooks/useCurrentUser'
 
 const BASE_TABS = [
   { id: 'config', label: 'Agente', icon: ChatBubbleLeftRightIcon },
   { id: 'tools', label: 'Herramientas', icon: WrenchScrewdriverIcon },
   { id: 'knowledge', label: 'Conocimiento', icon: BookOpenIcon },
   { id: 'sofia', label: 'Sofía IA', icon: SparklesIcon },
+  { id: 'appointments', label: 'Citas', icon: CalendarDaysIcon },
   { id: 'whatsapp', label: 'WhatsApp', icon: DevicePhoneMobileIcon },
+  { id: 'integration', label: 'Integración', icon: GlobeAltIcon },
   { id: 'analysis', label: 'Análisis', icon: ChartBarIcon },
 ] as const
 
 const KEYS_TAB = { id: 'keys', label: 'API Keys', icon: KeyIcon } as const
 
 type TabId = (typeof BASE_TABS)[number]['id'] | 'keys'
+
+const CLIENT_VISIBLE_TAB_IDS: Array<(typeof BASE_TABS)[number]['id']> = [
+  'config',
+  'sofia',
+  'whatsapp',
+  'integration',
+  'analysis',
+]
 
 export default function TextAgentDetailView() {
   const { id } = useParams<{ id: string }>()
@@ -46,6 +61,8 @@ export default function TextAgentDetailView() {
 
   const [activeTab, setActiveTab] = useState<TabId>('config')
   const [editingName, setEditingName] = useState(false)
+  const { isSuperAdmin } = useCurrentUser()
+  const isClient = !isSuperAdmin
 
   const { data: agent, isLoading, isError } = useQuery({
     queryKey: ['text-agent', id],
@@ -61,15 +78,24 @@ export default function TextAgentDetailView() {
   const providerConfigs = providerConfigsData?.providers ?? []
   const requiresUserKeys = providerConfigsData?.requires_user_keys ?? true
 
-  const tabs = requiresUserKeys
-    ? [BASE_TABS[0], KEYS_TAB, ...BASE_TABS.slice(1)]
+  const visibleBaseTabs = isClient
+    ? BASE_TABS.filter((tab) => CLIENT_VISIBLE_TAB_IDS.includes(tab.id))
     : [...BASE_TABS]
+
+  const tabs = requiresUserKeys && !isClient
+    ? [visibleBaseTabs[0], KEYS_TAB, ...visibleBaseTabs.slice(1)]
+    : [...visibleBaseTabs]
 
   useEffect(() => {
     if (!requiresUserKeys && activeTab === 'keys') {
       setActiveTab('config')
+      return
     }
-  }, [activeTab, requiresUserKeys])
+
+    if (!tabs.some((tab) => tab.id === activeTab)) {
+      setActiveTab((tabs[0]?.id as TabId) ?? 'config')
+    }
+  }, [activeTab, requiresUserKeys, tabs])
 
   const {
     register,
@@ -95,37 +121,42 @@ export default function TextAgentDetailView() {
     if (!agent) return
     reset({
       name: agent.name,
-      model: agent.model,
+      model: isClient ? 'gpt-4.1-mini' : agent.model,
       system_prompt: agent.system_prompt,
       welcome_message: agent.welcome_message,
-      temperature: agent.temperature,
-      max_tokens: agent.max_tokens,
+      temperature: isClient ? 0.7 : agent.temperature,
+      max_tokens: isClient ? 512 : agent.max_tokens,
       sofia_mode: agent.sofia_mode ?? false,
       sofia_config_json: agent.sofia_config_json ?? '{}',
     })
-  }, [agent, reset])
+  }, [agent, isClient, reset])
 
   const watchedModel = watch('model')
   const provider = agent?.provider as TextProvider | undefined
 
   useEffect(() => {
+    if (isClient && watchedModel !== 'gpt-4.1-mini') {
+      setValue('model', 'gpt-4.1-mini', { shouldDirty: false })
+      return
+    }
+
     if (!provider) return
     const available = TEXT_PROVIDER_MODELS[provider] ?? []
     const exists = available.some((m) => m.value === watchedModel)
     if (!exists && available.length > 0) {
       setValue('model', available[0].value, { shouldDirty: true })
     }
-  }, [watchedModel, provider, setValue])
+  }, [isClient, watchedModel, provider, setValue])
 
   const { mutate: save, mutateAsync: saveAsync, isPending: isSaving } = useMutation({
     mutationFn: (values: TextAgentFormValues) =>
       updateTextAgent(id!, {
         name: values.name,
-        model: values.model,
+        model: isClient ? 'gpt-4.1-mini' : values.model,
         system_prompt: values.system_prompt,
         welcome_message: values.welcome_message,
-        temperature: values.temperature,
-        max_tokens: values.max_tokens,
+        temperature: isClient ? 0.7 : values.temperature,
+        max_tokens: isClient ? 512 : values.max_tokens,
         sofia_mode: values.sofia_mode,
         sofia_config_json: values.sofia_config_json,
       }),
@@ -266,6 +297,7 @@ export default function TextAgentDetailView() {
               provider={agent.provider}
               temperature={watchedTemperature}
               maxTokens={watchedMaxTokens}
+              isClient={isClient}
             />
           )}
 
@@ -288,6 +320,10 @@ export default function TextAgentDetailView() {
             <TextAgentWhatsAppTab agentId={id!} />
           )}
 
+          {activeTab === 'integration' && (
+            <TextAgentIntegrationTab agentId={id!} />
+          )}
+
           {activeTab === 'sofia' && (
             <TextAgentSofiaTab
               agentId={id!}
@@ -298,6 +334,10 @@ export default function TextAgentDetailView() {
                 setValue('sofia_config_json', configJson, { shouldDirty: true })
               }}
             />
+          )}
+
+          {activeTab === 'appointments' && (
+            <TextAgentAppointmentsTab agentId={id!} />
           )}
 
           {activeTab === 'analysis' && <TextAgentAnalysisTab agentId={id!} />}

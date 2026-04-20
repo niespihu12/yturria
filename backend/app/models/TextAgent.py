@@ -30,5 +30,11 @@ class TextAgent(SQLModel, table=True):
     max_tokens: int = Field(default=512, nullable=False)
     sofia_mode: bool = Field(default=False, nullable=False)
     sofia_config_json: str = Field(default="{}", nullable=False)
+    embed_enabled: bool = Field(default=True, nullable=False)
+    embed_token: str = Field(default="", nullable=False, index=True)
+    legal_notice: str = Field(
+        default="",
+        sa_column=Column(LONG_TEXT, nullable=False),
+    )
     created_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
     updated_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)

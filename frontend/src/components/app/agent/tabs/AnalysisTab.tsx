@@ -39,6 +39,7 @@ type Props = {
   agentId: string
   agent: AgentDetail
   onUpdate: () => void
+  isClient?: boolean
 }
 
 type EditableCriterion = {
@@ -552,7 +553,7 @@ function ConversationDetailModal({
   )
 }
 
-export default function AnalysisTab({ agentId, agent, onUpdate }: Props) {
+export default function AnalysisTab({ agentId, agent, onUpdate, isClient = false }: Props) {
   const queryClient = useQueryClient()
   const [selectedConv, setSelectedConv] = useState<string | null>(null)
   const [conversationCursor, setConversationCursor] = useState<string | null>(null)
@@ -718,6 +719,7 @@ export default function AnalysisTab({ agentId, agent, onUpdate }: Props) {
 
   return (
     <div className="space-y-6">
+      {!isClient && (
       <div className={`${cardClass} p-5`}>
         <div className="mb-5 flex flex-col gap-3 border-b border-[#e4e0f5] pb-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
@@ -1086,6 +1088,8 @@ export default function AnalysisTab({ agentId, agent, onUpdate }: Props) {
           )}
         </div>
       </div>
+
+      )}
 
       <div>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">

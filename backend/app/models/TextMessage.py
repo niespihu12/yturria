@@ -16,6 +16,7 @@ class TextMessage(SQLModel, table=True):
     )
     role: str = Field(nullable=False)
     content: str = Field(sa_column=Column(Text, nullable=False))
+    deleted_at: datetime | None = Field(default=None, nullable=True)
     provider: str = Field(default="", nullable=False)
     model: str = Field(default="", nullable=False)
     token_usage: int | None = Field(default=None, nullable=True)

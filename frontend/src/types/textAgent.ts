@@ -26,6 +26,7 @@ export type TextAgentSummary = {
   max_tokens: number
   sofia_mode: boolean
   sofia_config_json: string
+  embed_enabled?: boolean
   created_at_unix_secs: number
   updated_at_unix_secs: number
   owner_user_id?: string
@@ -86,6 +87,50 @@ export type TextConversation = {
   escalation_status?: 'none' | 'pending' | 'in_progress' | 'resolved'
   escalation_reason?: string
   escalated_at_unix_secs?: number | null
+  renewal_date_unix_secs?: number | null
+  renewal_status?: 'none' | 'scheduled' | 'reminder_sent' | 'contacted' | 'renewed' | 'expired' | 'cancelled'
+  renewal_note?: string
+  renewal_reminder_sent_at_unix_secs?: number | null
+}
+
+export type UpcomingRenewal = {
+  conversation_id: string
+  agent_id: string
+  agent_name: string
+  title: string
+  renewal_date_unix_secs: number
+  renewal_status: 'none' | 'scheduled' | 'reminder_sent' | 'contacted' | 'renewed' | 'expired' | 'cancelled'
+  renewal_note: string
+  renewal_reminder_sent_at_unix_secs?: number | null
+  days_until_renewal: number
+}
+
+export type TextAppointmentStatus =
+  | 'scheduled'
+  | 'confirmed'
+  | 'completed'
+  | 'cancelled'
+  | 'no_show'
+
+export type TextAppointment = {
+  id: string
+  text_agent_id?: string | null
+  voice_agent_id?: string | null
+  conversation_id?: string | null
+  contact_name: string
+  contact_phone: string
+  contact_email: string
+  appointment_date_unix_secs: number
+  timezone: string
+  status: TextAppointmentStatus
+  source: 'manual' | 'agent' | 'embed' | 'phone' | 'voice'
+  notes: string
+  google_event_id?: string
+  google_calendar_id?: string
+  google_sync_status?: string
+  google_sync_error?: string
+  created_at_unix_secs: number
+  updated_at_unix_secs: number
 }
 
 export type EscalationStatus = 'pending' | 'in_progress' | 'resolved'
@@ -99,10 +144,16 @@ export type EscalatedConversation = TextConversation & {
 export type SofiaConfig = {
   advisor_phone: string
   advisor_name: string
+  /** @deprecated use company_name — kept for backward compat with saved configs */
   business_name: string
   business_hours: string
   escalation_phrases: string[]
   max_response_lines: number
+  escalation_threshold: number
+  company_name?: string
+  company_years?: string
+  carriers?: string
+  legal_disclaimer?: string
 }
 
 export type TextConversationDetail = {
