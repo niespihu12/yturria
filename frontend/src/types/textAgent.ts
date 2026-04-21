@@ -177,6 +177,20 @@ export type TextConversationDetail = {
 
 export type WhatsAppProvider = 'meta' | 'twilio'
 
+export type SofiaErrorLabel = 'false_positive' | 'true_positive' | ''
+
+export type SofiaError = {
+  conversation_id: string
+  title: string
+  channel: string
+  escalation_reason: string
+  escalation_status: string
+  sofia_error_label: SofiaErrorLabel
+  escalated_at_unix_secs: number | null
+  created_at_unix_secs: number
+  transcript: Array<{ role: string; message: string }>
+}
+
 export type TextAgentWhatsApp = {
   id: string
   text_agent_id: string

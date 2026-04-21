@@ -17,6 +17,8 @@ import type {
   UpcomingRenewal,
   TextAppointment,
   TextAppointmentStatus,
+  SofiaError,
+  SofiaErrorLabel,
 } from '@/types/textAgent'
 
 type UserScopeOptions = {
@@ -644,4 +646,39 @@ export async function updateEscalation(
   } catch (error) {
     throw new Error(getError(error))
   }
+}
+
+// ── Sofia Errors ──────────────────────────────────────────────────────────────
+
+export async function getSofiaErrors(
+  agentId: string,
+  label?: SofiaErrorLabel
+): Promise<{ sofia_errors: SofiaError[]; total: number }> {
+  try {
+    const params = label !== undefined ? { label } : {}
+    const { data } = await api.get(`/text-agents/${agentId}/sofia-errors`, { params })
+    return data
+  } catch (error) {
+    throw new Error(getError(error))
+  }
+}
+
+export async function updateSofiaErrorLabel(
+  agentId: string,
+  conversationId: string,
+  label: SofiaErrorLabel
+): Promise<{ ok: boolean; sofia_error_label: SofiaErrorLabel }> {
+  try {
+    const { data } = await api.patch(
+      `/text-agents/${agentId}/sofia-errors/${conversationId}`,
+      { sofia_error_label: label }
+    )
+    return data
+  } catch (error) {
+    throw new Error(getError(error))
+  }
+}
+
+export function getSofiaErrorsExportUrl(agentId: string): string {
+  return `/api/text-agents/${agentId}/sofia-errors/export`
 }

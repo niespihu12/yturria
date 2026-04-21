@@ -10,9 +10,11 @@ import {
   CheckCircleIcon,
   XMarkIcon,
   ExclamationCircleIcon,
+  ChatBubbleLeftRightIcon,
 } from '@heroicons/react/24/outline'
-import { updateTextAgent, upsertWhatsAppConfig, getWhatsAppConfig } from '@/api/TextAgentsAPI'
+import { updateTextAgent, upsertWhatsAppConfig, getWhatsAppConfig, getTextAgentEmbedConfig } from '@/api/TextAgentsAPI'
 import type { WhatsAppProvider } from '@/types/textAgent'
+import ChannelSelectionStep from './ChannelSelectionStep'
 
 type Props = {
   agentId: string
@@ -70,6 +72,12 @@ export default function OnboardingWizard({ agentId, onComplete }: Props) {
     queryKey: ['onboarding-whatsapp', agentId],
     queryFn: () => getWhatsAppConfig(agentId),
     enabled: step === 3,
+  })
+
+  const { data: embedConfigData } = useQuery({
+    queryKey: ['onboarding-embed-config', agentId],
+    queryFn: () => getTextAgentEmbedConfig(agentId),
+    enabled: step === 1,
   })
 
   const wpConfig = wpQueryData?.config ?? null
@@ -243,6 +251,25 @@ export default function OnboardingWizard({ agentId, onComplete }: Props) {
                 />
               </div>
 
+              {/* Live preview */}
+              {data.company_name.trim() && (
+                <div className="rounded-2xl border border-[#e4e0f5] bg-[#f8f7ff] p-4">
+                  <div className="mb-2 flex items-center gap-1.5">
+                    <ChatBubbleLeftRightIcon className="h-4 w-4 text-[#271173]" />
+                    <span className="text-xs font-semibold text-[#271173]">Preview de Sofía</span>
+                  </div>
+                  <div className="rounded-xl bg-white p-3 shadow-sm">
+                    <div className="max-w-[85%] rounded-xl rounded-tl-none bg-[#f3f0ff] px-3 py-2 text-xs text-black">
+                      ¡Hola! Soy Sofía, asistente virtual de{' '}
+                      <span className="font-semibold">{data.company_name}</span>.
+                      {data.carriers ? ` Trabajamos con ${data.carriers}.` : ''}
+                      {data.business_hours ? ` Nuestro horario es ${data.business_hours}.` : ''}
+                      {' '}¿En qué puedo ayudarte?
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="flex justify-end pt-2">
                 <button
                   type="button"
@@ -260,11 +287,22 @@ export default function OnboardingWizard({ agentId, onComplete }: Props) {
           {step === 1 && (
             <div className="space-y-4">
               <div>
-                <h2 className="text-base font-bold text-black">Canal de WhatsApp</h2>
+                <h2 className="text-base font-bold text-black">Canal de comunicación</h2>
                 <p className="mt-0.5 text-xs text-black/50">
-                  Conecta un número para que Sofía reciba y responda mensajes automáticamente.
+                  Empieza con el chat web (disponible ahora) y añade WhatsApp cuando lo apruebes.
                 </p>
               </div>
+
+              <ChannelSelectionStep
+                embedSnippet={embedConfigData?.iframe_snippet ?? '<!-- Cargando snippet... -->'}
+                onChoiceChange={c => upd({ wp_skipped: c === 'web_only' })}
+                defaultChoice={data.wp_skipped ? 'web_only' : 'web_and_whatsapp'}
+              />
+
+              {!data.wp_skipped && (
+                <>
+                  <div className="border-t border-[#e4e0f5] pt-4">
+                    <p className="mb-3 text-xs font-semibold text-black/60">Configuración de WhatsApp</p>
 
               <div className="grid gap-2 sm:grid-cols-2">
                 {(['twilio', 'meta'] as const).map((p) => (
@@ -349,25 +387,43 @@ export default function OnboardingWizard({ agentId, onComplete }: Props) {
                 </div>
               )}
 
+                  </div>
+                </>
+              )}
+
               <div className="flex items-center justify-between pt-2">
-                <button
-                  type="button"
-                  onClick={() => { upd({ wp_skipped: true }); setStep(2) }}
-                  className="text-sm text-black/40 hover:text-black/70 transition-colors"
-                >
-                  Omitir por ahora
-                </button>
-                <button
-                  type="button"
-                  disabled={!data.wp_phone.trim() || savingWP}
-                  onClick={() => saveWP()}
-                  className="flex items-center gap-2 rounded-xl bg-[#271173] px-6 py-2.5 text-sm font-semibold text-white hover:bg-[#1f0d5a] disabled:opacity-40 transition-colors"
-                >
-                  {savingWP && (
-                    <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
-                  )}
-                  Guardar y continuar →
-                </button>
+                {data.wp_skipped ? (
+                  <span />
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => { upd({ wp_skipped: true }); setStep(2) }}
+                    className="text-sm text-black/40 hover:text-black/70 transition-colors"
+                  >
+                    Omitir WhatsApp por ahora
+                  </button>
+                )}
+                {data.wp_skipped ? (
+                  <button
+                    type="button"
+                    onClick={() => setStep(2)}
+                    className="rounded-xl bg-[#271173] px-6 py-2.5 text-sm font-semibold text-white hover:bg-[#1f0d5a] transition-colors"
+                  >
+                    Continuar con web →
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={!data.wp_phone.trim() || savingWP}
+                    onClick={() => saveWP()}
+                    className="flex items-center gap-2 rounded-xl bg-[#271173] px-6 py-2.5 text-sm font-semibold text-white hover:bg-[#1f0d5a] disabled:opacity-40 transition-colors"
+                  >
+                    {savingWP && (
+                      <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                    )}
+                    Guardar y continuar →
+                  </button>
+                )}
               </div>
             </div>
           )}

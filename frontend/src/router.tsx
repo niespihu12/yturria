@@ -19,6 +19,8 @@ import EscalationsView from '@/views/app/EscalationsView'
 import AppointmentsView from '@/views/app/AppointmentsView'
 import WhatsAppConfigView from '@/views/app/WhatsAppConfigView'
 import TextAgentEmbedView from '@/views/embed/TextAgentEmbedView'
+import SofiaErrorsView from '@/views/app/sofia-errors/SofiaErrorsView'
+import VoiceAnalyticsView from '@/views/app/voice-analytics/VoiceAnalyticsView'
 
 export default function Router() {
   return (
@@ -44,6 +46,8 @@ export default function Router() {
           <Route path="/agentes_texto" element={<TextAgentsView />} />
           <Route path="/agentes_texto/:id" element={<TextAgentDetailView />} />
           <Route path="/escalamientos" element={<EscalationsView />} />
+          <Route path="/sofia-errores" element={<SofiaErrorsView />} />
+          <Route path="/voice-analytics" element={<VoiceAnalyticsView />} />
           <Route path="/citas" element={<AppointmentsView />} />
           <Route path="/whatsapp_config" element={<WhatsAppConfigView />} />
           <Route path="/numeros_telefono" element={<PhoneNumbersView />} />
