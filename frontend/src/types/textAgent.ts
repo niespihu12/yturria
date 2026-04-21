@@ -14,11 +14,41 @@ export type ProviderConfigListResponse = {
   requires_user_keys: boolean
 }
 
+export type TextAgentTemplateKey = 'sofia' | 'recepcionista' | 'faq_bot' | 'custom'
+
+export type TextAgentTemplateCapabilities = {
+  show_sofia_tab: boolean
+  show_knowledge_tab: boolean
+  show_tools_tab: boolean
+  show_appointments_tab: boolean
+  allow_prompt_edit: boolean
+  allow_welcome_edit: boolean
+  allow_model_edit: boolean
+  allow_runtime_tuning: boolean
+  launches_onboarding: boolean
+}
+
+export type TextAgentTemplate = {
+  key: TextAgentTemplateKey
+  label: string
+  summary: string
+  description: string
+  highlights: string[]
+  recommended: boolean
+  capabilities: TextAgentTemplateCapabilities
+}
+
 export type TextAgentSummary = {
   agent_id: string
   name: string
   provider: TextProvider
   model: string
+  template_key: TextAgentTemplateKey
+  template_label: string
+  template_summary: string
+  template_description: string
+  template_highlights: string[]
+  template_capabilities: TextAgentTemplateCapabilities
   system_prompt: string
   welcome_message: string
   language: string
@@ -210,6 +240,7 @@ export type TextAgentWhatsApp = {
 export type TextAgentFormValues = {
   name: string
   model: string
+  template_key: TextAgentTemplateKey
   system_prompt: string
   welcome_message: string
   legal_notice: string

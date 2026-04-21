@@ -11,6 +11,8 @@ import type {
   TextConversationDetail,
   TextKnowledgeBaseDocument,
   TextProvider,
+  TextAgentTemplate,
+  TextAgentTemplateKey,
   WhatsAppProvider,
   EscalatedConversation,
   EscalationStatus,
@@ -97,10 +99,31 @@ export async function getTextAgents(
   }
 }
 
-export async function createTextAgent(payload: { name: string; provider: TextProvider; model?: string }) {
+export async function createTextAgent(payload: {
+  name: string
+  provider: TextProvider
+  template_key: TextAgentTemplateKey
+  model?: string
+}) {
   try {
     const { data } = await api.post('/text-agents', payload)
     return data as TextAgentSummary
+  } catch (error) {
+    throw new Error(getError(error))
+  }
+}
+
+export async function listTextAgentTemplates(): Promise<{
+  templates: TextAgentTemplate[]
+  client_agent_limit: number
+}> {
+  try {
+    const { data } = await api.get('/text-agents/templates')
+    return {
+      ...data,
+      templates: Array.isArray(data?.templates) ? data.templates : [],
+      client_agent_limit: Number(data?.client_agent_limit || 3),
+    }
   } catch (error) {
     throw new Error(getError(error))
   }
@@ -128,6 +151,11 @@ export async function updateTextAgent(
     max_tokens: number
     sofia_mode: boolean
     sofia_config_json: string
+    embed_enabled: boolean
+    embed_primary_color: string
+    embed_position: string
+    embed_logo_url: string
+    regenerate_embed_token: boolean
   }>
 ) {
   try {
