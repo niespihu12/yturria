@@ -35,3 +35,13 @@ def add_cors_middleware(app: FastAPI) -> None:
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
     )
+
+
+def add_all_middlewares(app: FastAPI) -> None:
+    """Registra todos los middlewares en el orden correcto"""
+    from app.middlewares.cors import add_cors_middleware
+    from app.middlewares.rate_limiter import RateLimitMiddleware
+    
+    # El orden importa: rate limiting primero, luego CORS
+    app.add_middleware(RateLimitMiddleware)
+    add_cors_middleware(app)

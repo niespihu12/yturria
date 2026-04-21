@@ -1,0 +1,63 @@
+# Cloudflare Tunnel Configuration para Sofía WEP
+# Este archivo configura un tunnel seguro desde tu Mac Studio hacia internet
+# sin necesidad de abrir puertos en el router.
+
+# ID del tunnel (se genera con: cloudflared tunnel create sofia-wep)
+tunnel: SOFIA_WEP_TUNNEL_ID_REEMPLAZAR
+
+# Credenciales del tunnel
+credentials-file: /etc/cloudflared/sofia-wep.json
+
+# Configuración de ingress
+ingress:
+  # Backend - API FastAPI
+  - hostname: api.sofia-wep.com
+    service: http://localhost:8000
+    
+  # Frontend - Vite/React (en producción usar nginx o similar)
+  - hostname: app.sofia-wep.com
+    service: http://localhost:5173
+    
+  # Health check endpoint
+  - hostname: health.sofia-wep.com
+    service: http://localhost:8000/health
+    
+  # Catch-all: redirigir todo tráfico no definido al backend
+  - service: http://localhost:8000
+  
+# Logging
+logfile: /var/log/cloudflared/sofia-wep.log
+loglevel: info
+
+# Metrics para monitoreo (opcional - compatible con Prometheus)
+metrics: 127.0.0.1:2000
+
+# Configuración de conexión
+no-autoupdate: true
+protocol: http2
+
+# Origens específicos con configuraciones avanzadas
+originConfig:
+  # TLS
+  caPool: /etc/ssl/certs/ca-certificates.crt
+  
+  # Keep-alive para mejor performance
+  keepAliveConnections: 100
+  keepAliveTimeout: 90s
+  
+  # Timeouts
+  connectTimeout: 10s
+  timeout: 30s
+  
+  # Compression
+  compression: gzip
+
+# Reglas de acceso (opcional - para proteger endpoints admin)
+access:
+  - domain: api.sofia-wep.com
+    path: /api/admin/*
+    policies:
+      - require:
+          email:
+            - admin@yturria.com
+            - Enrique@yturria.com
