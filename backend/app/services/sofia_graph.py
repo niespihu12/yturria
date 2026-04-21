@@ -50,6 +50,10 @@ def _coerce_config(raw_config: dict[str, Any] | None) -> SofiaConfig:
     if "business_name" in raw_config and "company_name" not in normalized:
         normalized["company_name"] = raw_config.get("business_name")
 
+    # legal_disclaimer era el nombre anterior — mapear al nombre canónico legal_notice.
+    if "legal_disclaimer" in raw_config and "legal_notice" not in normalized:
+        normalized["legal_notice"] = raw_config.get("legal_disclaimer")
+
     if "escalation_phrases" in raw_config and "extra_escalation_phrases" not in normalized:
         phrases = raw_config.get("escalation_phrases")
         if isinstance(phrases, list):
@@ -126,10 +130,50 @@ def classify(state: SofiaState) -> dict:
         "renueva",
     ]
 
+    # Siniestro activo (cliente con reporte ya abierto) — escalación inmediata
+    # con razón específica, antes del check genérico de siniestro.
+    active_claim_keywords = [
+        "siniestro activo",
+        "siniestro abierto",
+        "siniestro en proceso",
+        "reporte abierto",
+        "folio de siniestro",
+    ]
+    if any(kw in lower_msg for kw in active_claim_keywords) and not already_escalated:
+        return {
+            "intent": "siniestro",
+            "should_escalate": True,
+            "escalation_reason": "active_claim",
+        }
+
     if any(keyword in lower_msg for keyword in claim_keywords):
         return {"intent": "siniestro"}
     if any(keyword in lower_msg for keyword in renewal_keywords):
         return {"intent": "renovacion"}
+
+    # Póliza específica del cliente (no cotización nueva) — escalar al asesor.
+    # Va después de renewal_keywords para que consultas de vigencia/renovación
+    # de "mi póliza" sigan siendo renovacion y no se escalen prematuramente.
+    own_policy_keywords = [
+        "mi póliza",
+        "mi poliza",
+        "número de póliza",
+        "numero de poliza",
+        "mi número de póliza",
+        "mi numero de poliza",
+        "folio de póliza",
+        "folio de poliza",
+        "tengo una póliza",
+        "tengo una poliza",
+        "tengo póliza",
+        "tengo poliza",
+    ]
+    if any(kw in lower_msg for kw in own_policy_keywords) and not already_escalated:
+        return {
+            "intent": "otro",
+            "should_escalate": True,
+            "escalation_reason": "specific_policy",
+        }
 
     for phrase in ESCALATION_PHRASES + config.extra_escalation_phrases:
         if phrase in lower_msg:
@@ -203,7 +247,7 @@ def respond(state: SofiaState) -> dict:
     extra = f"Contexto de base de conocimiento:\n{rag}" if rag else ""
 
     legal_notice_section = (
-        f"\nAVISO LEGAL: {config.legal_disclaimer}" if config.legal_disclaimer.strip() else ""
+        f"\nAVISO LEGAL: {config.legal_notice}" if config.legal_notice.strip() else ""
     )
     system_text = system_base.format(
         company_name=config.company_name,
@@ -250,7 +294,11 @@ def guard(state: SofiaState) -> dict:
         max_tokens=config.max_tokens,
     )
 
-    prompt = GUARD_PROMPT.format(response=response)
+    prompt = GUARD_PROMPT.format(
+        response=response,
+        max_response_lines=config.max_response_lines,
+        max_chars=config.max_response_lines * 70,
+    )
     result = llm.invoke([HumanMessage(content=prompt)])
     verdict = result.content.strip()
 

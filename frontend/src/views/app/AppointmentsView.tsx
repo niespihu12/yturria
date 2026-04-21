@@ -357,6 +357,7 @@ export default function AppointmentsView() {
     [allAgents, modalForm.channel]
   )
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     const inCurrentMonth =
       selectedDayDate.getFullYear() === currentMonth.getFullYear() &&
@@ -395,6 +396,7 @@ export default function AppointmentsView() {
       setModalForm((prev) => ({ ...prev, agentId: createModeAgents[0].id }))
     }
   }, [createModeAgents, isModalOpen, modalForm.agentId, modalMode])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ['appointments-dashboard'] })

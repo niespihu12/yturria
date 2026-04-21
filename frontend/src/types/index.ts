@@ -2,18 +2,16 @@ import { z } from 'zod'
 
 
 /** Auth */
-const authSchema = z.object({
-    name: z.string(),
-    email: z.string().email(),
-    current_password: z.string(),
-    password: z.string(),
-    password_confirmation: z.string(),
-    token: z.string(),
-    code: z.string(),
-    mfa_token: z.string()
-})
-
-type Auth = z.infer<typeof authSchema>
+type Auth = {
+    name: string
+    email: string
+    current_password: string
+    password: string
+    password_confirmation: string
+    token: string
+    code: string
+    mfa_token: string
+}
 
 export type UserLoginForm = Pick<Auth, 'email' | 'password'>
 export type UserRegistrationForm = Pick<Auth, 'name' | 'email' | 'password' | 'password_confirmation'>

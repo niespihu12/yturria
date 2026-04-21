@@ -120,6 +120,7 @@ export async function updateTextAgent(
     model: string
     system_prompt: string
     welcome_message: string
+    legal_notice: string
     language: string
     temperature: number
     max_tokens: number
@@ -344,6 +345,7 @@ export async function upsertWhatsAppConfig(
     account_sid?: string
     auth_token?: string
     access_token?: string
+    app_secret?: string
     phone_number_id?: string
     business_account_id?: string
     active?: boolean

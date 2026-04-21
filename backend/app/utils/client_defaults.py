@@ -34,17 +34,23 @@ class TenantProfile:
     company_years: str = "75"
     business_hours: str = _DEFAULT_BUSINESS_HOURS
     carriers: str = _DEFAULT_CARRIERS
-    legal_disclaimer: str = ""
+    legal_notice: str = ""
     company_context: str = _DEFAULT_COMPANY_CONTEXT
 
 
 def _load_tenant_profile() -> TenantProfile:
+    # TENANT_LEGAL_NOTICE es el nombre canónico; TENANT_LEGAL_DISCLAIMER se acepta
+    # por backward compat con deployments que ya usaban la var anterior.
+    legal_notice = (
+        os.getenv("TENANT_LEGAL_NOTICE", "")
+        or os.getenv("TENANT_LEGAL_DISCLAIMER", "")
+    ).strip()
     return TenantProfile(
         company_name=os.getenv("TENANT_COMPANY_NAME", "Yturria Agente de Seguros").strip(),
         company_years=os.getenv("TENANT_COMPANY_YEARS", "75").strip(),
         business_hours=os.getenv("TENANT_BUSINESS_HOURS", _DEFAULT_BUSINESS_HOURS).strip(),
         carriers=os.getenv("TENANT_CARRIERS", _DEFAULT_CARRIERS).strip(),
-        legal_disclaimer=os.getenv("TENANT_LEGAL_DISCLAIMER", "").strip(),
+        legal_notice=legal_notice,
         company_context=os.getenv("TENANT_COMPANY_CONTEXT", _DEFAULT_COMPANY_CONTEXT).strip(),
     )
 
@@ -55,7 +61,6 @@ TENANT: TenantProfile = _load_tenant_profile()
 # ── Voice prompt & first message (built from TENANT at import time) ───────────
 
 def _build_voice_prompt(t: TenantProfile) -> str:
-    disclaimer_line = f"\nAVISO LEGAL: {t.legal_disclaimer}" if t.legal_disclaimer else ""
     return (
         f"Eres Sofía, asistente virtual de {t.company_name}.\n"
         f"{t.company_name} tiene {t.company_years} años en el mercado asegurador mexicano.\n"
@@ -83,7 +88,6 @@ def _build_voice_prompt(t: TenantProfile) -> str:
         "NUNCA des precios exactos sin revisión del asesor.\n"
         "NUNCA hagas promesas de cobertura específica.\n"
         f"Siempre di: \"soy la asistente virtual de {t.company_name}\""
-        f"{disclaimer_line}"
     )
 
 

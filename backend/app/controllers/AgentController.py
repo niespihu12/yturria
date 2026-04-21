@@ -1,6 +1,7 @@
 import logging
 import os
 import re
+import json
 from datetime import datetime, timezone
 from typing import Any
 
@@ -10,12 +11,28 @@ from sqlmodel import Session, select
 
 from app.controllers.deps.auth import CurrentUser
 from app.controllers.deps.db_session import SessionDep
+from app.models.AuditTrailEvent import AuditTrailEvent
 from app.models.User import User
 from app.models.UserAgent import UserAgent
 from app.models.TextAppointment import TextAppointment
+from app.models.UserWhatsAppConfig import UserWhatsAppConfig
+from app.models.VoiceAgentRuntimeConfig import VoiceAgentRuntimeConfig
 from app.models.UserPhoneNumber import UserPhoneNumber
 from app.models.UserTool import UserTool
+from app.services.appointment_service import (
+    format_appointment_for_humans,
+    is_time_slot_available,
+    parse_preferred_datetime,
+)
 from app.services.google_calendar import sync_google_calendar_for_appointment
+from app.services.whatsapp_service import (
+    build_appointment_confirmation_message,
+    build_escalation_message,
+    has_valid_credentials,
+    normalize_recipient,
+    send_whatsapp_message,
+)
+from app.utils.crypto import encrypt_secret
 from app.utils.client_defaults import (
     apply_client_voice_defaults,
     build_client_voice_payload,
@@ -36,6 +53,7 @@ SUPPORTED_APPOINTMENT_STATUSES = {
 }
 
 SUPPORTED_APPOINTMENT_SOURCES = {"manual", "agent", "embed", "phone", "voice"}
+SUPPORTED_ESCALATION_CHANNELS = {"phone", "whatsapp"}
 
 
 def _headers(*, json_body: bool = False) -> dict[str, str]:
@@ -289,6 +307,92 @@ def _apply_google_calendar_sync(
     session.add(appointment)
 
 
+def _log_audit_event(
+    session: SessionDep,
+    *,
+    event_type: str,
+    actor_user_id: str | None,
+    subject_user_id: str | None,
+    entity_type: str,
+    entity_id: str,
+    details: dict[str, Any] | None = None,
+) -> None:
+    session.add(
+        AuditTrailEvent(
+            event_type=event_type,
+            actor_user_id=actor_user_id,
+            subject_user_id=subject_user_id,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            details_json=json.dumps(details or {}),
+        )
+    )
+
+
+def _serialize_global_whatsapp_config(config: UserWhatsAppConfig) -> dict[str, Any]:
+    return {
+        "id": config.id,
+        "provider": config.provider,
+        "default_sender_number": config.default_sender_number,
+        "active": bool(config.active),
+        "message_template_escalation": config.message_template_escalation,
+        "message_template_appointment": config.message_template_appointment,
+        "has_twilio_auth_token": bool(config.auth_token_encrypted),
+        "has_meta_access_token": bool(config.access_token_encrypted),
+        "account_sid": config.account_sid,
+        "phone_number_id": config.phone_number_id,
+        "business_account_id": config.business_account_id,
+    }
+
+
+def _serialize_voice_runtime_config(config: VoiceAgentRuntimeConfig) -> dict[str, Any]:
+    return {
+        "id": config.id,
+        "agent_id": config.agent_id,
+        "whatsapp_enabled": bool(config.whatsapp_enabled),
+        "default_escalation_channel": config.default_escalation_channel,
+        "escalation_phone_number": config.escalation_phone_number,
+        "updated_at_unix_secs": _to_unix(config.updated_at),
+    }
+
+
+def _get_or_create_voice_runtime_config(
+    session: SessionDep,
+    *,
+    owner_user_id: str,
+    agent_id: str,
+) -> VoiceAgentRuntimeConfig:
+    config = session.exec(
+        select(VoiceAgentRuntimeConfig).where(
+            VoiceAgentRuntimeConfig.agent_id == agent_id,
+            VoiceAgentRuntimeConfig.user_id == owner_user_id,
+        )
+    ).first()
+
+    if config:
+        return config
+
+    now = _utcnow()
+    config = VoiceAgentRuntimeConfig(
+        user_id=owner_user_id,
+        agent_id=agent_id,
+        whatsapp_enabled=False,
+        default_escalation_channel="phone",
+        escalation_phone_number="",
+        created_at=now,
+        updated_at=now,
+    )
+    session.add(config)
+    session.flush()
+    return config
+
+
+def _resolve_voice_whatsapp_config(session: SessionDep, user_id: str) -> UserWhatsAppConfig | None:
+    return session.exec(
+        select(UserWhatsAppConfig).where(UserWhatsAppConfig.user_id == user_id)
+    ).first()
+
+
 class AgentController:
 
     @staticmethod
@@ -455,6 +559,391 @@ class AgentController:
         return _elevenlabs_patch(f"/convai/agents/{agent_id}", payload)
 
     @staticmethod
+    async def get_whatsapp_global_config(current_user: CurrentUser, session: SessionDep):
+        config = _resolve_voice_whatsapp_config(session, current_user.id)
+        if not config:
+            return {"config": None}
+        return {"config": _serialize_global_whatsapp_config(config)}
+
+    @staticmethod
+    async def upsert_whatsapp_global_config(
+        payload: dict,
+        current_user: CurrentUser,
+        session: SessionDep,
+    ):
+        provider = str(payload.get("provider") or "").strip().lower()
+        if provider not in {"twilio", "meta"}:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="provider debe ser twilio o meta",
+            )
+
+        config = _resolve_voice_whatsapp_config(session, current_user.id)
+        now = _utcnow()
+        if not config:
+            config = UserWhatsAppConfig(
+                user_id=current_user.id,
+                provider=provider,
+                created_at=now,
+                updated_at=now,
+            )
+
+        config.provider = provider
+        config.default_sender_number = str(payload.get("default_sender_number") or "").strip()
+        config.message_template_escalation = str(
+            payload.get("message_template_escalation") or ""
+        ).strip()[:1500]
+        config.message_template_appointment = str(
+            payload.get("message_template_appointment") or ""
+        ).strip()[:1500]
+
+        if "active" in payload:
+            config.active = bool(payload.get("active"))
+
+        if provider == "twilio":
+            if "account_sid" in payload:
+                config.account_sid = str(payload.get("account_sid") or "").strip()
+
+            raw_auth_token = str(payload.get("auth_token") or "").strip()
+            if raw_auth_token:
+                config.auth_token_encrypted = encrypt_secret(raw_auth_token)
+
+            if not config.account_sid or not config.auth_token_encrypted:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Twilio requiere account_sid y auth_token",
+                )
+
+        if provider == "meta":
+            if "phone_number_id" in payload:
+                config.phone_number_id = str(payload.get("phone_number_id") or "").strip()
+            if "business_account_id" in payload:
+                config.business_account_id = str(
+                    payload.get("business_account_id") or ""
+                ).strip()
+
+            raw_access_token = str(payload.get("access_token") or "").strip()
+            if raw_access_token:
+                config.access_token_encrypted = encrypt_secret(raw_access_token)
+
+            if not config.phone_number_id or not config.access_token_encrypted:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Meta requiere phone_number_id y access_token",
+                )
+
+        config.updated_at = now
+        session.add(config)
+        session.commit()
+        session.refresh(config)
+
+        return {"config": _serialize_global_whatsapp_config(config)}
+
+    @staticmethod
+    async def get_voice_runtime_config(
+        agent_id: str,
+        current_user: CurrentUser,
+        session: SessionDep,
+    ):
+        owner = _require_owned_agent(agent_id, current_user, session)
+        config = _get_or_create_voice_runtime_config(
+            session,
+            owner_user_id=owner.user_id,
+            agent_id=agent_id,
+        )
+        session.add(config)
+        session.commit()
+        session.refresh(config)
+        return {"config": _serialize_voice_runtime_config(config)}
+
+    @staticmethod
+    async def upsert_voice_runtime_config(
+        agent_id: str,
+        payload: dict,
+        current_user: CurrentUser,
+        session: SessionDep,
+    ):
+        owner = _require_owned_agent(agent_id, current_user, session)
+        config = _get_or_create_voice_runtime_config(
+            session,
+            owner_user_id=owner.user_id,
+            agent_id=agent_id,
+        )
+
+        if "whatsapp_enabled" in payload:
+            config.whatsapp_enabled = bool(payload.get("whatsapp_enabled"))
+
+        next_channel = str(
+            payload.get("default_escalation_channel") or config.default_escalation_channel or "phone"
+        ).strip().lower()
+        if next_channel not in SUPPORTED_ESCALATION_CHANNELS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="default_escalation_channel debe ser phone o whatsapp",
+            )
+        config.default_escalation_channel = next_channel
+
+        if "escalation_phone_number" in payload:
+            config.escalation_phone_number = str(
+                payload.get("escalation_phone_number") or ""
+            ).strip()[:40]
+
+        config.updated_at = _utcnow()
+        session.add(config)
+        session.commit()
+        session.refresh(config)
+
+        return {"config": _serialize_voice_runtime_config(config)}
+
+    @staticmethod
+    async def escalate_voice_conversation(
+        agent_id: str,
+        payload: dict,
+        current_user: CurrentUser,
+        session: SessionDep,
+    ):
+        owner = _require_owned_agent(agent_id, current_user, session)
+        runtime_config = _get_or_create_voice_runtime_config(
+            session,
+            owner_user_id=owner.user_id,
+            agent_id=agent_id,
+        )
+
+        requested_channel = str(
+            payload.get("channel") or runtime_config.default_escalation_channel or "phone"
+        ).strip().lower()
+        if requested_channel not in SUPPORTED_ESCALATION_CHANNELS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="channel debe ser phone o whatsapp",
+            )
+
+        conversation_id = str(payload.get("conversation_id") or "").strip()
+        summary = str(payload.get("summary") or "").strip()[:500]
+        user_phone = normalize_recipient(str(payload.get("phone_number") or ""))
+        agent_name = str(payload.get("agent_name") or "").strip() or "Agente de voz"
+
+        if requested_channel == "phone":
+            transfer_phone_number = str(
+                payload.get("transfer_phone_number")
+                or runtime_config.escalation_phone_number
+                or ""
+            ).strip()
+
+            _log_audit_event(
+                session,
+                event_type="voice_escalation_phone",
+                actor_user_id=current_user.id,
+                subject_user_id=owner.user_id,
+                entity_type="voice_agent",
+                entity_id=agent_id,
+                details={
+                    "conversation_id": conversation_id,
+                    "channel": "phone",
+                    "transfer_phone_number": transfer_phone_number,
+                },
+            )
+            session.commit()
+
+            return {
+                "channel": "phone",
+                "status": "transfer_required",
+                "transfer_phone_number": transfer_phone_number,
+                "message": "Transfiere la llamada usando transfer_to_number.",
+            }
+
+        if not runtime_config.whatsapp_enabled:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="WhatsApp no esta habilitado para este agente",
+            )
+
+        config = _resolve_voice_whatsapp_config(session, owner.user_id)
+        if not config or not config.active:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="No hay configuracion global de WhatsApp activa",
+            )
+
+        if not has_valid_credentials(config):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Configuracion global de WhatsApp incompleta",
+            )
+
+        if not user_phone:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="phone_number es requerido para escalacion por WhatsApp",
+            )
+
+        message = str(payload.get("message") or "").strip() or build_escalation_message(
+            config,
+            agent_name=agent_name,
+            summary=summary,
+        )
+
+        try:
+            send_whatsapp_message(config, to_number=user_phone, message=message)
+        except Exception as exc:
+            logger.exception("No se pudo enviar escalacion por WhatsApp")
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Fallo enviando WhatsApp: {exc}",
+            ) from exc
+
+        _log_audit_event(
+            session,
+            event_type="voice_escalation_whatsapp",
+            actor_user_id=current_user.id,
+            subject_user_id=owner.user_id,
+            entity_type="voice_agent",
+            entity_id=agent_id,
+            details={
+                "conversation_id": conversation_id,
+                "channel": "whatsapp",
+                "phone_number": user_phone,
+            },
+        )
+        session.commit()
+
+        return {
+            "channel": "whatsapp",
+            "status": "sent",
+            "conversation_status": "escalated_via_whatsapp",
+        }
+
+    @staticmethod
+    async def schedule_voice_appointment(
+        agent_id: str,
+        payload: dict,
+        current_user: CurrentUser,
+        session: SessionDep,
+    ):
+        owner = _require_owned_agent(agent_id, current_user, session)
+
+        preferred_date = str(payload.get("preferred_date") or "").strip()
+        preferred_time = str(payload.get("preferred_time") or "").strip()
+        timezone_name = str(payload.get("timezone") or "America/Bogota").strip() or "America/Bogota"
+
+        try:
+            appointment_date = parse_preferred_datetime(
+                preferred_date,
+                preferred_time,
+                timezone_name=timezone_name,
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+            ) from exc
+
+        if not is_time_slot_available(
+            session,
+            user_id=owner.user_id,
+            appointment_date=appointment_date,
+            buffer_minutes=60,
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="No hay disponibilidad para la fecha y hora solicitadas",
+            )
+
+        contact_name = str(payload.get("contact_name") or "").strip()[:120]
+        contact_phone = normalize_recipient(str(payload.get("contact_phone") or ""))[:40]
+        contact_email = str(payload.get("contact_email") or "").strip()[:160]
+
+        if not contact_name and not contact_phone and not contact_email:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Se requiere al menos un dato de contacto",
+            )
+
+        now = _utcnow()
+        appointment = TextAppointment(
+            text_agent_id=None,
+            voice_agent_id=agent_id,
+            user_id=owner.user_id,
+            conversation_id=str(payload.get("conversation_id") or "").strip() or None,
+            contact_name=contact_name,
+            contact_phone=contact_phone,
+            contact_email=contact_email,
+            appointment_date=appointment_date,
+            timezone=timezone_name[:64],
+            status="scheduled",
+            source="voice",
+            notes=str(payload.get("notes") or "").strip()[:500],
+            created_at=now,
+            updated_at=now,
+        )
+
+        session.add(appointment)
+        _apply_google_calendar_sync(session, appointment, operation="upsert")
+
+        confirmation = {
+            "channel": "none",
+            "sent": False,
+        }
+
+        runtime_config = _get_or_create_voice_runtime_config(
+            session,
+            owner_user_id=owner.user_id,
+            agent_id=agent_id,
+        )
+        whatsapp_config = _resolve_voice_whatsapp_config(session, owner.user_id)
+
+        if (
+            runtime_config.whatsapp_enabled
+            and whatsapp_config
+            and whatsapp_config.active
+            and has_valid_credentials(whatsapp_config)
+            and contact_phone
+        ):
+            human_date = format_appointment_for_humans(appointment_date, timezone_name)
+            confirmation_message = str(payload.get("confirmation_message") or "").strip() or (
+                build_appointment_confirmation_message(
+                    whatsapp_config,
+                    agent_name=str(payload.get("agent_name") or "").strip() or "Agente de voz",
+                    appointment_date=human_date,
+                    timezone=timezone_name,
+                )
+            )
+
+            try:
+                send_whatsapp_message(
+                    whatsapp_config,
+                    to_number=contact_phone,
+                    message=confirmation_message,
+                )
+                confirmation = {
+                    "channel": "whatsapp",
+                    "sent": True,
+                }
+            except Exception:
+                logger.exception("No se pudo enviar confirmacion de cita por WhatsApp")
+
+        _log_audit_event(
+            session,
+            event_type="voice_appointment_scheduled",
+            actor_user_id=current_user.id,
+            subject_user_id=owner.user_id,
+            entity_type="voice_agent",
+            entity_id=agent_id,
+            details={
+                "appointment_id": appointment.id,
+                "confirmation": confirmation,
+            },
+        )
+
+        session.commit()
+        session.refresh(appointment)
+
+        return {
+            "appointment": _serialize_appointment(appointment),
+            "confirmation": confirmation,
+        }
+
+    @staticmethod
     async def list_voices(_: CurrentUser):
         return _elevenlabs_get("/voices")
 
@@ -604,8 +1093,19 @@ class AgentController:
                 detail="appointment_date es requerido (ISO8601 o unix timestamp)",
             )
 
+        if not is_time_slot_available(
+            session,
+            user_id=owner_mapping.user_id,
+            appointment_date=appointment_date,
+            buffer_minutes=60,
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="No hay disponibilidad para la fecha y hora solicitadas",
+            )
+
         contact_name = str(payload.get("contact_name") or "").strip()[:120]
-        contact_phone = str(payload.get("contact_phone") or "").strip()[:40]
+        contact_phone = normalize_recipient(str(payload.get("contact_phone") or ""))[:40]
         contact_email = str(payload.get("contact_email") or "").strip()[:160]
 
         if not contact_name and not contact_phone and not contact_email:
@@ -649,6 +1149,52 @@ class AgentController:
 
         session.add(appointment)
         _apply_google_calendar_sync(session, appointment, operation="upsert")
+
+        runtime_config = _get_or_create_voice_runtime_config(
+            session,
+            owner_user_id=owner_mapping.user_id,
+            agent_id=agent_id,
+        )
+        whatsapp_config = _resolve_voice_whatsapp_config(session, owner_mapping.user_id)
+
+        confirmation_channel = "none"
+        if (
+            runtime_config.whatsapp_enabled
+            and whatsapp_config
+            and whatsapp_config.active
+            and has_valid_credentials(whatsapp_config)
+            and contact_phone
+        ):
+            human_date = format_appointment_for_humans(appointment_date, appointment.timezone)
+            confirmation_message = build_appointment_confirmation_message(
+                whatsapp_config,
+                agent_name=str(payload.get("agent_name") or "").strip() or "Agente de voz",
+                appointment_date=human_date,
+                timezone=appointment.timezone,
+            )
+            try:
+                send_whatsapp_message(
+                    whatsapp_config,
+                    to_number=contact_phone,
+                    message=confirmation_message,
+                )
+                confirmation_channel = "whatsapp"
+            except Exception:
+                logger.exception("No se pudo enviar confirmacion de cita por WhatsApp")
+
+        _log_audit_event(
+            session,
+            event_type="voice_appointment_created",
+            actor_user_id=current_user.id,
+            subject_user_id=owner_mapping.user_id,
+            entity_type="voice_agent",
+            entity_id=agent_id,
+            details={
+                "appointment_id": appointment.id,
+                "confirmation_channel": confirmation_channel,
+            },
+        )
+
         session.commit()
         session.refresh(appointment)
         return _serialize_appointment(appointment)
@@ -684,6 +1230,19 @@ class AgentController:
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="appointment_date no puede ser null",
                 )
+
+            if not is_time_slot_available(
+                session,
+                user_id=appointment.user_id,
+                appointment_date=updated_date,
+                buffer_minutes=60,
+                exclude_appointment_id=appointment.id,
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="No hay disponibilidad para la fecha y hora solicitadas",
+                )
+
             appointment.appointment_date = updated_date
 
         if "status" in payload:
@@ -699,7 +1258,9 @@ class AgentController:
             appointment.contact_name = str(payload.get("contact_name") or "").strip()[:120]
 
         if "contact_phone" in payload:
-            appointment.contact_phone = str(payload.get("contact_phone") or "").strip()[:40]
+            appointment.contact_phone = normalize_recipient(
+                str(payload.get("contact_phone") or "")
+            )[:40]
 
         if "contact_email" in payload:
             appointment.contact_email = str(payload.get("contact_email") or "").strip()[:160]

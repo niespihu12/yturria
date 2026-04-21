@@ -344,10 +344,10 @@ function ToolCard({ tool, agentId }: { tool: TextAgentTool; agentId: string }) {
 
   const mc = METHOD_COLORS[tool.http_method] ?? 'bg-gray-50 text-gray-600 border-gray-200'
 
-  const schema = (tool.parameters_schema as any) ?? {}
-  const properties = schema.properties ?? {}
-  const required: string[] = schema.required ?? []
-  const paramEntries = Object.entries(properties) as Array<[string, any]>
+  const schema = (tool.parameters_schema as Record<string, unknown>) ?? {}
+  const properties = (schema.properties ?? {}) as Record<string, Record<string, unknown>>
+  const required: string[] = (schema.required as string[]) ?? []
+  const paramEntries = Object.entries(properties)
 
   const mapping = tool.response_mapping ?? {}
   const resultPath = (mapping as Record<string, string>).result_path ?? ''

@@ -30,7 +30,7 @@ from app.models.TextMessage import TextMessage
 from app.models.TextProviderConfig import TextProviderConfig
 from app.utils.crypto import decrypt_secret, encrypt_secret, mask_secret
 from app.models.User import User
-from app.utils.client_defaults import DEFAULT_TEXT_MODEL, apply_client_text_defaults
+from app.utils.client_defaults import DEFAULT_TEXT_MODEL, TENANT, apply_client_text_defaults
 from app.utils.roles import is_super_admin_user, role_as_value
 from app.services.google_calendar import sync_google_calendar_for_appointment
 from app.services.renewal_scheduler import run_due_renewal_reminders
@@ -101,8 +101,12 @@ def _maybe_prepend_legal_notice(
     legal_notice: str,
     has_prior_assistant: bool,
 ) -> str:
-    """Prepend legal_notice to the first assistant response in a conversation."""
-    notice = (legal_notice or "").strip()
+    """Prepend the effective legal notice to the first assistant response.
+
+    Effective notice = agent-level legal_notice if set, else TENANT.legal_notice fallback.
+    Idempotent: no-ops on any turn after the first assistant message.
+    """
+    notice = (legal_notice or "").strip() or TENANT.legal_notice.strip()
     if not notice or has_prior_assistant:
         return content
     return f"{notice}\n\n{content}"
@@ -622,6 +626,7 @@ def _serialize_text_agent(
         "embed_enabled": agent.embed_enabled,
         "sofia_config": sofia_config,
         "sofia_config_json": json.dumps(sofia_config),
+        "legal_notice": agent.legal_notice or "",
         "created_at_unix_secs": _to_unix(agent.created_at),
         "updated_at_unix_secs": _to_unix(agent.updated_at),
     }
@@ -652,6 +657,7 @@ def _serialize_whatsapp(config: TextAgentWhatsApp) -> dict[str, Any]:
         "business_account_id": config.business_account_id,
         "webhook_verify_token": config.webhook_verify_token,
         "has_credentials": has_credentials,
+        "has_app_secret": bool(getattr(config, "app_secret_encrypted", "")),
         "active": config.active,
         "created_at_unix_secs": _to_unix(config.created_at),
         "updated_at_unix_secs": _to_unix(config.updated_at),
@@ -2132,6 +2138,7 @@ class TextAgentController:
             sofia_config_json=sofia_config_json,
             embed_enabled=bool(payload.get("embed_enabled", True)),
             embed_token=secrets.token_urlsafe(24),
+            legal_notice=str(payload.get("legal_notice") or ""),
             created_at=now,
             updated_at=now,
         )
@@ -2266,6 +2273,10 @@ class TextAgentController:
 
         _ensure_embed_token(agent)
 
+        # Todos los usuarios pueden editar el aviso legal de su agente.
+        if "legal_notice" in payload:
+            agent.legal_notice = str(payload.get("legal_notice") or "")
+
         if not is_super_admin:
             agent.provider = original_provider
             agent.system_prompt = original_system_prompt
@@ -2366,6 +2377,7 @@ class TextAgentController:
                 text_agent_id=agent.id,
                 user_id=agent.user_id,
                 title=f"embed:{session_id}",
+                channel="embed",
                 created_at=now,
                 updated_at=now,
             )
@@ -2515,6 +2527,7 @@ class TextAgentController:
             escalations.append({
                 "conversation_id": conv.id,
                 "title": conv.title,
+                "channel": conv.channel,
                 "escalation_status": conv.escalation_status,
                 "escalation_reason": conv.escalation_reason,
                 "escalated_at_unix_secs": _to_unix(conv.escalated_at) if conv.escalated_at else None,
@@ -3298,6 +3311,9 @@ class TextAgentController:
             raw_token = str(payload.get("access_token") or "").strip()
             if raw_token:
                 config.access_token_encrypted = encrypt_secret(raw_token)
+            raw_secret = str(payload.get("app_secret") or "").strip()
+            if raw_secret:
+                config.app_secret_encrypted = encrypt_secret(raw_secret)
             config.phone_number_id = str(payload.get("phone_number_id") or "").strip()
             config.business_account_id = str(payload.get("business_account_id") or "").strip()
 
@@ -3379,7 +3395,7 @@ class TextAgentController:
                     "conversation_id": conversation.id,
                     "agent_id": text_agent_id,
                     "status": "done",
-                    "channel": getattr(conversation, "channel", "web"),
+                    "channel": conversation.channel,
                     "start_time_unix_secs": _to_unix(conversation.created_at),
                     "updated_at_unix_secs": _to_unix(conversation.updated_at),
                     "message_count": len(msgs),
@@ -3444,7 +3460,7 @@ class TextAgentController:
             "conversation_id": conversation.id,
             "agent_id": agent.id,
             "status": "done",
-            "channel": getattr(conversation, "channel", "web"),
+            "channel": conversation.channel,
             "transcript": transcript,
             "metadata": {
                 "start_time_unix_secs": _to_unix(conversation.created_at),
@@ -3662,6 +3678,7 @@ class TextAgentController:
                 text_agent_id=agent.id,
                 user_id=current_user.id,
                 title=user_message[:80],
+                channel="web",
                 created_at=now,
                 updated_at=now,
             )
@@ -3792,6 +3809,7 @@ class TextAgentController:
                 text_agent_id=agent.id,
                 user_id=agent.user_id,
                 title=wa_title,
+                channel="whatsapp",
                 created_at=now,
                 updated_at=now,
             )
@@ -3901,6 +3919,12 @@ async def _run_sofia_chat(
         sofia_config = json.loads(agent.sofia_config_json or "{}")
     except (json.JSONDecodeError, TypeError):
         sofia_config = {}
+
+    # Fuente de verdad única: legal_notice del agente (con fallback de tenant).
+    # Se inyecta en el config para que el grafo lo use en el system prompt.
+    effective_legal_notice = (agent.legal_notice or "").strip() or TENANT.legal_notice.strip()
+    if effective_legal_notice:
+        sofia_config["legal_notice"] = effective_legal_notice
 
     user_msg_count = sum(1 for m in history if m["role"] == "user")
 

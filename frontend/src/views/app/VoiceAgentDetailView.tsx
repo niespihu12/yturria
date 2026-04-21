@@ -1,7 +1,7 @@
 ﻿import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useForm } from 'react-hook-form'
+import { useForm, useWatch } from 'react-hook-form'
 import { toast } from 'react-toastify'
 import {
   ChevronLeftIcon,
@@ -441,6 +441,9 @@ function buildUpdatePayload(
   systemToolParamsByName: SystemToolParamsMap
 ) {
   const currentPrompt = currentAgent.conversation_config.agent.prompt
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { tools: _currentPromptTools, tool_ids: _currentPromptToolIds, ...promptWithoutToolLinks } =
+    currentPrompt as Record<string, unknown>
   const currentRag = currentPrompt.rag
   const currentTools = (currentPrompt.tools ?? []) as Array<Record<string, unknown>>
   const currentBuiltInTools = (currentPrompt as Record<string, unknown>).built_in_tools
@@ -533,6 +536,11 @@ function buildUpdatePayload(
     }
   })
 
+  const useToolIdsMode = selectedToolIds.length > 0
+  const promptToolConfig = useToolIdsMode
+    ? { tool_ids: selectedToolIds }
+    : { tools: [...customTools, ...systemTools] }
+
   const currentConversation = isRecord(
     (currentAgent.conversation_config as Record<string, unknown>).conversation
   )
@@ -557,14 +565,13 @@ function buildUpdatePayload(
       agent: {
         ...currentAgent.conversation_config.agent,
         prompt: {
-          ...currentPrompt,
+          ...promptWithoutToolLinks,
           prompt: values.prompt,
           llm: values.llm,
           temperature: values.llm_temperature,
           max_tokens: values.max_tokens,
           ignore_default_personality: values.ignore_default_personality,
-          tools: [...customTools, ...systemTools],
-          tool_ids: selectedToolIds,
+          ...promptToolConfig,
           ...(builtInTools !== undefined ? { built_in_tools: builtInTools } : {}),
           // Preserve RAG as-is - managed exclusively by KnowledgeBaseTab
           rag: currentRag,
@@ -654,6 +661,7 @@ function VoiceAgentForm({ id, initialAgent }: { id: string; initialAgent: AgentD
     register,
     handleSubmit,
     reset,
+    control,
     watch,
     getValues,
     setValue,
@@ -663,8 +671,9 @@ function VoiceAgentForm({ id, initialAgent }: { id: string; initialAgent: AgentD
     defaultValues: buildDefaultValues(initialAgent),
   })
 
-  const autoLanguageDetection = watch('auto_language_detection')
+  const autoLanguageDetection = useWatch({ control, name: 'auto_language_detection' })
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!isClient) return
 
@@ -689,6 +698,7 @@ function VoiceAgentForm({ id, initialAgent }: { id: string; initialAgent: AgentD
         : prev.filter((tool) => tool !== 'language_detection')
     )
   }, [autoLanguageDetection, enabledSystemTools])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     const hasLanguageDetectionTool = enabledSystemTools.includes('language_detection')
@@ -805,7 +815,7 @@ function VoiceAgentForm({ id, initialAgent }: { id: string; initialAgent: AgentD
   })
 
   const handleSaveForPreview = async () => {
-    const values = watch()
+    const values = getValues()
     await saveAsync(values)
   }
 
@@ -844,7 +854,7 @@ function VoiceAgentForm({ id, initialAgent }: { id: string; initialAgent: AgentD
     })
   }
 
-  const watchedName = watch('name')
+  const watchedName = useWatch({ control, name: 'name' })
   const knowledgeBase: KnowledgeBaseItem[] =
     (agent?.conversation_config.agent.prompt.knowledge_base as KnowledgeBaseItem[]) ?? []
 
@@ -941,6 +951,7 @@ function VoiceAgentForm({ id, initialAgent }: { id: string; initialAgent: AgentD
           {activeTab === 'agent' && (
             <div className="no-visible-scrollbar h-full min-h-0 w-full overflow-y-auto pr-2">
               <AgentTab
+                agentId={id}
                 register={register}
                 watch={watch}
                 setValue={setValue}

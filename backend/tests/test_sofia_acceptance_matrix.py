@@ -641,9 +641,95 @@ ALL_CASES: list[AcceptanceCase] = [
         compliance_checks=["max_length"],
         expect_violation=True,
     ),
+
+    # ── CATEGORÍA 12: yturria_me_interesa ────────────────────────────────────
+    # "me interesa" como señal de compra — escalar al asesor.
+
+    AcceptanceCase(
+        id="E01", category="yturria_me_interesa",
+        description="me interesa (bare) escala con reason=user_request",
+        message="me interesa",
+        expected_intent="otro", expected_escalation=True,
+        expected_reason="user_request",
+    ),
+    AcceptanceCase(
+        id="E02", category="yturria_me_interesa",
+        description="me interesa + precio → cotizacion escalada",
+        message="me interesa saber el precio de un seguro de auto",
+        expected_intent="cotizacion", expected_escalation=True,
+        expected_reason="user_request",
+    ),
+
+    # ── CATEGORÍA 13: yturria_cuando_llaman ──────────────────────────────────
+    # "cuándo me llaman" — cliente pide ser contactado → escalar.
+
+    AcceptanceCase(
+        id="E03", category="yturria_cuando_llaman",
+        description="cuándo me llaman (acentuado) escala",
+        message="cuándo me llaman para hablar del seguro",
+        expected_intent="otro", expected_escalation=True,
+        expected_reason="user_request",
+    ),
+    AcceptanceCase(
+        id="E04", category="yturria_cuando_llaman",
+        description="cuando me van a llamar escala",
+        message="cuando me van a llamar para darme más información",
+        expected_intent="otro", expected_escalation=True,
+        expected_reason="user_request",
+    ),
+
+    # ── CATEGORÍA 14: yturria_specific_policy ────────────────────────────────
+    # Cliente existente pregunta por su póliza propia → asesor.
+
+    AcceptanceCase(
+        id="E05", category="yturria_specific_policy",
+        description="tengo una póliza con ustedes → specific_policy",
+        message="tengo una póliza con ustedes y quiero revisarla",
+        expected_intent="otro", expected_escalation=True,
+        expected_reason="specific_policy",
+    ),
+    AcceptanceCase(
+        id="E06", category="yturria_specific_policy",
+        description="número de mi poliza → specific_policy",
+        message="el numero de mi poliza es GNP-1234 y necesito ayuda",
+        expected_intent="otro", expected_escalation=True,
+        expected_reason="specific_policy",
+    ),
+    AcceptanceCase(
+        id="E07", category="yturria_specific_policy",
+        description="already_escalated: mi poliza → cotizacion sin escalar (suprimido)",
+        message="mi poliza numero 99",
+        already_escalated=True,
+        expected_intent="cotizacion", expected_escalation=False,
+    ),
+
+    # ── CATEGORÍA 15: yturria_active_claim ───────────────────────────────────
+    # Siniestro abierto/activo — razón distinguible de nuevo reporte.
+
+    AcceptanceCase(
+        id="E08", category="yturria_active_claim",
+        description="siniestro activo escala con reason=active_claim",
+        message="tengo un siniestro activo desde hace una semana",
+        expected_intent="siniestro", expected_escalation=True,
+        expected_reason="active_claim",
+    ),
+    AcceptanceCase(
+        id="E09", category="yturria_active_claim",
+        description="siniestro abierto escala con reason=active_claim",
+        message="mi siniestro abierto no ha recibido respuesta del ajustador",
+        expected_intent="siniestro", expected_escalation=True,
+        expected_reason="active_claim",
+    ),
+    AcceptanceCase(
+        id="E10", category="yturria_active_claim",
+        description="folio de siniestro escala con reason=active_claim",
+        message="necesito seguimiento a mi folio de siniestro pendiente",
+        expected_intent="siniestro", expected_escalation=True,
+        expected_reason="active_claim",
+    ),
 ]
 
-assert len(ALL_CASES) == 50, f"Se esperaban 50 casos, hay {len(ALL_CASES)}"
+assert len(ALL_CASES) == 60, f"Se esperaban 60 casos, hay {len(ALL_CASES)}"
 
 # ── Evaluador (sin efectos externos) ─────────────────────────────────────────
 

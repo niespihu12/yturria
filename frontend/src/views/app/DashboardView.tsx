@@ -250,8 +250,8 @@ export default function DashboardView() {
       }
     }
 
-    const nowUnix = Math.floor(Date.now() / 1000)
-    const todayStartDate = new Date()
+    const nowUnix = Math.floor(data.loadedAt / 1000)
+    const todayStartDate = new Date(data.loadedAt)
     todayStartDate.setHours(0, 0, 0, 0)
     const todayStart = Math.floor(todayStartDate.getTime() / 1000)
     const yesterdayStart = todayStart - 86400

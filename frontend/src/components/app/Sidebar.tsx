@@ -10,6 +10,7 @@ import {
   Cog6ToothIcon,
   InboxIcon,
   CalendarDaysIcon,
+  ChatBubbleOvalLeftEllipsisIcon,
 } from '@heroicons/react/24/outline'
 import {
   DevicePhoneMobileIcon as DevicePhoneMobileSolid,
@@ -19,6 +20,7 @@ import {
   UserGroupIcon as UserGroupSolid,
   InboxIcon as InboxSolid,
   CalendarDaysIcon as CalendarDaysSolid,
+  ChatBubbleOvalLeftEllipsisIcon as ChatBubbleOvalLeftEllipsisSolid,
 } from '@heroicons/react/24/solid'
 import Logo from '@/components/Logo'
 import { getAuthenticatedUser } from '@/api/AuthAPI'
@@ -53,6 +55,12 @@ const baseNavItems = [
     path: '/citas',
     icon: CalendarDaysIcon,
     iconActive: CalendarDaysSolid,
+  },
+  {
+    label: 'WhatsApp Saliente',
+    path: '/whatsapp_config',
+    icon: ChatBubbleOvalLeftEllipsisIcon,
+    iconActive: ChatBubbleOvalLeftEllipsisSolid,
   },
   {
     label: 'Numeros de telefono',

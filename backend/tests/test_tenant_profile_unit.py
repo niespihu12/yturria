@@ -3,17 +3,18 @@ Pruebas de backward compatibility y perfil de tenant configurable.
 
 Cubre:
   - TenantProfile usa valores Yturria por defecto (sin env vars)
-  - Env vars sobrescriben cada campo de TenantProfile
+  - Env vars sobrescriben cada campo de TenantProfile (TENANT_LEGAL_NOTICE y alias TENANT_LEGAL_DISCLAIMER)
   - SofiaConfig hereda defaults de TENANT cuando los campos no están en JSON
   - _coerce_config: business_name (legacy UI) → company_name
   - _coerce_config: company_name explícito sobrevive sin alteración
-  - _coerce_config: carriers y legal_disclaimer nuevos fluyen al config
+  - _coerce_config: legal_disclaimer (nombre antiguo) → legal_notice (backward compat)
+  - _coerce_config: carriers y legal_notice nuevos fluyen al config
   - Configs existentes vacías ({}) usan tenant por defecto (backward compat)
   - Configs con escalation_threshold conservan clamping [1, 20]
   - SOFIA_VOICE_PROMPT y SOFIA_FIRST_MESSAGE reflejan TENANT
-  - respond() formatea prompt sin KeyError cuando carriers/legal_disclaimer presentes
-  - legal_notice_section vacío cuando legal_disclaimer es empty string
-  - legal_notice_section poblado cuando legal_disclaimer tiene valor
+  - respond() formatea prompt sin KeyError cuando carriers/legal_notice presentes
+  - legal_notice_section vacío cuando legal_notice es empty string
+  - legal_notice_section poblado cuando legal_notice tiene valor
 """
 from __future__ import annotations
 
@@ -57,9 +58,9 @@ def test_tenant_default_carriers_contains_gnp():
     assert "GNP" in t.carriers
 
 
-def test_tenant_default_legal_disclaimer_is_empty():
+def test_tenant_default_legal_notice_is_empty():
     t = TenantProfile()
-    assert t.legal_disclaimer == ""
+    assert t.legal_notice == ""
 
 
 def test_tenant_default_business_hours_non_empty():
@@ -87,10 +88,17 @@ def test_load_tenant_profile_overrides_carriers(monkeypatch):
     assert t.carriers == "GNP, AXA"
 
 
-def test_load_tenant_profile_overrides_legal_disclaimer(monkeypatch):
-    monkeypatch.setenv("TENANT_LEGAL_DISCLAIMER", "Precios orientativos, no vinculantes.")
+def test_load_tenant_profile_overrides_legal_notice_canonical(monkeypatch):
+    monkeypatch.setenv("TENANT_LEGAL_NOTICE", "Precios orientativos, no vinculantes.")
     t = _load_tenant_profile()
-    assert t.legal_disclaimer == "Precios orientativos, no vinculantes."
+    assert t.legal_notice == "Precios orientativos, no vinculantes."
+
+
+def test_load_tenant_profile_overrides_legal_notice_legacy_alias(monkeypatch):
+    monkeypatch.delenv("TENANT_LEGAL_NOTICE", raising=False)
+    monkeypatch.setenv("TENANT_LEGAL_DISCLAIMER", "Compat legado.")
+    t = _load_tenant_profile()
+    assert t.legal_notice == "Compat legado."
 
 
 def test_load_tenant_profile_overrides_business_hours(monkeypatch):
@@ -123,9 +131,9 @@ def test_sofia_config_default_carriers_matches_tenant():
     assert cfg.carriers == TENANT.carriers
 
 
-def test_sofia_config_default_legal_disclaimer_matches_tenant():
+def test_sofia_config_default_legal_notice_matches_tenant():
     cfg = SofiaConfig()
-    assert cfg.legal_disclaimer == TENANT.legal_disclaimer
+    assert cfg.legal_notice == TENANT.legal_notice
 
 
 def test_default_config_escalation_threshold_unchanged():
@@ -159,9 +167,14 @@ def test_coerce_carriers_explicit_value_is_preserved():
     assert cfg.carriers == "Solo GNP"
 
 
-def test_coerce_legal_disclaimer_explicit_value_is_preserved():
-    cfg = _coerce_config({"legal_disclaimer": "No vinculante."})
-    assert cfg.legal_disclaimer == "No vinculante."
+def test_coerce_legal_notice_explicit_value_is_preserved():
+    cfg = _coerce_config({"legal_notice": "No vinculante."})
+    assert cfg.legal_notice == "No vinculante."
+
+
+def test_coerce_legal_disclaimer_legacy_name_maps_to_legal_notice():
+    cfg = _coerce_config({"legal_disclaimer": "Compat legado."})
+    assert cfg.legal_notice == "Compat legado."
 
 
 def test_coerce_company_years_explicit_value_is_preserved():
@@ -193,14 +206,9 @@ def test_voice_prompt_contains_carriers():
     assert "Solo HDI" in prompt
 
 
-def test_voice_prompt_contains_legal_disclaimer_when_set():
-    t = TenantProfile(legal_disclaimer="No vinculante.")
-    prompt = _build_voice_prompt(t)
-    assert "No vinculante." in prompt
-
-
-def test_voice_prompt_no_legal_disclaimer_section_when_empty():
-    t = TenantProfile(legal_disclaimer="")
+def test_voice_prompt_does_not_contain_legal_notice_section():
+    # El aviso legal va en el primer mensaje, no en el voice prompt del LLM.
+    t = TenantProfile(legal_notice="No vinculante.")
     prompt = _build_voice_prompt(t)
     assert "AVISO LEGAL" not in prompt
 

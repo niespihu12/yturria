@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'react-toastify'
 import {
@@ -30,10 +30,9 @@ const labelClass = 'mb-1.5 block text-xs font-semibold uppercase tracking-wide t
 
 const DEFAULT_CONFIG: SofiaConfig = {
   advisor_phone: '',
-  advisor_name: '',
-  business_name: '',
+  advisor_whatsapp_config_id: '',
   business_hours: '',
-  escalation_phrases: [
+  extra_escalation_phrases: [
     'quiero hablar con alguien',
     'necesito un asesor',
     'quiero cotizar',
@@ -44,7 +43,7 @@ const DEFAULT_CONFIG: SofiaConfig = {
   company_name: '',
   company_years: '',
   carriers: '',
-  legal_disclaimer: '',
+  company_context: '',
 }
 
 const STATUS_CONFIG: Record<EscalationStatus, { label: string; color: string; icon: typeof CheckCircleIcon }> = {
@@ -53,32 +52,30 @@ const STATUS_CONFIG: Record<EscalationStatus, { label: string; color: string; ic
   resolved: { label: 'Resuelto', color: 'bg-emerald-50 text-emerald-700 border-emerald-200', icon: CheckCircleIcon },
 }
 
+function parseSofiaConfig(json: string): SofiaConfig {
+  try {
+    const parsed = JSON.parse(json || '{}')
+    const merged = { ...DEFAULT_CONFIG, ...parsed }
+    if (!merged.company_name && parsed.business_name) merged.company_name = parsed.business_name
+    if (!merged.extra_escalation_phrases?.length && parsed.escalation_phrases?.length)
+      merged.extra_escalation_phrases = parsed.escalation_phrases
+    return merged
+  } catch {
+    return DEFAULT_CONFIG
+  }
+}
+
 export default function TextAgentSofiaTab({ agentId, sofiaMode, sofiaConfigJson, onSofiaChange }: Props) {
   const queryClient = useQueryClient()
 
-  const [config, setConfig] = useState<SofiaConfig>(() => {
-    try {
-      const parsed = JSON.parse(sofiaConfigJson || '{}')
-      const merged = { ...DEFAULT_CONFIG, ...parsed }
-      if (!merged.company_name && merged.business_name) merged.company_name = merged.business_name
-      return merged
-    } catch {
-      return DEFAULT_CONFIG
-    }
-  })
+  const [config, setConfig] = useState<SofiaConfig>(() => parseSofiaConfig(sofiaConfigJson))
+  const [lastSofiaJson, setLastSofiaJson] = useState(sofiaConfigJson)
+  if (sofiaConfigJson !== lastSofiaJson) {
+    setLastSofiaJson(sofiaConfigJson)
+    setConfig(parseSofiaConfig(sofiaConfigJson))
+  }
 
   const [newPhrase, setNewPhrase] = useState('')
-
-  useEffect(() => {
-    try {
-      const parsed = JSON.parse(sofiaConfigJson || '{}')
-      const merged = { ...DEFAULT_CONFIG, ...parsed }
-      if (!merged.company_name && merged.business_name) merged.company_name = merged.business_name
-      setConfig(merged)
-    } catch {
-      setConfig(DEFAULT_CONFIG)
-    }
-  }, [sofiaConfigJson])
 
   const updateConfig = (partial: Partial<SofiaConfig>) => {
     const next = { ...config, ...partial }
@@ -92,13 +89,13 @@ export default function TextAgentSofiaTab({ agentId, sofiaMode, sofiaConfigJson,
 
   const addPhrase = () => {
     const trimmed = newPhrase.trim()
-    if (!trimmed || config.escalation_phrases.includes(trimmed)) return
-    updateConfig({ escalation_phrases: [...config.escalation_phrases, trimmed] })
+    if (!trimmed || config.extra_escalation_phrases.includes(trimmed)) return
+    updateConfig({ extra_escalation_phrases: [...config.extra_escalation_phrases, trimmed] })
     setNewPhrase('')
   }
 
   const removePhrase = (idx: number) => {
-    updateConfig({ escalation_phrases: config.escalation_phrases.filter((_: string, i: number) => i !== idx) })
+    updateConfig({ extra_escalation_phrases: config.extra_escalation_phrases.filter((_: string, i: number) => i !== idx) })
   }
 
   // ── Escalations ──
@@ -170,8 +167,8 @@ export default function TextAgentSofiaTab({ agentId, sofiaMode, sofiaConfigJson,
                 <input
                   type="text"
                   className={inputClass}
-                  value={config.company_name ?? ''}
-                  onChange={(e) => updateConfig({ company_name: e.target.value, business_name: e.target.value })}
+                  value={config.company_name}
+                  onChange={(e) => updateConfig({ company_name: e.target.value })}
                   placeholder="Ej. Yturria Agente de Seguros"
                 />
               </div>
@@ -203,7 +200,7 @@ export default function TextAgentSofiaTab({ agentId, sofiaMode, sofiaConfigJson,
                 <input
                   type="text"
                   className={inputClass}
-                  value={config.carriers ?? ''}
+                  value={config.carriers}
                   onChange={(e) => updateConfig({ carriers: e.target.value })}
                   placeholder="GNP, AXA, Chubb, MetLife…"
                 />
@@ -211,15 +208,22 @@ export default function TextAgentSofiaTab({ agentId, sofiaMode, sofiaConfigJson,
             </div>
 
             <div>
-              <label className={labelClass}>Aviso legal (se agrega al primer mensaje)</label>
+              <label className={labelClass}>Contexto de la empresa</label>
               <textarea
-                className={`${inputClass} resize-none`}
                 rows={3}
-                value={config.legal_disclaimer ?? ''}
-                onChange={(e) => updateConfig({ legal_disclaimer: e.target.value })}
-                placeholder="Ej. Los rangos de precio son orientativos y no constituyen una oferta formal…"
+                className={`${inputClass} resize-none`}
+                value={config.company_context}
+                onChange={(e) => updateConfig({ company_context: e.target.value })}
+                placeholder="Descripción adicional del negocio, especialidades, zonas de operación…"
               />
+              <p className="mt-1 text-[11px] text-black/40">
+                Se inyecta en el prompt de Sofía para dar más contexto al agente.
+              </p>
             </div>
+
+            <p className="text-[11px] text-black/40 pt-1">
+              El aviso legal se configura en la pestaña <span className="font-semibold">Agente</span> y se muestra exactamente una vez al inicio de cada conversación.
+            </p>
           </div>
 
           {/* Advisor Info */}
@@ -231,19 +235,9 @@ export default function TextAgentSofiaTab({ agentId, sofiaMode, sofiaConfigJson,
 
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
-                <label className={labelClass}>Nombre del asesor</label>
-                <input
-                  type="text"
-                  className={inputClass}
-                  value={config.advisor_name}
-                  onChange={(e) => updateConfig({ advisor_name: e.target.value })}
-                  placeholder="Juan Pérez"
-                />
-              </div>
-              <div>
                 <label className={labelClass}>
                   <PhoneIcon className="inline h-3.5 w-3.5 mr-1" />
-                  Teléfono WhatsApp
+                  Teléfono WhatsApp del asesor
                 </label>
                 <input
                   type="text"
@@ -252,6 +246,19 @@ export default function TextAgentSofiaTab({ agentId, sofiaMode, sofiaConfigJson,
                   onChange={(e) => updateConfig({ advisor_phone: e.target.value })}
                   placeholder="+5218123456789"
                 />
+              </div>
+              <div>
+                <label className={labelClass}>ID de config WhatsApp (para notificaciones)</label>
+                <input
+                  type="text"
+                  className={inputClass}
+                  value={config.advisor_whatsapp_config_id}
+                  onChange={(e) => updateConfig({ advisor_whatsapp_config_id: e.target.value })}
+                  placeholder="ID de la config WhatsApp del agente"
+                />
+                <p className="mt-1 text-[11px] text-black/40">
+                  Configura WhatsApp en la pestaña correspondiente y pega aquí el ID para enrutar escalaciones.
+                </p>
               </div>
             </div>
           </div>
@@ -322,7 +329,7 @@ export default function TextAgentSofiaTab({ agentId, sofiaMode, sofiaConfigJson,
             </p>
 
             <div className="flex flex-wrap gap-2">
-              {config.escalation_phrases.map((phrase: string, idx: number) => (
+              {config.extra_escalation_phrases.map((phrase: string, idx: number) => (
                 <span
                   key={idx}
                   className="group flex items-center gap-1.5 rounded-lg border border-[#e4e0f5] bg-[#f5f3ff] px-3 py-1.5 text-xs text-[#271173]"

@@ -193,6 +193,78 @@ async def create_twilio_outbound_call(
     )
 
 
+@agents_router.get("/whatsapp-config")
+async def get_whatsapp_global_config(current_user: CurrentUser, session: SessionDep):
+    return await AgentController.get_whatsapp_global_config(current_user, session)
+
+
+@agents_router.put("/whatsapp-config")
+async def upsert_whatsapp_global_config(
+    request: Request,
+    current_user: CurrentUser,
+    session: SessionDep,
+):
+    payload = await _safe_json_payload(request)
+    return await AgentController.upsert_whatsapp_global_config(payload, current_user, session)
+
+
+@agents_router.get("/{agent_id}/runtime-config")
+async def get_voice_runtime_config(
+    agent_id: str,
+    current_user: CurrentUser,
+    session: SessionDep,
+):
+    return await AgentController.get_voice_runtime_config(agent_id, current_user, session)
+
+
+@agents_router.put("/{agent_id}/runtime-config")
+async def upsert_voice_runtime_config(
+    agent_id: str,
+    request: Request,
+    current_user: CurrentUser,
+    session: SessionDep,
+):
+    payload = await _safe_json_payload(request)
+    return await AgentController.upsert_voice_runtime_config(
+        agent_id,
+        payload,
+        current_user,
+        session,
+    )
+
+
+@agents_router.post("/{agent_id}/escalations")
+async def escalate_voice_conversation(
+    agent_id: str,
+    request: Request,
+    current_user: CurrentUser,
+    session: SessionDep,
+):
+    payload = await _safe_json_payload(request)
+    return await AgentController.escalate_voice_conversation(
+        agent_id,
+        payload,
+        current_user,
+        session,
+    )
+
+
+@agents_router.post("/{agent_id}/appointments/schedule")
+async def schedule_voice_appointment(
+    agent_id: str,
+    request: Request,
+    current_user: CurrentUser,
+    session: SessionDep,
+):
+    payload = await _safe_json_payload(request)
+    return await AgentController.schedule_voice_appointment(
+        agent_id,
+        payload,
+        current_user,
+        session,
+    )
+
+
 @agents_router.get("/conversations/{conversation_id}")
 async def get_conversation_detail(
     conversation_id: str, current_user: CurrentUser, session: SessionDep

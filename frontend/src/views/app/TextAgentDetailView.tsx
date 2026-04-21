@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useForm } from 'react-hook-form'
+import { useForm, useWatch } from 'react-hook-form'
 import { toast } from 'react-toastify'
 import {
   BookOpenIcon,
@@ -37,7 +37,7 @@ const BASE_TABS = [
   { id: 'knowledge', label: 'Conocimiento', icon: BookOpenIcon },
   { id: 'sofia', label: 'Sofía IA', icon: SparklesIcon },
   { id: 'appointments', label: 'Citas', icon: CalendarDaysIcon },
-  { id: 'whatsapp', label: 'WhatsApp', icon: DevicePhoneMobileIcon },
+  { id: 'whatsapp', label: 'Canal WhatsApp', icon: DevicePhoneMobileIcon },
   { id: 'integration', label: 'Integración', icon: GlobeAltIcon },
   { id: 'analysis', label: 'Análisis', icon: ChartBarIcon },
 ] as const
@@ -78,29 +78,27 @@ export default function TextAgentDetailView() {
   const providerConfigs = providerConfigsData?.providers ?? []
   const requiresUserKeys = providerConfigsData?.requires_user_keys ?? true
 
-  const visibleBaseTabs = isClient
-    ? BASE_TABS.filter((tab) => CLIENT_VISIBLE_TAB_IDS.includes(tab.id))
-    : [...BASE_TABS]
+  const tabs = useMemo(() => {
+    const visible = isClient
+      ? BASE_TABS.filter((tab) => CLIENT_VISIBLE_TAB_IDS.includes(tab.id))
+      : [...BASE_TABS]
+    return requiresUserKeys && !isClient
+      ? [visible[0], KEYS_TAB, ...visible.slice(1)]
+      : [...visible]
+  }, [isClient, requiresUserKeys])
 
-  const tabs = requiresUserKeys && !isClient
-    ? [visibleBaseTabs[0], KEYS_TAB, ...visibleBaseTabs.slice(1)]
-    : [...visibleBaseTabs]
-
-  useEffect(() => {
-    if (!requiresUserKeys && activeTab === 'keys') {
-      setActiveTab('config')
-      return
-    }
-
-    if (!tabs.some((tab) => tab.id === activeTab)) {
-      setActiveTab((tabs[0]?.id as TabId) ?? 'config')
-    }
-  }, [activeTab, requiresUserKeys, tabs])
+  // Reset active tab when it's no longer valid (setState-during-render pattern)
+  if (!requiresUserKeys && activeTab === 'keys') {
+    setActiveTab('config')
+  } else if (!tabs.some((tab) => tab.id === activeTab)) {
+    setActiveTab((tabs[0]?.id as TabId) ?? 'config')
+  }
 
   const {
     register,
     handleSubmit,
-    watch,
+    control,
+    getValues,
     setValue,
     reset,
     formState: { isDirty, errors },
@@ -110,6 +108,7 @@ export default function TextAgentDetailView() {
       model: 'gpt-4.1-mini',
       system_prompt: '',
       welcome_message: '',
+      legal_notice: '',
       temperature: 0.7,
       max_tokens: 512,
       sofia_mode: false,
@@ -124,6 +123,7 @@ export default function TextAgentDetailView() {
       model: isClient ? 'gpt-4.1-mini' : agent.model,
       system_prompt: agent.system_prompt,
       welcome_message: agent.welcome_message,
+      legal_notice: agent.legal_notice ?? '',
       temperature: isClient ? 0.7 : agent.temperature,
       max_tokens: isClient ? 512 : agent.max_tokens,
       sofia_mode: agent.sofia_mode ?? false,
@@ -131,7 +131,7 @@ export default function TextAgentDetailView() {
     })
   }, [agent, isClient, reset])
 
-  const watchedModel = watch('model')
+  const watchedModel = useWatch({ control, name: 'model' })
   const provider = agent?.provider as TextProvider | undefined
 
   useEffect(() => {
@@ -155,6 +155,7 @@ export default function TextAgentDetailView() {
         model: isClient ? 'gpt-4.1-mini' : values.model,
         system_prompt: values.system_prompt,
         welcome_message: values.welcome_message,
+        legal_notice: values.legal_notice,
         temperature: isClient ? 0.7 : values.temperature,
         max_tokens: isClient ? 512 : values.max_tokens,
         sofia_mode: values.sofia_mode,
@@ -164,21 +165,21 @@ export default function TextAgentDetailView() {
       toast.success('Cambios guardados')
       queryClient.invalidateQueries({ queryKey: ['text-agent', id] })
       queryClient.invalidateQueries({ queryKey: ['text-agents'] })
-      reset(watch())
+      reset(getValues())
     },
     onError: (error: Error) => toast.error(error.message),
   })
 
   const handleSaveForPreview = async () => {
-    await saveAsync(watch())
+    await saveAsync(getValues())
   }
 
-  const watchedName = watch('name')
-  const watchedWelcomeMessage = watch('welcome_message')
-  const watchedTemperature = watch('temperature') ?? 0.7
-  const watchedMaxTokens = watch('max_tokens') ?? 512
-  const watchedSofiaMode = watch('sofia_mode') ?? false
-  const watchedSofiaConfigJson = watch('sofia_config_json') ?? '{}'
+  const watchedName = useWatch({ control, name: 'name' })
+  const watchedWelcomeMessage = useWatch({ control, name: 'welcome_message' })
+  const watchedTemperature = useWatch({ control, name: 'temperature' }) ?? 0.7
+  const watchedMaxTokens = useWatch({ control, name: 'max_tokens' }) ?? 512
+  const watchedSofiaMode = useWatch({ control, name: 'sofia_mode' }) ?? false
+  const watchedSofiaConfigJson = useWatch({ control, name: 'sofia_config_json' }) ?? '{}'
   const previewWelcomeMessage = watchedWelcomeMessage?.trim()
     ? watchedWelcomeMessage
     : agent?.welcome_message ?? ''

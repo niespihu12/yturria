@@ -55,7 +55,7 @@ export default function SettingsView() {
   const {
     register: registerPassword,
     handleSubmit: handlePasswordSubmit,
-    watch: watchPassword,
+    getValues: getPasswordValues,
     reset: resetPassword,
     formState: { errors: passwordErrors, isDirty: isPasswordDirty },
   } = useForm<UpdateCurrentUserPasswordForm>({
@@ -65,8 +65,6 @@ export default function SettingsView() {
       password_confirmation: '',
     },
   })
-
-  const newPassword = watchPassword('password')
 
   const { mutate: saveProfile, isPending: isSavingProfile } = useMutation({
     mutationFn: updateProfile,
@@ -252,7 +250,7 @@ export default function SettingsView() {
                 {...registerPassword('password_confirmation', {
                   required: 'Debes confirmar el nuevo password',
                   validate: (value) =>
-                    value === newPassword || 'Los Passwords no son iguales',
+                    value === getPasswordValues('password') || 'Los Passwords no son iguales',
                 })}
               />
               {passwordErrors.password_confirmation && (

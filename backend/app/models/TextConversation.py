@@ -12,6 +12,7 @@ class TextConversation(SQLModel, table=True):
     text_agent_id: str = Field(foreign_key="text_agents.id", index=True, nullable=False)
     user_id: str = Field(foreign_key="users.id", index=True, nullable=False)
     title: str = Field(default="", nullable=False)
+    channel: str = Field(default="web", nullable=False)
     escalation_status: str = Field(default="none", nullable=False)
     escalation_reason: str = Field(default="", nullable=False)
     escalated_at: Optional[datetime] = Field(default=None, nullable=True)

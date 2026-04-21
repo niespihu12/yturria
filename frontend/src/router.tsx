@@ -17,6 +17,7 @@ import DashboardView from '@/views/app/DashboardView'
 import AdminUsersView from '@/views/app/AdminUsersView'
 import EscalationsView from '@/views/app/EscalationsView'
 import AppointmentsView from '@/views/app/AppointmentsView'
+import WhatsAppConfigView from '@/views/app/WhatsAppConfigView'
 import TextAgentEmbedView from '@/views/embed/TextAgentEmbedView'
 
 export default function Router() {
@@ -44,6 +45,7 @@ export default function Router() {
           <Route path="/agentes_texto/:id" element={<TextAgentDetailView />} />
           <Route path="/escalamientos" element={<EscalationsView />} />
           <Route path="/citas" element={<AppointmentsView />} />
+          <Route path="/whatsapp_config" element={<WhatsAppConfigView />} />
           <Route path="/numeros_telefono" element={<PhoneNumbersView />} />
           <Route path="/admin/usuarios" element={<AdminUsersView />} />
           <Route path="/configuracion" element={<SettingsView />} />

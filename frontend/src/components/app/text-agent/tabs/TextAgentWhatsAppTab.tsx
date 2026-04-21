@@ -4,6 +4,8 @@ import { toast } from 'react-toastify'
 import {
   CheckCircleIcon,
   ClipboardDocumentIcon,
+  PauseCircleIcon,
+  PlayCircleIcon,
   TrashIcon,
 } from '@heroicons/react/24/outline'
 import { deleteWhatsAppConfig, getWhatsAppConfig, upsertWhatsAppConfig } from '@/api/TextAgentsAPI'
@@ -11,13 +13,15 @@ import { WHATSAPP_PROVIDER_OPTIONS, type WhatsAppProvider } from '@/types/textAg
 
 type Props = {
   agentId: string
-  backendBaseUrl?: string
 }
 
 const inputClass =
   'w-full rounded-xl border border-[#e4e0f5] bg-white px-3 py-2.5 text-sm text-black placeholder:text-black/40 transition-colors focus:border-[#271173] focus:outline-none'
 
 const labelClass = 'mb-1.5 block text-xs font-semibold uppercase tracking-wide text-black/50'
+
+// Derive webhook base URL from VITE_API_URL (already contains /api)
+const API_BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? ''
 
 function CopyField({ label, value }: { label: string; value: string }) {
   const [copied, setCopied] = useState(false)
@@ -65,9 +69,8 @@ function CopyField({ label, value }: { label: string; value: string }) {
   )
 }
 
-export default function TextAgentWhatsAppTab({ agentId, backendBaseUrl }: Props) {
+export default function TextAgentWhatsAppTab({ agentId }: Props) {
   const queryClient = useQueryClient()
-  const baseUrl = backendBaseUrl ?? (typeof window !== 'undefined' ? `${window.location.protocol}//${window.location.hostname}:8000` : '')
 
   const { data, isLoading } = useQuery({
     queryKey: ['text-agent-whatsapp', agentId],
@@ -76,13 +79,28 @@ export default function TextAgentWhatsAppTab({ agentId, backendBaseUrl }: Props)
 
   const config = data?.config ?? null
 
-  const [provider, setProvider] = useState<WhatsAppProvider>(config?.provider ?? 'twilio')
-  const [phoneNumber, setPhoneNumber] = useState(config?.phone_number ?? '')
-  const [accountSid, setAccountSid] = useState(config?.account_sid ?? '')
+  const [provider, setProvider] = useState<WhatsAppProvider>('twilio')
+  const [phoneNumber, setPhoneNumber] = useState('')
+  const [accountSid, setAccountSid] = useState('')
   const [authToken, setAuthToken] = useState('')
   const [accessToken, setAccessToken] = useState('')
-  const [phoneNumberId, setPhoneNumberId] = useState(config?.phone_number_id ?? '')
-  const [businessAccountId, setBusinessAccountId] = useState(config?.business_account_id ?? '')
+  const [appSecret, setAppSecret] = useState('')
+  const [phoneNumberId, setPhoneNumberId] = useState('')
+  const [businessAccountId, setBusinessAccountId] = useState('')
+
+  // Hydrate form state when config identity changes (setState-during-render pattern)
+  const [lastConfigId, setLastConfigId] = useState<string | undefined>(undefined)
+  const [lastConfigProvider, setLastConfigProvider] = useState<string | undefined>(undefined)
+  if (config && (config.id !== lastConfigId || config.provider !== lastConfigProvider)) {
+    setLastConfigId(config.id)
+    setLastConfigProvider(config.provider)
+    setProvider(config.provider)
+    setPhoneNumber(config.phone_number)
+    setAccountSid(config.account_sid)
+    setPhoneNumberId(config.phone_number_id)
+    setBusinessAccountId(config.business_account_id)
+    // Tokens are secrets — never returned by API, don't overwrite user input
+  }
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ['text-agent-whatsapp', agentId] })
@@ -96,6 +114,7 @@ export default function TextAgentWhatsAppTab({ agentId, backendBaseUrl }: Props)
         account_sid: accountSid,
         auth_token: authToken || undefined,
         access_token: accessToken || undefined,
+        app_secret: appSecret || undefined,
         phone_number_id: phoneNumberId,
         business_account_id: businessAccountId,
       }),
@@ -103,6 +122,17 @@ export default function TextAgentWhatsAppTab({ agentId, backendBaseUrl }: Props)
       toast.success('Configuración de WhatsApp guardada')
       setAuthToken('')
       setAccessToken('')
+      setAppSecret('')
+      refresh()
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+
+  const { mutate: toggle, isPending: isToggling } = useMutation({
+    mutationFn: () =>
+      upsertWhatsAppConfig(agentId, { provider: config!.provider, active: !config!.active }),
+    onSuccess: () => {
+      toast.success(config?.active ? 'Canal pausado' : 'Canal activado')
       refresh()
     },
     onError: (e: Error) => toast.error(e.message),
@@ -116,6 +146,7 @@ export default function TextAgentWhatsAppTab({ agentId, backendBaseUrl }: Props)
       setAccountSid('')
       setAuthToken('')
       setAccessToken('')
+      setAppSecret('')
       setPhoneNumberId('')
       setBusinessAccountId('')
       refresh()
@@ -124,7 +155,7 @@ export default function TextAgentWhatsAppTab({ agentId, backendBaseUrl }: Props)
   })
 
   const webhookUrl = config
-    ? `${baseUrl}/api/webhooks/whatsapp/${config.id}/${config.provider}`
+    ? `${API_BASE}/webhooks/whatsapp/${config.id}/${config.provider}`
     : ''
 
   const verifyToken = config?.webhook_verify_token ?? ''
@@ -150,9 +181,22 @@ export default function TextAgentWhatsAppTab({ agentId, backendBaseUrl }: Props)
             </p>
             <p className="text-xs text-emerald-700">
               {config.has_credentials ? 'Credenciales configuradas' : 'Faltan credenciales'} ·{' '}
-              {config.active ? 'Activo' : 'Inactivo'}
+              {config.active ? 'Activo' : 'Pausado'}
             </p>
           </div>
+          <button
+            type="button"
+            disabled={isToggling}
+            onClick={() => toggle()}
+            title={config.active ? 'Pausar canal' : 'Activar canal'}
+            className="rounded-lg border border-amber-200 p-1.5 text-amber-600 transition-colors hover:bg-amber-50 disabled:opacity-50"
+          >
+            {config.active ? (
+              <PauseCircleIcon className="h-4 w-4" />
+            ) : (
+              <PlayCircleIcon className="h-4 w-4" />
+            )}
+          </button>
           <button
             type="button"
             disabled={isRemoving}
@@ -231,6 +275,9 @@ export default function TextAgentWhatsAppTab({ agentId, backendBaseUrl }: Props)
                 placeholder={config?.has_credentials ? '••••••••  (dejar vacío para mantener)' : 'Tu auth token de Twilio'}
                 className={inputClass}
               />
+              <p className="mt-1 text-[11px] text-black/40">
+                Usado para validar la firma <code>X-Twilio-Signature</code> en cada webhook entrante.
+              </p>
             </div>
           </>
         )}
@@ -246,6 +293,20 @@ export default function TextAgentWhatsAppTab({ agentId, backendBaseUrl }: Props)
                 placeholder={config?.has_credentials ? '••••••••  (dejar vacío para mantener)' : 'Token de acceso de Meta API'}
                 className={inputClass}
               />
+            </div>
+            <div>
+              <label className={labelClass}>App Secret</label>
+              <input
+                type="password"
+                value={appSecret}
+                onChange={(e) => setAppSecret(e.target.value)}
+                placeholder={config?.has_app_secret ? '••••••••  (dejar vacío para mantener)' : 'App Secret de tu Meta App'}
+                className={inputClass}
+              />
+              <p className="mt-1 text-[11px] text-black/40">
+                Usado para validar la firma <code>X-Hub-Signature-256</code> en cada webhook entrante.
+                Se encuentra en Meta Developers → Tu App → Configuración → Básica.
+              </p>
             </div>
             <div>
               <label className={labelClass}>Phone Number ID</label>
@@ -318,6 +379,7 @@ export default function TextAgentWhatsAppTab({ agentId, backendBaseUrl }: Props)
                 <li>En "Webhooks" agrega la URL del webhook</li>
                 <li>Pega el Token de verificación y haz clic en "Verify and save"</li>
                 <li>Suscríbete al evento <code>messages</code></li>
+                <li>Para validación de firma, agrega el App Secret en Credenciales</li>
               </ol>
             </div>
           )}

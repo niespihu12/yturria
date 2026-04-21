@@ -19,7 +19,7 @@ export default function RegisterView() {
         password_confirmation: '',
     }
 
-    const { register, handleSubmit, watch, reset, formState: { errors } } = useForm<UserRegistrationForm>({ defaultValues: initialValues });
+    const { register, handleSubmit, getValues, reset, formState: { errors } } = useForm<UserRegistrationForm>({ defaultValues: initialValues });
 
     const { mutate, isPending } = useMutation({
         mutationFn: createAccount,
@@ -102,7 +102,7 @@ export default function RegisterView() {
                         {...register("password_confirmation", {
                             required: "Repetir Password es obligatorio",
                             validate: (value) => {
-                                const password = watch("password");
+                                const password = getValues("password");
                                 return value === password || "Los Passwords no son iguales";
                             },
                         })}

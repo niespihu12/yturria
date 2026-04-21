@@ -11,6 +11,8 @@ from app.models.TextKnowledgeBaseChunk import TextKnowledgeBaseChunk
 from app.models.TextKnowledgeBaseDocument import TextKnowledgeBaseDocument
 from app.models.TextMessage import TextMessage
 from app.models.TextProviderConfig import TextProviderConfig
+from app.models.UserWhatsAppConfig import UserWhatsAppConfig
+from app.models.VoiceAgentRuntimeConfig import VoiceAgentRuntimeConfig
 from app.models.User import User, UserRole
 from app.models.UserAgent import UserAgent
 from app.models.UserPhoneNumber import UserPhoneNumber
@@ -30,6 +32,8 @@ __all__ = [
 	"TextKnowledgeBaseDocument",
 	"TextMessage",
 	"TextProviderConfig",
+	"UserWhatsAppConfig",
+	"VoiceAgentRuntimeConfig",
 	"User",
 	"UserRole",
 	"UserAgent",

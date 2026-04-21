@@ -156,6 +156,21 @@ export default function TextAgentConfigTab({ register, setValue, errors, provide
           Mensaje inicial que el agente muestra al abrir el chat.
         </p>
       </div>
+
+      {/* Legal notice */}
+      <div>
+        <label className={labelClass}>Aviso legal</label>
+        <textarea
+          rows={3}
+          className={textAreaClass}
+          placeholder="Ej: Los rangos de precio son orientativos y no constituyen una oferta formal de seguro…"
+          {...register('legal_notice')}
+        />
+        <p className="mt-1.5 text-xs text-black/40">
+          Se antepone exactamente una vez al primer mensaje del agente en todos los canales
+          (web, embed, WhatsApp). Vacío = usa el aviso configurado a nivel de servidor.
+        </p>
+      </div>
     </div>
   )
 }

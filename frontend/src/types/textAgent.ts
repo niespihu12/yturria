@@ -27,6 +27,7 @@ export type TextAgentSummary = {
   sofia_mode: boolean
   sofia_config_json: string
   embed_enabled?: boolean
+  legal_notice?: string
   created_at_unix_secs: number
   updated_at_unix_secs: number
   owner_user_id?: string
@@ -79,7 +80,7 @@ export type TextConversation = {
   conversation_id: string
   agent_id: string
   status: string
-  channel: 'web' | 'whatsapp'
+  channel: 'web' | 'whatsapp' | 'embed'
   start_time_unix_secs: number
   updated_at_unix_secs: number
   message_count: number
@@ -143,17 +144,15 @@ export type EscalatedConversation = TextConversation & {
 
 export type SofiaConfig = {
   advisor_phone: string
-  advisor_name: string
-  /** @deprecated use company_name — kept for backward compat with saved configs */
-  business_name: string
+  advisor_whatsapp_config_id: string
   business_hours: string
-  escalation_phrases: string[]
+  extra_escalation_phrases: string[]
   max_response_lines: number
   escalation_threshold: number
-  company_name?: string
-  company_years?: string
-  carriers?: string
-  legal_disclaimer?: string
+  company_name: string
+  company_years: string
+  carriers: string
+  company_context: string
 }
 
 export type TextConversationDetail = {
@@ -188,6 +187,7 @@ export type TextAgentWhatsApp = {
   business_account_id: string
   webhook_verify_token: string
   has_credentials: boolean
+  has_app_secret: boolean
   active: boolean
   created_at_unix_secs: number
   updated_at_unix_secs: number
@@ -198,6 +198,7 @@ export type TextAgentFormValues = {
   model: string
   system_prompt: string
   welcome_message: string
+  legal_notice: string
   temperature: number
   max_tokens: number
   sofia_mode: boolean

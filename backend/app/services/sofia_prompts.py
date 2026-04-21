@@ -1,4 +1,6 @@
 ESCALATION_PHRASES: list[str] = [
+    # Interés de compra / contratación
+    "me interesa",
     "quiero contratar",
     "me interesa contratar",
     "quiero comprar",
@@ -10,6 +12,15 @@ ESCALATION_PHRASES: list[str] = [
     "necesito una póliza",
     "necesito una poliza",
     "quiero asegurar",
+    # Solicitud de llamada / contacto
+    "cuándo me llaman",
+    "cuando me llaman",
+    "cuándo me van a llamar",
+    "cuando me van a llamar",
+    "cuándo me contactan",
+    "cuando me contactan",
+    "quiero que me llamen",
+    # Siniestro / reclamo (report nuevo — no activo)
     "tuve un siniestro",
     "tuve un accidente",
     "quiero reportar",
@@ -18,6 +29,7 @@ ESCALATION_PHRASES: list[str] = [
     "reclamo",
     "reclamación",
     "reclamacion",
+    # Solicitud de asesor humano
     "hablar con un asesor",
     "hablar con alguien",
     "hablar con una persona",
@@ -63,7 +75,7 @@ Responde SOLO con la categoría, sin explicación. Ejemplo: renovacion"""
 GUARD_PROMPT = """Revisa esta respuesta y verifica que cumpla TODAS estas reglas:
 1. No revela que es una IA/bot/chatbot/programa
 2. No da precios exactos de pólizas (solo rangos orientativos están permitidos)
-3. No excede 3 líneas (máximo ~200 caracteres)
+3. No excede {max_response_lines} líneas (máximo ~{max_chars} caracteres)
 4. Está en español mexicano con tono profesional y cálido
 5. No inventa información que no está en el contexto proporcionado
 

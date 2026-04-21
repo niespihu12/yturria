@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState } from 'react'
+﻿import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'react-toastify'
 import {
@@ -16,7 +16,14 @@ import {
   TrashIcon,
   XMarkIcon,
 } from '@heroicons/react/24/outline'
-import { createTool, deleteTool, getAgents, getPhoneNumbers, getTools } from '@/api/VoiceRuntimeAPI'
+import {
+  createTool,
+  deleteTool,
+  getAgents,
+  getPhoneNumbers,
+  getTools,
+  getVoiceAgentRuntimeConfig,
+} from '@/api/VoiceRuntimeAPI'
 import { SYSTEM_TOOLS } from '@/types/agent'
 import type { AgentDetail, AgentListItem, PhoneNumber, WorkspaceTool } from '@/types/agent'
 
@@ -124,6 +131,120 @@ const SYSTEM_TOOL_TYPE_BY_NAME: Record<string, string> = {
   transfer_to_number: 'transfer_to_number',
   dtmf: 'play_keypad_touch_tone',
   voicemail_detection: 'voicemail_detection',
+}
+
+function resolvePublicWebhookBaseUrl(): string {
+  const explicit = String(import.meta.env.VITE_PUBLIC_WEBHOOK_BASE_URL ?? '').trim()
+  if (explicit) {
+    return explicit.replace(/\/$/, '')
+  }
+
+  const apiUrl = String(import.meta.env.VITE_API_URL ?? '').trim()
+  if (!apiUrl) {
+    return ''
+  }
+
+  return apiUrl.replace(/\/api\/?$/, '').replace(/\/$/, '')
+}
+
+function buildSuggestedToolPayload(kind: 'send_whatsapp_message' | 'schedule_appointment'): CreateToolPayload {
+  const baseUrl = resolvePublicWebhookBaseUrl()
+  const runtimeToken = String(import.meta.env.VITE_VOICE_TOOL_TOKEN ?? '').trim()
+  const requestHeaders = runtimeToken ? { 'X-Voice-Tool-Token': runtimeToken } : {}
+
+  if (kind === 'send_whatsapp_message') {
+    return {
+      tool_config: {
+        type: 'webhook',
+        name: 'send_whatsapp_message',
+        description: 'Escala la conversacion a humano por WhatsApp usando la configuracion global.',
+        api_schema: {
+          url: `${baseUrl}/api/webhooks/voice/tools/send-whatsapp-message`,
+          method: 'POST',
+          content_type: 'application/json',
+          request_headers: requestHeaders,
+          request_body_schema: {
+            properties: {
+              agent_id: {
+                type: 'string',
+                description: 'ID del agente de voz actual.',
+              },
+              phone_number: {
+                type: 'string',
+                description: 'Numero destino en formato E.164.',
+              },
+              message: {
+                type: 'string',
+                description: 'Mensaje opcional a enviar.',
+              },
+              summary: {
+                type: 'string',
+                description: 'Resumen de la conversacion para contexto.',
+              },
+              conversation_id: {
+                type: 'string',
+                description: 'ID de conversacion opcional.',
+              },
+            },
+            required: ['agent_id', 'phone_number'],
+          },
+        },
+        response_timeout_secs: 20,
+      },
+    }
+  }
+
+  return {
+    tool_config: {
+      type: 'webhook',
+      name: 'schedule_appointment',
+      description: 'Agenda una cita validando disponibilidad y enviando confirmacion por WhatsApp.',
+      api_schema: {
+        url: `${baseUrl}/api/webhooks/voice/tools/schedule-appointment`,
+        method: 'POST',
+        content_type: 'application/json',
+        request_headers: requestHeaders,
+        request_body_schema: {
+          properties: {
+            agent_id: {
+              type: 'string',
+              description: 'ID del agente de voz actual.',
+            },
+            preferred_date: {
+              type: 'string',
+              description: 'Fecha preferida en formato YYYY-MM-DD.',
+            },
+            preferred_time: {
+              type: 'string',
+              description: 'Hora preferida en formato HH:MM.',
+            },
+            timezone: {
+              type: 'string',
+              description: 'Zona horaria IANA, por ejemplo America/Bogota.',
+            },
+            contact_name: {
+              type: 'string',
+              description: 'Nombre del contacto.',
+            },
+            contact_phone: {
+              type: 'string',
+              description: 'Telefono en formato E.164.',
+            },
+            contact_email: {
+              type: 'string',
+              description: 'Email del contacto.',
+            },
+            notes: {
+              type: 'string',
+              description: 'Notas de la cita.',
+            },
+          },
+          required: ['agent_id', 'preferred_date', 'preferred_time'],
+        },
+      },
+      response_timeout_secs: 25,
+    },
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -286,25 +407,23 @@ function CreateToolModal({
   const [queryParams, setQueryParams] = useState<ToolParamRow[]>([])
   const [errors, setErrors] = useState<Record<string, string>>({})
 
-  useEffect(() => {
+  // Sync path params to URL changes (setState-during-render pattern)
+  const [lastUrl, setLastUrl] = useState(form.url)
+  if (form.url !== lastUrl) {
+    setLastUrl(form.url)
     const names = extractPathParamNames(form.url)
-    setPathParams((prev) => {
-      const prevNames = prev.map((row) => row.identifier)
-      const sameNames =
-        prevNames.length === names.length && prevNames.every((name, index) => name === names[index])
-
-      if (sameNames) {
-        return prev
-      }
-
-      const map = new Map(prev.map((row) => [row.identifier, row]))
-      return names.map((name) => {
+    const prevNames = pathParams.map((row) => row.identifier)
+    const sameNames =
+      prevNames.length === names.length && prevNames.every((name, index) => name === names[index])
+    if (!sameNames) {
+      const map = new Map(pathParams.map((row) => [row.identifier, row]))
+      setPathParams(names.map((name) => {
         const existing = map.get(name)
         if (existing) return existing
         return { ...createToolParamRow(name), required: true }
-      })
-    })
-  }, [form.url])
+      }))
+    }
+  }
 
   const { mutate, isPending } = useMutation({
     mutationFn: (payload: CreateToolPayload) => createTool(payload),
@@ -349,8 +468,7 @@ function CreateToolModal({
 
     if (form.url.trim()) {
       try {
-        // eslint-disable-next-line no-new
-        new URL(form.url.trim())
+        new URL(form.url.trim()) // throws if invalid, intentionally unassigned
       } catch {
         addError('url', 'La URL debe ser valida (ej: https://api.example.com/v1/recurso)')
       }
@@ -1425,6 +1543,13 @@ export default function ToolsTab({
     queryFn: getPhoneNumbers,
   })
 
+  const { data: runtimeConfigData } = useQuery({
+    queryKey: ['voice-runtime-config', agent.agent_id],
+    queryFn: () => getVoiceAgentRuntimeConfig(agent.agent_id),
+    enabled: isClient && Boolean(agent.agent_id),
+  })
+  const escalationPhone = runtimeConfigData?.config?.escalation_phone_number ?? ''
+
   const { mutate: removeTool } = useMutation({
     mutationFn: (toolId: string) => deleteTool(toolId),
     onSuccess: () => {
@@ -1438,6 +1563,17 @@ export default function ToolsTab({
     },
   })
 
+  const { mutate: createSuggestedTool, isPending: isCreatingSuggestedTool } = useMutation({
+    mutationFn: (kind: 'send_whatsapp_message' | 'schedule_appointment') =>
+      createTool(buildSuggestedToolPayload(kind)),
+    onSuccess: (tool) => {
+      onWorkspaceToolToggle(tool.id, true)
+      toast.success(`Herramienta ${tool.tool_config.name} creada y activada`)
+      queryClient.invalidateQueries({ queryKey: ['workspace-tools'] })
+    },
+    onError: (error: Error) => toast.error(error.message),
+  })
+
   const handleDeleteTool = (toolId: string, e: React.MouseEvent) => {
     e.stopPropagation()
     if (!confirm('¿Eliminar esta herramienta del workspace?')) return
@@ -1445,14 +1581,34 @@ export default function ToolsTab({
     removeTool(toolId)
   }
 
+  const handleCreateSuggestedTool = (kind: 'send_whatsapp_message' | 'schedule_appointment') => {
+    const toolName = kind
+
+    const existing = workspaceTools.some(
+      (tool) => (tool.tool_config.name || '').trim().toLowerCase() === toolName
+    )
+    if (existing) {
+      toast.info(`La herramienta ${toolName} ya existe en el workspace`)
+      return
+    }
+
+    const baseUrl = resolvePublicWebhookBaseUrl()
+    if (!baseUrl) {
+      toast.error('Configura VITE_PUBLIC_WEBHOOK_BASE_URL o VITE_API_URL para crear herramientas sugeridas')
+      return
+    }
+
+    createSuggestedTool(kind)
+  }
+
   const workspaceTools: WorkspaceTool[] = data?.tools ?? []
   const ownedWebhookTools = useMemo(
     () =>
-      workspaceTools.filter((tool) => {
+      (data?.tools ?? []).filter((tool) => {
         const toolType = (tool.tool_config.type ?? '').toLowerCase()
         return toolType === 'webhook'
       }),
-    [workspaceTools]
+    [data]
   )
 
   const attachedOwnedWebhookCount = useMemo(
@@ -1511,7 +1667,18 @@ export default function ToolsTab({
     const rows = Array.isArray(params.transfers)
       ? params.transfers.filter(isRecord).map((item) => ({ ...item }))
       : []
-    return rows.length > 0 ? rows : [fallbackRow]
+
+    if (rows.length > 0) return rows
+
+    // For clients with transfer_to_number, pre-seed from escalation config
+    if (isClient && toolName === 'transfer_to_number' && escalationPhone) {
+      return [{
+        phone_number: escalationPhone,
+        condition: 'cuando el usuario solicite hablar con un asesor humano o quiera ser transferido',
+      }]
+    }
+
+    return [fallbackRow]
   }
 
   const setTransferRows = (
@@ -1546,6 +1713,36 @@ export default function ToolsTab({
             placeholder="Buscar herramientas por nombre, tipo o descripcion..."
             className="w-full rounded-xl border border-[#e4e0f5] bg-[#f5f3ff] py-2.5 pl-9 pr-3 text-sm text-black placeholder:text-black/40 transition-colors focus:border-[#271173] focus:outline-none"
           />
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-[#e4e0f5] bg-white p-4">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <p className="text-sm font-medium text-black">Herramientas sugeridas de Voice</p>
+            <p className="mt-1 text-xs text-black/55">
+              Crea rapidamente send_whatsapp_message y schedule_appointment para invocarlas desde el agente.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => handleCreateSuggestedTool('send_whatsapp_message')}
+              disabled={isCreatingSuggestedTool || isClient}
+              className="rounded-xl border border-[#271173]/25 bg-[#f5f3ff] px-3 py-2 text-xs font-semibold text-[#271173] transition-colors hover:bg-[#ede9ff] disabled:opacity-50"
+            >
+              Crear send_whatsapp_message
+            </button>
+            <button
+              type="button"
+              onClick={() => handleCreateSuggestedTool('schedule_appointment')}
+              disabled={isCreatingSuggestedTool || isClient}
+              className="rounded-xl border border-[#271173]/25 bg-[#f5f3ff] px-3 py-2 text-xs font-semibold text-[#271173] transition-colors hover:bg-[#ede9ff] disabled:opacity-50"
+            >
+              Crear schedule_appointment
+            </button>
+          </div>
         </div>
       </div>
 

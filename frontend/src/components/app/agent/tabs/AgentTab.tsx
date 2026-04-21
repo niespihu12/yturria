@@ -1,4 +1,4 @@
-﻿import { useMemo, useState } from 'react'
+﻿import { useEffect, useMemo, useState } from 'react'
 import type {
   UseFormRegister,
   UseFormSetValue,
@@ -7,8 +7,13 @@ import type {
 } from 'react-hook-form'
 import type { AgentFormValues } from '@/types/agent'
 import { SUPPORTED_LLMS, SUPPORTED_LANGUAGES } from '@/types/agent'
-import { useQuery } from '@tanstack/react-query'
-import { getVoicePreview, getVoices } from '@/api/VoiceRuntimeAPI'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  getVoiceAgentRuntimeConfig,
+  getVoicePreview,
+  getVoices,
+  upsertVoiceAgentRuntimeConfig,
+} from '@/api/VoiceRuntimeAPI'
 import type { Voice } from '@/types/agent'
 import {
   ChatBubbleLeftRightIcon,
@@ -19,6 +24,7 @@ import {
 import { toast } from 'react-toastify'
 
 type Props = {
+  agentId: string
   register: UseFormRegister<AgentFormValues>
   watch: UseFormWatch<AgentFormValues>
   setValue: UseFormSetValue<AgentFormValues>
@@ -120,7 +126,15 @@ function TogglePill({
   )
 }
 
-export default function AgentTab({ register, watch, setValue, errors, isClient = false }: Props) {
+export default function AgentTab({
+  agentId,
+  register,
+  watch,
+  setValue,
+  errors,
+  isClient = false,
+}: Props) {
+  const queryClient = useQueryClient()
   const voiceField = register('voice_id')
   const ttsModelField = register('tts_model_id')
   const languageField = register('language')
@@ -131,7 +145,52 @@ export default function AgentTab({ register, watch, setValue, errors, isClient =
     queryFn: getVoices,
   })
 
-  const voices: Voice[] = voicesData?.voices ?? []
+  const { data: runtimeConfigData } = useQuery({
+    queryKey: ['voice-runtime-config', agentId],
+    queryFn: () => getVoiceAgentRuntimeConfig(agentId),
+    enabled: Boolean(agentId),
+  })
+
+  const [runtimeForm, setRuntimeForm] = useState({
+    whatsapp_enabled: false,
+    default_escalation_channel: 'phone' as 'phone' | 'whatsapp',
+    escalation_phone_number: '',
+  })
+
+  useEffect(() => {
+    const config = runtimeConfigData?.config
+    if (!config) return
+
+    setRuntimeForm({
+      whatsapp_enabled: Boolean(config.whatsapp_enabled),
+      default_escalation_channel:
+        config.default_escalation_channel === 'whatsapp' ? 'whatsapp' : 'phone',
+      escalation_phone_number: config.escalation_phone_number || '',
+    })
+  }, [runtimeConfigData?.config])
+
+  const hasRuntimeChanges = useMemo(() => {
+    const config = runtimeConfigData?.config
+    if (!config) return false
+
+    return (
+      runtimeForm.whatsapp_enabled !== Boolean(config.whatsapp_enabled) ||
+      runtimeForm.default_escalation_channel !==
+        (config.default_escalation_channel === 'whatsapp' ? 'whatsapp' : 'phone') ||
+      runtimeForm.escalation_phone_number !== (config.escalation_phone_number || '')
+    )
+  }, [runtimeConfigData?.config, runtimeForm])
+
+  const { mutate: saveRuntimeConfig, isPending: isSavingRuntimeConfig } = useMutation({
+    mutationFn: () => upsertVoiceAgentRuntimeConfig(agentId, runtimeForm),
+    onSuccess: () => {
+      toast.success('Configuracion de escalacion actualizada')
+      queryClient.invalidateQueries({ queryKey: ['voice-runtime-config', agentId] })
+    },
+    onError: (error: Error) => toast.error(error.message),
+  })
+
+  const voices = useMemo<Voice[]>(() => voicesData?.voices ?? [], [voicesData])
   const [previewing, setPreviewing] = useState(false)
 
   const selectedVoiceId = watch('voice_id')
@@ -241,6 +300,76 @@ export default function AgentTab({ register, watch, setValue, errors, isClient =
                 Este saludo está bloqueado por política para cliente final.
               </p>
             )}
+          </div>
+
+          <div className="space-y-4 rounded-xl border border-[#e4e0f5] bg-[#f8f7ff] p-4">
+            <div>
+              <p className="text-sm font-medium text-black">Escalacion y WhatsApp</p>
+              <p className="mt-1 text-xs text-black/55">
+                Permite que este agente escale por llamada o por WhatsApp segun tu configuracion.
+              </p>
+            </div>
+
+            <label className="inline-flex items-center gap-2 rounded-lg bg-white px-3 py-2 text-sm text-black/80">
+              <input
+                type="checkbox"
+                checked={runtimeForm.whatsapp_enabled}
+                onChange={(event) =>
+                  setRuntimeForm((prev) => ({
+                    ...prev,
+                    whatsapp_enabled: event.target.checked,
+                  }))
+                }
+              />
+              Habilitar escalacion via WhatsApp
+            </label>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <label className="flex flex-col gap-1.5 text-sm font-medium text-black/80">
+                Canal de escalacion por defecto
+                <select
+                  className={selectClass}
+                  value={runtimeForm.default_escalation_channel}
+                  onChange={(event) =>
+                    setRuntimeForm((prev) => ({
+                      ...prev,
+                      default_escalation_channel:
+                        event.target.value === 'whatsapp' ? 'whatsapp' : 'phone',
+                    }))
+                  }
+                >
+                  <option value="phone">Llamada telefonica</option>
+                  <option value="whatsapp">WhatsApp</option>
+                </select>
+              </label>
+
+              <label className="flex flex-col gap-1.5 text-sm font-medium text-black/80">
+                Numero de transferencia (phone)
+                <input
+                  type="text"
+                  className={inputClass}
+                  placeholder="+573001234567"
+                  value={runtimeForm.escalation_phone_number}
+                  onChange={(event) =>
+                    setRuntimeForm((prev) => ({
+                      ...prev,
+                      escalation_phone_number: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+            </div>
+
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => saveRuntimeConfig()}
+                disabled={isSavingRuntimeConfig || !hasRuntimeChanges}
+                className="inline-flex items-center gap-2 rounded-xl bg-[#271173] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#1f0d5a] disabled:opacity-50"
+              >
+                {isSavingRuntimeConfig ? 'Guardando...' : 'Guardar escalacion'}
+              </button>
+            </div>
           </div>
 
           {!isClient && (

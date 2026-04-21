@@ -16,7 +16,7 @@ const inputClass =
 export default function NewPasswordForm({ token }: NewPasswordFormProps) {
   const navigate = useNavigate()
   const initialValues: NewPasswordForm = { password: '', password_confirmation: '' }
-  const { register, handleSubmit, watch, reset, formState: { errors } } = useForm({ defaultValues: initialValues })
+  const { register, handleSubmit, getValues, reset, formState: { errors } } = useForm({ defaultValues: initialValues })
 
   const { mutate, isPending } = useMutation({
     mutationFn: updatePasswordWithToken,
@@ -58,7 +58,7 @@ export default function NewPasswordForm({ token }: NewPasswordFormProps) {
           className={inputClass}
           {...register('password_confirmation', {
             required: 'Confirma la contraseña',
-            validate: (value) => value === watch('password') || 'Las contraseñas no coinciden',
+            validate: (value) => value === getValues('password') || 'Las contraseñas no coinciden',
           })}
         />
         {errors.password_confirmation && <ErrorMessage>{errors.password_confirmation.message}</ErrorMessage>}

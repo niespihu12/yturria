@@ -22,7 +22,7 @@ function formatDate(unix: number) {
 
 export default function TextAgentAnalysisTab({ agentId }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [channelFilter, setChannelFilter] = useState<'all' | 'web' | 'whatsapp'>('all')
+  const [channelFilter, setChannelFilter] = useState<'all' | 'web' | 'whatsapp' | 'embed'>('all')
 
   const { data, isLoading } = useQuery({
     queryKey: ['text-conversations', agentId],
@@ -41,13 +41,14 @@ export default function TextAgentAnalysisTab({ agentId }: Props) {
       ? allConversations
       : allConversations.filter((c) => (c.channel ?? 'web') === channelFilter)
 
-  const webCount = allConversations.filter((c) => (c.channel ?? 'web') === 'web').length
+  const webCount = allConversations.filter((c) => c.channel === 'web').length
   const waCount = allConversations.filter((c) => c.channel === 'whatsapp').length
+  const embedCount = allConversations.filter((c) => c.channel === 'embed').length
 
   return (
     <div className="space-y-4">
       {/* Stats row */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-4 gap-3">
         <div className="rounded-2xl border border-[#e4e0f5] bg-white px-5 py-4">
           <p className="text-xs font-semibold uppercase tracking-wide text-black/40">Total</p>
           <p className="mt-1 text-2xl font-bold text-black">{allConversations.length}</p>
@@ -66,11 +67,16 @@ export default function TextAgentAnalysisTab({ agentId }: Props) {
           <p className="mt-1 text-2xl font-bold text-emerald-700">{waCount}</p>
           <p className="text-xs text-emerald-600/70">Mensajes recibidos</p>
         </div>
+        <div className="rounded-2xl border border-blue-100 bg-blue-50 px-5 py-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-blue-600">Embed</p>
+          <p className="mt-1 text-2xl font-bold text-blue-700">{embedCount}</p>
+          <p className="text-xs text-blue-600/70">Widget externo</p>
+        </div>
       </div>
 
       {/* Filter tabs */}
       <div className="flex gap-1 rounded-xl border border-[#e4e0f5] bg-[#fafafa] p-1">
-        {(['all', 'web', 'whatsapp'] as const).map((f) => (
+        {(['all', 'web', 'whatsapp', 'embed'] as const).map((f) => (
           <button
             key={f}
             type="button"
@@ -81,7 +87,7 @@ export default function TextAgentAnalysisTab({ agentId }: Props) {
                 : 'text-black/50 hover:text-black/70'
             }`}
           >
-            {f === 'all' ? 'Todas' : f === 'web' ? 'Web' : 'WhatsApp'}
+            {f === 'all' ? 'Todas' : f === 'web' ? 'Web' : f === 'whatsapp' ? 'WhatsApp' : 'Embed'}
           </button>
         ))}
       </div>
@@ -107,6 +113,7 @@ export default function TextAgentAnalysisTab({ agentId }: Props) {
               {conversations.map((conv) => {
                 const selected = selectedId === conv.conversation_id
                 const isWa = conv.channel === 'whatsapp'
+                const isEmbed = conv.channel === 'embed'
                 return (
                   <button
                     key={conv.conversation_id}
@@ -124,6 +131,11 @@ export default function TextAgentAnalysisTab({ agentId }: Props) {
                         <span className="flex items-center gap-0.5 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700">
                           <DevicePhoneMobileIcon className="h-2.5 w-2.5" />
                           WA
+                        </span>
+                      )}
+                      {isEmbed && (
+                        <span className="rounded-full bg-blue-100 px-1.5 py-0.5 text-[9px] font-bold text-blue-700">
+                          Embed
                         </span>
                       )}
                     </div>

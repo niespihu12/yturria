@@ -13,6 +13,29 @@ import type {
 } from '@/types/agent'
 import type { TextAppointment, TextAppointmentStatus } from '@/types/textAgent'
 
+export type VoiceRuntimeConfig = {
+  id: string
+  agent_id: string
+  whatsapp_enabled: boolean
+  default_escalation_channel: 'phone' | 'whatsapp'
+  escalation_phone_number: string
+  updated_at_unix_secs?: number | null
+}
+
+export type UserWhatsAppGlobalConfig = {
+  id: string
+  provider: 'twilio' | 'meta'
+  default_sender_number: string
+  active: boolean
+  account_sid: string
+  phone_number_id: string
+  business_account_id: string
+  message_template_escalation: string
+  message_template_appointment: string
+  has_twilio_auth_token: boolean
+  has_meta_access_token: boolean
+}
+
 type UserScopeOptions = {
   userId?: string
   user_id?: string
@@ -238,6 +261,29 @@ export async function createVoiceAgentAppointment(
   }
 }
 
+export async function scheduleVoiceAgentAppointment(
+  agentId: string,
+  payload: {
+    preferred_date: string
+    preferred_time: string
+    timezone?: string
+    contact_name?: string
+    contact_phone?: string
+    contact_email?: string
+    conversation_id?: string
+    notes?: string
+    agent_name?: string
+    confirmation_message?: string
+  }
+): Promise<{ appointment: TextAppointment; confirmation: { channel: string; sent: boolean } }> {
+  try {
+    const { data } = await api.post(`/agents/${agentId}/appointments/schedule`, payload)
+    return data
+  } catch (error) {
+    throw new Error(getError(error))
+  }
+}
+
 export async function updateVoiceAgentAppointment(
   agentId: string,
   appointmentId: string,
@@ -267,6 +313,82 @@ export async function deleteVoiceAgentAppointment(agentId: string, appointmentId
   try {
     const { data } = await api.delete(`/agents/${agentId}/appointments/${appointmentId}`)
     return data as { deleted: boolean }
+  } catch (error) {
+    throw new Error(getError(error))
+  }
+}
+
+export async function getWhatsAppGlobalConfig(): Promise<{ config: UserWhatsAppGlobalConfig | null }> {
+  try {
+    const { data } = await api.get('/agents/whatsapp-config')
+    return data
+  } catch (error) {
+    throw new Error(getError(error))
+  }
+}
+
+export async function upsertWhatsAppGlobalConfig(payload: {
+  provider: 'twilio' | 'meta'
+  default_sender_number?: string
+  active?: boolean
+  account_sid?: string
+  auth_token?: string
+  access_token?: string
+  phone_number_id?: string
+  business_account_id?: string
+  message_template_escalation?: string
+  message_template_appointment?: string
+}): Promise<{ config: UserWhatsAppGlobalConfig }> {
+  try {
+    const { data } = await api.put('/agents/whatsapp-config', payload)
+    return data
+  } catch (error) {
+    throw new Error(getError(error))
+  }
+}
+
+export async function getVoiceAgentRuntimeConfig(
+  agentId: string
+): Promise<{ config: VoiceRuntimeConfig }> {
+  try {
+    const { data } = await api.get(`/agents/${agentId}/runtime-config`)
+    return data
+  } catch (error) {
+    throw new Error(getError(error))
+  }
+}
+
+export async function upsertVoiceAgentRuntimeConfig(
+  agentId: string,
+  payload: Partial<{
+    whatsapp_enabled: boolean
+    default_escalation_channel: 'phone' | 'whatsapp'
+    escalation_phone_number: string
+  }>
+): Promise<{ config: VoiceRuntimeConfig }> {
+  try {
+    const { data } = await api.put(`/agents/${agentId}/runtime-config`, payload)
+    return data
+  } catch (error) {
+    throw new Error(getError(error))
+  }
+}
+
+export async function escalateVoiceConversation(
+  agentId: string,
+  payload: {
+    channel: 'phone' | 'whatsapp'
+    phone_number?: string
+    message?: string
+    summary?: string
+    conversation_id?: string
+    transfer_phone_number?: string
+    agent_name?: string
+  }
+) {
+  try {
+    const { data } = await api.post(`/agents/${agentId}/escalations`, payload)
+    return data
   } catch (error) {
     throw new Error(getError(error))
   }

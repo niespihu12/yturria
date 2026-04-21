@@ -42,7 +42,7 @@ export default function AdminUsersView() {
     enabled: isSuperAdmin,
   })
 
-  const users = data?.users ?? []
+  const users = useMemo(() => data?.users ?? [], [data])
 
   const totals = useMemo(() => {
     return users.reduce(

@@ -32,6 +32,7 @@ from app.controllers.TextAgentController import (
     TextAgentController,
     _maybe_prepend_legal_notice,
 )
+import app.utils.client_defaults as _client_defaults_mod
 from app.models.TextAgent import TextAgent
 from app.models.TextAgentWhatsApp import TextAgentWhatsApp
 from app.models.TextConversation import TextConversation
@@ -356,3 +357,43 @@ def _seed_conversation_with_history_wa(
         ))
     session.commit()
     return conv
+
+
+# ── tenant fallback ───────────────────────────────────────────────────────────
+
+class TestTenantFallback:
+    """Cuando el agente tiene legal_notice vacío, TENANT.legal_notice actúa como fallback."""
+
+    def test_tenant_notice_used_when_agent_notice_empty(self, monkeypatch):
+        import app.controllers.TextAgentController as ctrl_mod
+        fake_tenant = _client_defaults_mod.TenantProfile(legal_notice="Aviso global del tenant.")
+        monkeypatch.setattr(ctrl_mod, "TENANT", fake_tenant)
+
+        result = _maybe_prepend_legal_notice("Hola", "", has_prior_assistant=False)
+        assert result.startswith("Aviso global del tenant.")
+
+    def test_agent_notice_overrides_tenant(self, monkeypatch):
+        import app.controllers.TextAgentController as ctrl_mod
+        fake_tenant = _client_defaults_mod.TenantProfile(legal_notice="Aviso tenant.")
+        monkeypatch.setattr(ctrl_mod, "TENANT", fake_tenant)
+
+        result = _maybe_prepend_legal_notice("Hola", "Aviso del agente.", has_prior_assistant=False)
+        assert result.startswith("Aviso del agente.")
+        assert "Aviso tenant." not in result
+
+    def test_no_notice_at_all_no_op(self, monkeypatch):
+        import app.controllers.TextAgentController as ctrl_mod
+        fake_tenant = _client_defaults_mod.TenantProfile(legal_notice="")
+        monkeypatch.setattr(ctrl_mod, "TENANT", fake_tenant)
+
+        result = _maybe_prepend_legal_notice("Hola", "", has_prior_assistant=False)
+        assert result == "Hola"
+
+    def test_tenant_notice_not_shown_on_subsequent_turns(self, monkeypatch):
+        import app.controllers.TextAgentController as ctrl_mod
+        fake_tenant = _client_defaults_mod.TenantProfile(legal_notice="Aviso global.")
+        monkeypatch.setattr(ctrl_mod, "TENANT", fake_tenant)
+
+        result = _maybe_prepend_legal_notice("Hola", "", has_prior_assistant=True)
+        assert result == "Hola"
+        assert "Aviso global." not in result

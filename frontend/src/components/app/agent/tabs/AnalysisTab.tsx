@@ -347,6 +347,7 @@ function ConversationDetailModal({
     retry: false,
   })
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!proxyAudioBlob) {
       setProxyAudioUrl(null)
@@ -360,6 +361,7 @@ function ConversationDetailModal({
       URL.revokeObjectURL(objectUrl)
     }
   }, [proxyAudioBlob])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const conversationAudioUrl = detailAudioUrl ?? proxyAudioUrl
   const callDurationSecs = data?.metadata?.call_duration_secs
@@ -566,24 +568,26 @@ export default function AnalysisTab({ agentId, agent, onUpdate, isClient = false
   ])
   const [animatingTypeFieldId, setAnimatingTypeFieldId] = useState<string | null>(null)
 
-  useEffect(() => {
-    setCriteria(
-      mapCriteria(agent.platform_settings?.evaluation?.criteria)
-    )
-    setDataCollection(
-      mapDataCollection(agent.platform_settings?.data_collection)
-    )
+  // Sync agent config to state (setState-during-render pattern)
+  const [lastAgent, setLastAgent] = useState(agent)
+  if (agent !== lastAgent) {
+    setLastAgent(agent)
+    setCriteria(mapCriteria(agent.platform_settings?.evaluation?.criteria))
+    setDataCollection(mapDataCollection(agent.platform_settings?.data_collection))
     setAnalysisLanguage(
       agent.platform_settings?.summary_language ??
         agent.conversation_config.agent.language ??
         'es'
     )
-  }, [agent])
+  }
 
-  useEffect(() => {
+  // Reset pagination when agentId changes (setState-during-render pattern)
+  const [lastAgentId, setLastAgentId] = useState(agentId)
+  if (agentId !== lastAgentId) {
+    setLastAgentId(agentId)
     setConversationCursor(null)
     setConversationCursorHistory([])
-  }, [agentId])
+  }
 
   const { data, isLoading, isFetching } = useQuery({
     queryKey: ['conversations', agentId, conversationCursor, CONVERSATIONS_PAGE_SIZE],
