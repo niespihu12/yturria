@@ -1,63 +1,53 @@
-.mcp.json
-claude.md
-skills-lock.json
-/.agents
-/.claude
+# Examples 1:
 
-# ── Secrets & environment files ──────────────────────────────────────────────
-# NEVER commit these. Use .env.example as the tracked template.
-.env
-.env.local
-.env.*.local
-.env.production
-.env.staging
-.env.test
-backend/.env
-backend/.env.*
-frontend/.env
-frontend/.env.*
-!backend/.env.example
-!frontend/.env.example
+    Input:
+    ### Added files:
+    [src/main.py, README.md, config.json]
 
-# Private keys, certificates, credentials
-*.pem
-*.p12
-*.pfx
-*.key
-*.cert
-*.crt
-id_rsa
-id_ed25519
-*.keystore
+    ### Deleted files:
+    [old/unused.py]
+    ### Modified files:
+    [utils.py]
+    ###current .gitignore Content
+    (empty)
+    Expected Output:
+    (empty — output nothing)
 
-# Secret stores / vaults
-secrets/
-.secrets/
-.vault-token
-vault-token
+# Example 2 (Project with artifacts):
+Input:
+### Added files:
+[pycache/main.cpython-310.pyc, dist/app.js, .env.local, .vscode/settings.json
 
-# OS & editor artifacts
-.DS_Store
-Thumbs.db
-*.swp
-*.swo
-*~
+### Deleted files:
+    []
 
-# Python
-__pycache__/
-*.py[cod]
-*.egg-info/
-dist/
-build/
-.venv/
-venv/
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-htmlcov/
-.coverage
-
-# Node / frontend
-node_modules/
-frontend/dist/
-frontend/.vite/
+### Modified files:
+[]
+### current .gitignore Content
+*.log
+Expected Output:
+    #Compiled and build artifacts
+    *.pyc
+    pycache/
+    *.o
+    *.obj
+    dist/
+    build/
+    #Dependencies
+    .venv/
+    venv/
+    node_modules/
+    #Logs and temp files
+    *.log
+    *.tmp
+    *.swp
+    #Environment
+    .env
+    .env.local
+    .env.
+    #Editors
+    .vscode/
+    .idea/
+    #Original rules preserved
+    *.log
+Final reminder: Output ONLY the .gitignore content. If nothing should be ignored, output NOTHING.

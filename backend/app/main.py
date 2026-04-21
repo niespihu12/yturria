@@ -9,6 +9,7 @@ from sqlmodel import Session, SQLModel
 import app.models  # noqa: F401
 from app.config.db import engine
 from app.middlewares.cors import add_cors_middleware
+from app.middlewares.rate_limiter import RateLimitMiddleware
 from app.middlewares.http_error_handler import register_exception_handlers
 from app.routes.auth_router import auth_router
 from app.routes.agents_router import agents_router
@@ -474,6 +475,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 register_exception_handlers(app)
+app.add_middleware(RateLimitMiddleware)
 add_cors_middleware(app)
 
 app.include_router(auth_router, prefix="/api")
