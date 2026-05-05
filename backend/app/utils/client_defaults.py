@@ -157,7 +157,24 @@ def build_client_voice_payload(name: str) -> dict[str, Any]:
     }
 
 
-def apply_client_voice_defaults(payload: dict[str, Any]) -> dict[str, Any]:
+def _resolve_non_empty(
+    *candidates: Any,
+    fallback: str,
+) -> str:
+    for candidate in candidates:
+        normalized = str(candidate or "").strip()
+        if normalized:
+            return normalized
+    return fallback
+
+
+def apply_client_voice_defaults(
+    payload: dict[str, Any],
+    *,
+    prompt_override: str | None = None,
+    first_message_override: str | None = None,
+    language_override: str | None = None,
+) -> dict[str, Any]:
     """Mezcla defaults sobre un payload existente del cliente.
 
     Se fuerzan los campos no negociables (LLM, TTS model, language default si vacío).
@@ -170,14 +187,27 @@ def apply_client_voice_defaults(payload: dict[str, Any]) -> dict[str, Any]:
     agent_cfg = conv.setdefault("agent", {})
     prompt_cfg = agent_cfg.setdefault("prompt", {})
 
-    # Cliente final: prompt y mensaje inicial son inmutables por política.
-    prompt_cfg["prompt"] = SOFIA_VOICE_PROMPT
+    # Cliente final: llm, tools y tts son inmutables por politica.
+    # prompt/first_message/language pueden inyectarse por plantilla en create_agent.
+    prompt_cfg["prompt"] = _resolve_non_empty(
+        prompt_override,
+        prompt_cfg.get("prompt"),
+        fallback=SOFIA_VOICE_PROMPT,
+    )
 
     prompt_cfg["llm"] = DEFAULT_VOICE_LLM
     prompt_cfg["built_in_tools"] = build_client_built_in_tools()
 
-    agent_cfg["first_message"] = SOFIA_FIRST_MESSAGE
-    agent_cfg["language"] = DEFAULT_LANGUAGE
+    agent_cfg["first_message"] = _resolve_non_empty(
+        first_message_override,
+        agent_cfg.get("first_message"),
+        fallback=SOFIA_FIRST_MESSAGE,
+    )
+    agent_cfg["language"] = _resolve_non_empty(
+        language_override,
+        agent_cfg.get("language"),
+        fallback=DEFAULT_LANGUAGE,
+    )
 
 
     tts = conv.setdefault("tts", {})

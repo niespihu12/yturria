@@ -8,7 +8,7 @@ from langgraph.graph.message import add_messages
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from app.services.sofia_config import SofiaConfig, DEFAULT_CONFIG
+from app.services.sofia_config import SofiaConfig, DEFAULT_CONFIG, get_escalation_message, get_language_instruction
 from app.services.sofia_prompts import (
     CLASSIFY_PROMPT,
     ESCALATION_MESSAGE,
@@ -33,6 +33,31 @@ class SofiaState(TypedDict):
     config: dict[str, Any]
     already_escalated: bool
     has_open_appointment: bool
+    uncertainty_count: int
+
+
+# Frases que indican que la IA no está segura de su respuesta.
+_UNCERTAINTY_PHRASES: tuple[str, ...] = (
+    "no estoy seguro",
+    "no estoy segura",
+    "permítame consultar",
+    "permítame verificar",
+    "tengo que verificar",
+    "déjeme verificar",
+    "necesito consultar",
+    "debo consultar",
+    "déjeme confirmar",
+    "permítame confirmar",
+    "no tengo esa información",
+    "no cuento con esa información",
+    "no puedo confirmar",
+    "tendría que revisar",
+    "habría que consultar",
+    "le recomiendo consultar directamente",
+    "es mejor que lo consulte",
+    "no tengo certeza",
+)
+_UNCERTAINTY_ESCALATION_THRESHOLD = 2
 
 
 def _coerce_config(raw_config: dict[str, Any] | None) -> SofiaConfig:
@@ -229,10 +254,12 @@ def quote_price(state: SofiaState) -> dict:
 
 def escalate_to_human(state: SofiaState) -> dict:
     reason = state.get("escalation_reason") or "user_request"
+    config = _coerce_config(state.get("config"))
+    escalation_msg = get_escalation_message(config.language)
     return {
         "should_escalate": True,
         "escalation_reason": reason,
-        "response": ESCALATION_MESSAGE,
+        "response": escalation_msg,
     }
 
 
@@ -259,6 +286,10 @@ def respond(state: SofiaState) -> dict:
         legal_notice_section=legal_notice_section,
     )
 
+    lang_instruction = get_language_instruction(config.language)
+    if lang_instruction not in system_text:
+        system_text = f"{lang_instruction}\n\n{system_text}"
+
     if state.get("has_open_appointment"):
         system_text += (
             "\n\nContexto operativo: Ya existe una cita o solicitud registrada para este cliente. "
@@ -279,6 +310,11 @@ def respond(state: SofiaState) -> dict:
     return {"response": result.content.strip()}
 
 
+def _detect_uncertainty(response: str) -> bool:
+    lower = response.lower()
+    return any(phrase in lower for phrase in _UNCERTAINTY_PHRASES)
+
+
 def guard(state: SofiaState) -> dict:
     if state.get("should_escalate"):
         return {}
@@ -287,6 +323,21 @@ def guard(state: SofiaState) -> dict:
     if not response:
         return {}
 
+    # ── Detector de incertidumbre ─────────────────────────────────────────────
+    uncertainty_count = int(state.get("uncertainty_count") or 0)
+    if _detect_uncertainty(response):
+        uncertainty_count += 1
+        logger.info("guard: frase de incertidumbre detectada (count=%s)", uncertainty_count)
+        if uncertainty_count >= _UNCERTAINTY_ESCALATION_THRESHOLD:
+            logger.info("guard: umbral de incertidumbre alcanzado → escalando")
+            return {
+                "uncertainty_count": uncertainty_count,
+                "should_escalate": True,
+                "escalation_reason": "uncertainty_detected",
+            }
+        return {"uncertainty_count": uncertainty_count}
+
+    # ── Validación de formato/longitud (comportamiento original) ──────────────
     config = _coerce_config(state.get("config"))
     llm = ChatOpenAI(
         model=config.model,

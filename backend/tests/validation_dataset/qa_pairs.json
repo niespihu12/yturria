@@ -1,0 +1,402 @@
+[
+  {
+    "id": "Q001",
+    "category": "coberturas",
+    "question": "¿Qué cubre un seguro de automóvil básico?",
+    "expected_contains": ["responsabilidad civil", "daños a terceros"],
+    "expected_intent": "general",
+    "should_escalate": false
+  },
+  {
+    "id": "Q002",
+    "category": "coberturas",
+    "question": "¿Mi seguro cubre si choco contra una valla?",
+    "expected_contains": ["daños propios", "cobertura", "póliza"],
+    "expected_intent": "general",
+    "should_escalate": false
+  },
+  {
+    "id": "Q003",
+    "category": "siniestros",
+    "question": "Tuve un accidente esta mañana, ¿qué hago?",
+    "expected_contains": ["asesor", "siniestro"],
+    "expected_intent": "siniestro",
+    "should_escalate": true
+  },
+  {
+    "id": "Q004",
+    "category": "siniestros",
+    "question": "Me robaron el carro, ¿cómo reporto el siniestro?",
+    "expected_contains": ["asesor", "siniestro"],
+    "expected_intent": "siniestro",
+    "should_escalate": true
+  },
+  {
+    "id": "Q005",
+    "category": "cotizacion",
+    "question": "¿Cuánto cuesta un seguro para un Toyota Corolla 2020?",
+    "expected_contains": ["asesor", "cotiz"],
+    "expected_intent": "cotizacion",
+    "should_escalate": false
+  },
+  {
+    "id": "Q006",
+    "category": "cotizacion",
+    "question": "Necesito un seguro para mi moto nueva de 150cc",
+    "expected_contains": ["asesor", "cotiz"],
+    "expected_intent": "cotizacion",
+    "should_escalate": false
+  },
+  {
+    "id": "Q007",
+    "category": "renovacion",
+    "question": "Mi póliza vence la próxima semana, ¿cómo la renuevo?",
+    "expected_contains": ["renovaci"],
+    "expected_intent": "renovacion",
+    "should_escalate": false
+  },
+  {
+    "id": "Q008",
+    "category": "renovacion",
+    "question": "¿Puedo cambiar de plan al renovar mi seguro?",
+    "expected_contains": ["renovaci", "plan"],
+    "expected_intent": "renovacion",
+    "should_escalate": false
+  },
+  {
+    "id": "Q009",
+    "category": "coberturas",
+    "question": "¿Qué es la cobertura de responsabilidad civil extracontractual?",
+    "expected_contains": ["responsabilidad civil", "terceros"],
+    "expected_intent": "general",
+    "should_escalate": false
+  },
+  {
+    "id": "Q010",
+    "category": "coberturas",
+    "question": "¿El seguro cubre daños por inundación?",
+    "expected_contains": ["cobertura", "póliza"],
+    "expected_intent": "general",
+    "should_escalate": false
+  },
+  {
+    "id": "Q011",
+    "category": "pagos",
+    "question": "¿Cuáles son las formas de pago disponibles?",
+    "expected_contains": ["pago", "cuotas"],
+    "expected_intent": "general",
+    "should_escalate": false
+  },
+  {
+    "id": "Q012",
+    "category": "pagos",
+    "question": "¿Puedo pagar mi seguro en cuotas mensuales?",
+    "expected_contains": ["cuotas", "mensual"],
+    "expected_intent": "general",
+    "should_escalate": false
+  },
+  {
+    "id": "Q013",
+    "category": "coberturas",
+    "question": "¿Qué aseguradoras manejan en Yturria?",
+    "expected_contains": [],
+    "expected_intent": "general",
+    "should_escalate": false
+  },
+  {
+    "id": "Q014",
+    "category": "coberturas",
+    "question": "¿Tienen seguro para vehículos comerciales?",
+    "expected_contains": ["asesor", "comercial"],
+    "expected_intent": "general",
+    "should_escalate": false
+  },
+  {
+    "id": "Q015",
+    "category": "siniestros",
+    "question": "Se me averió el carro en la vía, ¿qué cubre el seguro?",
+    "expected_contains": ["asistencia", "cobertura"],
+    "expected_intent": "general",
+    "should_escalate": false
+  },
+  {
+    "id": "Q016",
+    "category": "coberturas",
+    "question": "¿El SOAT es obligatorio en Colombia?",
+    "expected_contains": ["SOAT", "obligatori"],
+    "expected_intent": "general",
+    "should_escalate": false
+  },
+  {
+    "id": "Q017",
+    "category": "coberturas",
+    "question": "¿Qué diferencia hay entre el SOAT y el seguro todo riesgo?",
+    "expected_contains": ["SOAT", "todo riesgo"],
+    "expected_intent": "general",
+    "should_escalate": false
+  },
+  {
+    "id": "Q018",
+    "category": "cotizacion",
+    "question": "Quiero cotizar un seguro de vida para mi familia",
+    "expected_contains": ["asesor", "vida"],
+    "expected_intent": "cotizacion",
+    "should_escalate": false
+  },
+  {
+    "id": "Q019",
+    "category": "coberturas",
+    "question": "¿El seguro cubre si el carro está sin revisión técnico-mecánica?",
+    "expected_contains": ["asesor", "póliza"],
+    "expected_intent": "general",
+    "should_escalate": false
+  },
+  {
+    "id": "Q020",
+    "category": "pagos",
+    "question": "¿Qué pasa si no pago la prima a tiempo?",
+    "expected_contains": ["prima", "vencimiento"],
+    "expected_intent": "general",
+    "should_escalate": false
+  },
+  {
+    "id": "Q021",
+    "category": "siniestros",
+    "question": "Tuve un accidente y el otro conductor no tiene seguro, ¿qué hago?",
+    "expected_contains": ["asesor", "siniestro"],
+    "expected_intent": "siniestro",
+    "should_escalate": true
+  },
+  {
+    "id": "Q022",
+    "category": "coberturas",
+    "question": "¿Qué es la franquicia en un seguro?",
+    "expected_contains": ["franquicia", "deducible"],
+    "expected_intent": "general",
+    "should_escalate": false
+  },
+  {
+    "id": "Q023",
+    "category": "renovacion",
+    "question": "¿Con cuánta anticipación debo renovar mi póliza?",
+    "expected_contains": ["días", "anticipaci"],
+    "expected_intent": "renovacion",
+    "should_escalate": false
+  },
+  {
+    "id": "Q024",
+    "category": "coberturas",
+    "question": "¿Cubren seguro para camiones de carga?",
+    "expected_contains": ["asesor"],
+    "expected_intent": "general",
+    "should_escalate": false
+  },
+  {
+    "id": "Q025",
+    "category": "cotizacion",
+    "question": "Quiero asegurar mi casa contra incendio, ¿tienen ese tipo de seguro?",
+    "expected_contains": ["asesor", "hogar"],
+    "expected_intent": "cotizacion",
+    "should_escalate": false
+  },
+  {
+    "id": "Q026",
+    "category": "coberturas",
+    "question": "¿Qué es un seguro de responsabilidad civil para empresas?",
+    "expected_contains": ["responsabilidad civil", "empresa"],
+    "expected_intent": "general",
+    "should_escalate": false
+  },
+  {
+    "id": "Q027",
+    "category": "pagos",
+    "question": "¿Puedo pagar mi seguro en línea?",
+    "expected_contains": ["pago", "línea"],
+    "expected_intent": "general",
+    "should_escalate": false
+  },
+  {
+    "id": "Q028",
+    "category": "siniestros",
+    "question": "El vehículo que me chocó se fugó, ¿tiene cobertura mi seguro?",
+    "expected_contains": ["asesor", "siniestro"],
+    "expected_intent": "siniestro",
+    "should_escalate": true
+  },
+  {
+    "id": "Q029",
+    "category": "coberturas",
+    "question": "¿Qué documentos necesito para sacar un seguro de carro?",
+    "expected_contains": ["documento", "cédula"],
+    "expected_intent": "general",
+    "should_escalate": false
+  },
+  {
+    "id": "Q030",
+    "category": "coberturas",
+    "question": "¿El seguro cubre si prestó el carro y el conductor tuvo un accidente?",
+    "expected_contains": ["asesor", "conductor"],
+    "expected_intent": "general",
+    "should_escalate": false
+  },
+  {
+    "id": "Q031",
+    "category": "cotizacion",
+    "question": "Necesito seguro de viaje para ir a Estados Unidos",
+    "expected_contains": ["asesor", "viaje"],
+    "expected_intent": "cotizacion",
+    "should_escalate": false
+  },
+  {
+    "id": "Q032",
+    "category": "coberturas",
+    "question": "¿Qué es la cobertura de pérdida total?",
+    "expected_contains": ["pérdida total", "100%"],
+    "expected_intent": "general",
+    "should_escalate": false
+  },
+  {
+    "id": "Q033",
+    "category": "renovacion",
+    "question": "¿Mi seguro se renueva automáticamente?",
+    "expected_contains": ["renovaci", "automátic"],
+    "expected_intent": "renovacion",
+    "should_escalate": false
+  },
+  {
+    "id": "Q034",
+    "category": "coberturas",
+    "question": "¿El seguro cubre el equipaje dentro del carro si me lo roban?",
+    "expected_contains": ["asesor", "cobertura"],
+    "expected_intent": "general",
+    "should_escalate": false
+  },
+  {
+    "id": "Q035",
+    "category": "siniestros",
+    "question": "Mi carro quedó con pérdida total en el accidente, ¿cómo procedo?",
+    "expected_contains": ["asesor", "siniestro"],
+    "expected_intent": "siniestro",
+    "should_escalate": true
+  },
+  {
+    "id": "Q036",
+    "category": "cotizacion",
+    "question": "¿Qué precio tiene el seguro para un conductor joven de 22 años?",
+    "expected_contains": ["asesor", "cotiz"],
+    "expected_intent": "cotizacion",
+    "should_escalate": false
+  },
+  {
+    "id": "Q037",
+    "category": "coberturas",
+    "question": "¿Tienen seguro para motos eléctricas?",
+    "expected_contains": ["asesor", "eléctric"],
+    "expected_intent": "general",
+    "should_escalate": false
+  },
+  {
+    "id": "Q038",
+    "category": "pagos",
+    "question": "¿Puedo obtener un descuento si tengo varios seguros con ustedes?",
+    "expected_contains": ["descuento", "asesor"],
+    "expected_intent": "general",
+    "should_escalate": false
+  },
+  {
+    "id": "Q039",
+    "category": "coberturas",
+    "question": "¿Qué es el seguro de transporte de mercancías?",
+    "expected_contains": ["asesor", "mercancía"],
+    "expected_intent": "general",
+    "should_escalate": false
+  },
+  {
+    "id": "Q040",
+    "category": "coberturas",
+    "question": "¿Qué asistencias incluye el plan de seguro básico?",
+    "expected_contains": ["asistencia", "grúa"],
+    "expected_intent": "general",
+    "should_escalate": false
+  },
+  {
+    "id": "Q041",
+    "category": "coberturas",
+    "question": "¿Puedo asegurar un vehículo que está a nombre de otra persona?",
+    "expected_contains": ["asesor"],
+    "expected_intent": "general",
+    "should_escalate": false
+  },
+  {
+    "id": "Q042",
+    "category": "siniestros",
+    "question": "Me vandalizaron el carro, le rayaron toda la pintura",
+    "expected_contains": ["asesor", "siniestro"],
+    "expected_intent": "siniestro",
+    "should_escalate": true
+  },
+  {
+    "id": "Q043",
+    "category": "coberturas",
+    "question": "¿Existe seguro para ciclistas?",
+    "expected_contains": ["asesor", "ciclist"],
+    "expected_intent": "general",
+    "should_escalate": false
+  },
+  {
+    "id": "Q044",
+    "category": "renovacion",
+    "question": "¿Puedo cambiar de aseguradora cuando renuevo?",
+    "expected_contains": ["asesor", "aseguradora"],
+    "expected_intent": "renovacion",
+    "should_escalate": false
+  },
+  {
+    "id": "Q045",
+    "category": "coberturas",
+    "question": "¿El seguro cubre si el carro se daña por granizo?",
+    "expected_contains": ["fenómeno", "cobertura"],
+    "expected_intent": "general",
+    "should_escalate": false
+  },
+  {
+    "id": "Q046",
+    "category": "cotizacion",
+    "question": "¿Cuánto tarda en expedirse una póliza nueva?",
+    "expected_contains": ["días", "horas"],
+    "expected_intent": "general",
+    "should_escalate": false
+  },
+  {
+    "id": "Q047",
+    "category": "coberturas",
+    "question": "¿Qué es la prima del seguro?",
+    "expected_contains": ["prima", "costo", "pago"],
+    "expected_intent": "general",
+    "should_escalate": false
+  },
+  {
+    "id": "Q048",
+    "category": "siniestros",
+    "question": "Choqué hace 3 días, ¿todavía puedo reportar el siniestro?",
+    "expected_contains": ["asesor", "siniestro"],
+    "expected_intent": "siniestro",
+    "should_escalate": true
+  },
+  {
+    "id": "Q049",
+    "category": "coberturas",
+    "question": "¿Tienen seguro de desempleo?",
+    "expected_contains": ["asesor", "desempleo"],
+    "expected_intent": "general",
+    "should_escalate": false
+  },
+  {
+    "id": "Q050",
+    "category": "coberturas",
+    "question": "¿Qué es el amparo de lucro cesante?",
+    "expected_contains": ["lucro cesante", "ingresos"],
+    "expected_intent": "general",
+    "should_escalate": false
+  }
+]

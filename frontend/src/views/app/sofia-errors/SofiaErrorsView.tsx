@@ -45,11 +45,9 @@ function TranscriptRow({ entry }: { entry: { role: string; message: string } }) 
 
 function ErrorCard({
   error,
-  agentId,
   onLabelChange,
 }: {
   error: SofiaError
-  agentId: string
   onLabelChange: (conversationId: string, label: SofiaErrorLabel) => void
 }) {
   const [expanded, setExpanded] = useState(false)
@@ -239,7 +237,6 @@ export default function SofiaErrorsView() {
               <ErrorCard
                 key={e.conversation_id}
                 error={e}
-                agentId={selectedAgentId}
                 onLabelChange={(conversationId, label) => setLabel({ conversationId, label })}
               />
             ))}

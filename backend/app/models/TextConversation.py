@@ -20,6 +20,7 @@ class TextConversation(SQLModel, table=True):
     renewal_status: str = Field(default="none", nullable=False)
     renewal_note: str = Field(default="", nullable=False)
     renewal_reminder_sent_at: Optional[datetime] = Field(default=None, nullable=True)
+    sofia_error_label: str = Field(default="", nullable=False)
     deleted_at: Optional[datetime] = Field(default=None, nullable=True)
     created_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
     updated_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)

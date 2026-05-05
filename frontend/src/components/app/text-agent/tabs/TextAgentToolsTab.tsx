@@ -29,6 +29,11 @@ type ParamDef = {
   required: boolean
 }
 
+type ToolParameterSchemaDef = {
+  type?: string
+  description?: string
+}
+
 type ToolDraft = {
   name: string
   description: string
@@ -345,13 +350,15 @@ function ToolCard({ tool, agentId }: { tool: TextAgentTool; agentId: string }) {
   const mc = METHOD_COLORS[tool.http_method] ?? 'bg-gray-50 text-gray-600 border-gray-200'
 
   const schema = (tool.parameters_schema as Record<string, unknown>) ?? {}
-  const properties = (schema.properties ?? {}) as Record<string, Record<string, unknown>>
+  const properties = (schema.properties ?? {}) as Record<string, ToolParameterSchemaDef>
   const required: string[] = (schema.required as string[]) ?? []
   const paramEntries = Object.entries(properties)
 
   const mapping = tool.response_mapping ?? {}
-  const resultPath = (mapping as Record<string, string>).result_path ?? ''
-  const displayTemplate = (mapping as Record<string, string>).display_template ?? ''
+  const rawResultPath = (mapping as Record<string, unknown>).result_path
+  const rawDisplayTemplate = (mapping as Record<string, unknown>).display_template
+  const resultPath = typeof rawResultPath === 'string' ? rawResultPath : ''
+  const displayTemplate = typeof rawDisplayTemplate === 'string' ? rawDisplayTemplate : ''
 
   return (
     <div className="overflow-hidden rounded-xl border border-[#e4e0f5] bg-white">

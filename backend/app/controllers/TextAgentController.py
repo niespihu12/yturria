@@ -30,7 +30,17 @@ from app.models.TextMessage import TextMessage
 from app.models.TextProviderConfig import TextProviderConfig
 from app.utils.crypto import decrypt_secret, encrypt_secret, mask_secret
 from app.models.User import User
-from app.utils.client_defaults import DEFAULT_TEXT_MODEL, TENANT, apply_client_text_defaults
+from app.utils.client_defaults import TENANT
+from app.utils.text_agent_templates import (
+    TEXT_AGENT_DEFAULT_TEMPLATE_KEY,
+    TEXT_AGENT_NON_ADMIN_LIMIT,
+    apply_text_agent_template_defaults,
+    default_text_model_for_provider,
+    get_text_agent_template_definition,
+    is_text_agent_template_key_supported,
+    list_text_agent_templates,
+    normalize_text_agent_template_key,
+)
 from app.utils.roles import is_super_admin_user, role_as_value
 from app.services.google_calendar import sync_google_calendar_for_appointment
 from app.services.renewal_scheduler import run_due_renewal_reminders
@@ -240,9 +250,19 @@ def _normalize_provider(value: Any) -> str:
 
 
 def _default_model(provider: str) -> str:
-    if provider == "gemini":
-        return "gemini-2.5-flash"
-    return "gpt-4.1-mini"
+    return default_text_model_for_provider(provider)
+
+
+def _resolve_template_key(value: Any, *, fallback: str = TEXT_AGENT_DEFAULT_TEMPLATE_KEY) -> str:
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return fallback
+    if not is_text_agent_template_key_supported(raw):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Plantilla no soportada",
+        )
+    return normalize_text_agent_template_key(raw, fallback=fallback)
 
 
 def _commit_with_data_error_guard(session: SessionDep) -> None:
@@ -607,6 +627,13 @@ def _serialize_text_agent(
     agent: TextAgent,
     owner: User | None = None,
 ) -> dict[str, Any]:
+    fallback_template_key = "sofia" if getattr(agent, "sofia_mode", False) else "custom"
+    template_key = normalize_text_agent_template_key(
+        getattr(agent, "template_key", ""),
+        fallback=fallback_template_key,
+    )
+    template_definition = get_text_agent_template_definition(template_key)
+
     try:
         sofia_config = json.loads(agent.sofia_config_json or "{}")
     except (json.JSONDecodeError, TypeError):
@@ -617,6 +644,12 @@ def _serialize_text_agent(
         "name": agent.name,
         "provider": agent.provider,
         "model": agent.model,
+        "template_key": template_definition["key"],
+        "template_label": template_definition["label"],
+        "template_summary": template_definition["summary"],
+        "template_description": template_definition["description"],
+        "template_highlights": list(template_definition["highlights"]),
+        "template_capabilities": dict(template_definition["capabilities"]),
         "system_prompt": agent.system_prompt,
         "welcome_message": agent.welcome_message,
         "language": agent.language,
@@ -2086,8 +2119,32 @@ class TextAgentController:
         return {"agents": [_serialize_text_agent(agent) for agent in rows]}
 
     @staticmethod
+    async def list_templates():
+        templates = []
+        for template in list_text_agent_templates():
+            templates.append(
+                {
+                    "key": template["key"],
+                    "label": template["label"],
+                    "summary": template["summary"],
+                    "description": template["description"],
+                    "highlights": list(template["highlights"]),
+                    "recommended": bool(template["recommended"]),
+                    "capabilities": dict(template["capabilities"]),
+                }
+            )
+        return {
+            "templates": templates,
+            "client_agent_limit": TEXT_AGENT_NON_ADMIN_LIMIT,
+        }
+
+    @staticmethod
     async def create_agent(payload: dict, current_user: CurrentUser, session: SessionDep):
         is_super_admin = is_super_admin_user(current_user)
+        template_key = _resolve_template_key(
+            payload.get("template_key"),
+            fallback=TEXT_AGENT_DEFAULT_TEMPLATE_KEY,
+        )
 
         if not is_super_admin:
             existing_count = len(
@@ -2095,16 +2152,16 @@ class TextAgentController:
                     select(TextAgent).where(TextAgent.user_id == current_user.id)
                 ).all()
             )
-            if existing_count >= 1:
+            if existing_count >= TEXT_AGENT_NON_ADMIN_LIMIT:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail=(
-                        "Tu plan permite un único agente de texto. "
+                        "Tu plan permite hasta 3 agentes de texto. "
                         "Edita el existente o contacta al administrador."
                     ),
                 )
 
-            payload = apply_client_text_defaults(payload)
+        payload = apply_text_agent_template_defaults(payload, template_key)
 
         name = str(payload.get("name") or "").strip()
         if not name:
@@ -2129,6 +2186,7 @@ class TextAgentController:
             name=name,
             provider=provider,
             model=str(payload.get("model") or _default_model(provider)),
+            template_key=template_key,
             system_prompt=str(payload.get("system_prompt") or ""),
             welcome_message=str(payload.get("welcome_message") or ""),
             language=str(payload.get("language") or "es"),
@@ -2151,52 +2209,14 @@ class TextAgentController:
 
     @staticmethod
     async def bootstrap_client(current_user: CurrentUser, session: SessionDep) -> dict:
-        """Crea 1 agente de texto Sofía si el cliente no tiene ninguno."""
+        """El agente de texto se crea manualmente desde el picker de plantillas."""
         existing = session.exec(
             select(TextAgent).where(TextAgent.user_id == current_user.id)
         ).all()
         if existing:
             return {"created": False, "agent_id": existing[0].id}
 
-        display_name = (current_user.name or "").strip() or "Sofía - Yturria"
-        payload = apply_client_text_defaults({"name": display_name})
-
-        try:
-            _resolve_provider_api_key(payload["provider"], current_user, session)
-        except HTTPException:
-            return {"created": False, "agent_id": None, "error": "provider_key_missing"}
-
-        now = _utcnow()
-        agent = TextAgent(
-            user_id=current_user.id,
-            name=display_name,
-            provider=payload["provider"],
-            model=payload["model"],
-            system_prompt=str(payload.get("system_prompt") or ""),
-            welcome_message=str(payload.get("welcome_message") or ""),
-            language=str(payload.get("language") or "es"),
-            temperature=0.7,
-            max_tokens=512,
-            sofia_mode=bool(payload.get("sofia_mode", True)),
-            sofia_config_json="{}",
-            embed_enabled=True,
-            embed_token=secrets.token_urlsafe(24),
-            created_at=now,
-            updated_at=now,
-        )
-        session.add(agent)
-        try:
-            _commit_with_data_error_guard(session)
-            session.refresh(agent)
-        except HTTPException:
-            return {"created": False, "agent_id": None, "error": "db_error"}
-
-        try:
-            _ensure_default_appointment_tool(session, agent)
-        except HTTPException:
-            return {"created": False, "agent_id": None, "error": "db_error"}
-
-        return {"created": True, "agent_id": agent.id}
+        return {"created": False, "agent_id": None, "skipped": "template_picker"}
 
     @staticmethod
     async def get_agent(text_agent_id: str, current_user: CurrentUser, session: SessionDep):
@@ -2220,10 +2240,16 @@ class TextAgentController:
     ):
         agent = _require_owned_text_agent(text_agent_id, current_user, session)
         is_super_admin = is_super_admin_user(current_user)
+        template_capabilities = get_text_agent_template_definition(agent.template_key)["capabilities"]
         original_provider = agent.provider
         original_system_prompt = agent.system_prompt
         original_welcome_message = agent.welcome_message
         original_language = agent.language
+        original_model = agent.model
+        original_temperature = agent.temperature
+        original_max_tokens = agent.max_tokens
+        original_sofia_mode = agent.sofia_mode
+        original_sofia_config_json = agent.sofia_config_json
 
         if "name" in payload:
             name = str(payload.get("name") or "").strip()
@@ -2237,13 +2263,19 @@ class TextAgentController:
         if "model" in payload:
             agent.model = str(payload.get("model") or "").strip() or _default_model(agent.provider)
 
-        if "system_prompt" in payload and is_super_admin:
+        if "system_prompt" in payload and (
+            is_super_admin or template_capabilities.get("allow_prompt_edit", False)
+        ):
             agent.system_prompt = str(payload.get("system_prompt") or "")
 
-        if "welcome_message" in payload and is_super_admin:
+        if "welcome_message" in payload and (
+            is_super_admin or template_capabilities.get("allow_welcome_edit", False)
+        ):
             agent.welcome_message = str(payload.get("welcome_message") or "")
 
-        if "language" in payload and is_super_admin:
+        if "language" in payload and (
+            is_super_admin or template_capabilities.get("allow_prompt_edit", False)
+        ):
             agent.language = str(payload.get("language") or "es")
 
         if "temperature" in payload:
@@ -2268,6 +2300,17 @@ class TextAgentController:
         if "embed_enabled" in payload:
             agent.embed_enabled = bool(payload.get("embed_enabled"))
 
+        if "embed_primary_color" in payload:
+            color = str(payload["embed_primary_color"] or "#271173").strip()
+            agent.embed_primary_color = color if color.startswith("#") else "#271173"
+
+        if "embed_position" in payload:
+            pos = str(payload["embed_position"] or "bottom-right").strip()
+            agent.embed_position = pos if pos in ("bottom-right", "bottom-left") else "bottom-right"
+
+        if "embed_logo_url" in payload:
+            agent.embed_logo_url = str(payload["embed_logo_url"] or "").strip()
+
         if bool(payload.get("regenerate_embed_token", False)):
             agent.embed_token = secrets.token_urlsafe(24)
 
@@ -2279,12 +2322,19 @@ class TextAgentController:
 
         if not is_super_admin:
             agent.provider = original_provider
-            agent.system_prompt = original_system_prompt
-            agent.welcome_message = original_welcome_message
-            agent.language = original_language
-            agent.model = DEFAULT_TEXT_MODEL
-            agent.temperature = 0.7
-            agent.max_tokens = 512
+            if not template_capabilities.get("allow_prompt_edit", False):
+                agent.system_prompt = original_system_prompt
+                agent.language = original_language
+            if not template_capabilities.get("allow_welcome_edit", False):
+                agent.welcome_message = original_welcome_message
+            if not template_capabilities.get("allow_model_edit", False):
+                agent.model = original_model
+            if not template_capabilities.get("allow_runtime_tuning", False):
+                agent.temperature = original_temperature
+                agent.max_tokens = original_max_tokens
+            if not template_capabilities.get("show_sofia_tab", False):
+                agent.sofia_mode = original_sofia_mode
+                agent.sofia_config_json = original_sofia_config_json
 
         agent.updated_at = _utcnow()
         session.add(agent)
@@ -2320,6 +2370,9 @@ class TextAgentController:
             "agent_id": agent.id,
             "agent_name": agent.name,
             "embed_enabled": agent.embed_enabled,
+            "embed_primary_color": getattr(agent, "embed_primary_color", "#271173"),
+            "embed_position": getattr(agent, "embed_position", "bottom-right"),
+            "embed_logo_url": getattr(agent, "embed_logo_url", ""),
             "iframe_url": iframe_url,
             "iframe_snippet": iframe_snippet,
             "script_snippet": script_snippet,

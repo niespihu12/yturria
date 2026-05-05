@@ -37,6 +37,11 @@ from app.utils.client_defaults import (
     apply_client_voice_defaults,
     build_client_voice_payload,
 )
+from app.utils.text_agent_templates import (
+    TEXT_AGENT_DEFAULT_TEMPLATE_KEY,
+    get_text_agent_template_definition,
+    normalize_text_agent_template_key,
+)
 from app.utils.roles import is_super_admin_user, role_as_value
 
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")
@@ -54,6 +59,20 @@ SUPPORTED_APPOINTMENT_STATUSES = {
 
 SUPPORTED_APPOINTMENT_SOURCES = {"manual", "agent", "embed", "phone", "voice"}
 SUPPORTED_ESCALATION_CHANNELS = {"phone", "whatsapp"}
+
+
+def _resolve_voice_template_defaults(template_key: Any) -> tuple[str, str, str]:
+    normalized_key = normalize_text_agent_template_key(
+        template_key,
+        fallback=TEXT_AGENT_DEFAULT_TEMPLATE_KEY,
+    )
+    definition = get_text_agent_template_definition(normalized_key)
+    defaults = definition.get("defaults") if isinstance(definition.get("defaults"), dict) else {}
+
+    prompt = str(defaults.get("system_prompt") or "").strip()
+    first_message = str(defaults.get("welcome_message") or "").strip()
+    language = str(defaults.get("language") or "").strip() or "es"
+    return prompt, first_message, language
 
 
 def _headers(*, json_body: bool = False) -> dict[str, str]:
@@ -482,7 +501,13 @@ class AgentController:
 
     @staticmethod
     async def create_agent(payload: dict, current_user: CurrentUser, session: SessionDep):
+        if not isinstance(payload, dict):
+            payload = {}
+
         is_super_admin = is_super_admin_user(current_user)
+        template_prompt, template_first_message, template_language = _resolve_voice_template_defaults(
+            payload.get("template_key")
+        )
 
         if not is_super_admin:
             existing_count = len(
@@ -499,7 +524,25 @@ class AgentController:
                     ),
                 )
 
-            payload = apply_client_voice_defaults(payload)
+            payload = apply_client_voice_defaults(
+                payload,
+                prompt_override=template_prompt,
+                first_message_override=template_first_message,
+                language_override=template_language,
+            )
+        else:
+            conv_cfg = payload.setdefault("conversation_config", {})
+            agent_cfg = conv_cfg.setdefault("agent", {})
+            prompt_cfg = agent_cfg.setdefault("prompt", {})
+
+            if not str(prompt_cfg.get("prompt") or "").strip() and template_prompt:
+                prompt_cfg["prompt"] = template_prompt
+            if not str(agent_cfg.get("first_message") or "").strip() and template_first_message:
+                agent_cfg["first_message"] = template_first_message
+            if not str(agent_cfg.get("language") or "").strip():
+                agent_cfg["language"] = template_language
+
+        payload.pop("template_key", None)
 
         # ElevenLabs requires eleven_turbo_v2_5 for non-English agents.
         # Always set it as default to avoid validation errors.

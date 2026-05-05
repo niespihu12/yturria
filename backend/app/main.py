@@ -10,14 +10,17 @@ import app.models  # noqa: F401
 from app.config.db import engine
 from app.middlewares.cors import add_cors_middleware
 from app.middlewares.http_error_handler import register_exception_handlers
+from app.middlewares.rate_limiter import RateLimiterMiddleware
 from app.routes.auth_router import auth_router
 from app.routes.agents_router import agents_router
 from app.routes.privacy_router import privacy_router
 from app.routes.text_agents_router import text_agents_router
 from app.routes.webhooks_router import webhooks_router
+from app.routes.sofia_errors_router import sofia_errors_router
+from app.routes.audit_router import audit_router
 from app.services.renewal_scheduler import run_due_renewal_reminders, RENEWAL_REMINDER_DAYS_AHEAD
 from app.utils.roles import PLATFORM_SUPER_ADMIN_EMAILS, normalize_email
-from app.utils.startup_check import validate_startup_secrets
+from app.utils.startup_check import validate_startup_secrets, start_cloudflare_tunnel, stop_cloudflare_tunnel
 
 
 logger = logging.getLogger(__name__)
@@ -306,6 +309,23 @@ def ensure_sofia_and_escalation_columns() -> None:
             )
             _make_column_not_null_text(connection, "text_agents", "sofia_config_json")
 
+            if not _column_exists(connection, "text_agents", "template_key"):
+                connection.execute(
+                    text(
+                        "ALTER TABLE text_agents "
+                        "ADD COLUMN template_key VARCHAR(50) NOT NULL DEFAULT 'sofia'"
+                    )
+                )
+            connection.execute(
+                text(
+                    "UPDATE text_agents "
+                    "SET template_key = CASE "
+                    "WHEN template_key IS NULL OR TRIM(template_key) = '' "
+                    "THEN CASE WHEN sofia_mode THEN 'sofia' ELSE 'custom' END "
+                    "ELSE template_key END"
+                )
+            )
+
             if not _column_exists(connection, "text_agents", "embed_enabled"):
                 connection.execute(
                     text(
@@ -394,6 +414,38 @@ def ensure_whatsapp_app_secret_column() -> None:
         session.commit()
 
 
+def ensure_embed_customization_columns() -> None:
+    with Session(engine) as session:
+        connection = session.connection()
+        if not _table_exists(connection, "text_agents"):
+            session.commit()
+            return
+        for col, ddl in [
+            ("embed_primary_color", "VARCHAR(20) NOT NULL DEFAULT '#271173'"),
+            ("embed_position", "VARCHAR(20) NOT NULL DEFAULT 'bottom-right'"),
+            ("embed_logo_url", "VARCHAR(500) NOT NULL DEFAULT ''"),
+        ]:
+            if not _column_exists(connection, "text_agents", col):
+                connection.execute(text(f"ALTER TABLE text_agents ADD COLUMN {col} {ddl}"))
+        session.commit()
+
+
+def ensure_sofia_error_label_column() -> None:
+    with Session(engine) as session:
+        connection = session.connection()
+        if not _table_exists(connection, "text_conversations"):
+            session.commit()
+            return
+        if not _column_exists(connection, "text_conversations", "sofia_error_label"):
+            connection.execute(
+                text(
+                    "ALTER TABLE text_conversations "
+                    "ADD COLUMN sofia_error_label VARCHAR(50) NOT NULL DEFAULT ''"
+                )
+            )
+        session.commit()
+
+
 def ensure_text_conversations_channel_column() -> None:
     with Session(engine) as session:
         connection = session.connection()
@@ -444,6 +496,7 @@ async def _renewal_scheduler_loop(stop_event: asyncio.Event) -> None:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     validate_startup_secrets()
+    start_cloudflare_tunnel()
 
     SQLModel.metadata.create_all(engine)
 
@@ -459,6 +512,8 @@ async def lifespan(_: FastAPI):
         ensure_text_agents_legal_notice_column()
         ensure_whatsapp_app_secret_column()
         ensure_text_conversations_channel_column()
+        ensure_sofia_error_label_column()
+        ensure_embed_customization_columns()
 
     scheduler_stop = asyncio.Event()
     scheduler_task = asyncio.create_task(_renewal_scheduler_loop(scheduler_stop))
@@ -467,6 +522,7 @@ async def lifespan(_: FastAPI):
 
     scheduler_stop.set()
     await scheduler_task
+    stop_cloudflare_tunnel()
 
 
 # ── App factory ────────────────────────────────────────────────────────────────
@@ -475,9 +531,17 @@ app = FastAPI(lifespan=lifespan)
 
 register_exception_handlers(app)
 add_cors_middleware(app)
+app.add_middleware(RateLimiterMiddleware)
 
 app.include_router(auth_router, prefix="/api")
 app.include_router(agents_router, prefix="/api")
 app.include_router(text_agents_router, prefix="/api")
 app.include_router(privacy_router, prefix="/api")
 app.include_router(webhooks_router, prefix="/api")
+app.include_router(sofia_errors_router, prefix="/api")
+app.include_router(audit_router, prefix="/api")
+
+
+@app.get("/health", include_in_schema=False)
+async def health_check():
+    return {"status": "ok"}

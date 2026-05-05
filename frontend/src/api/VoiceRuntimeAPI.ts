@@ -2,6 +2,7 @@ import api from '@/lib/axios'
 import { isAxiosError } from 'axios'
 import type {
   AgentDetail,
+  AgentListItem,
   Conversation,
   ConversationDetail,
   ConversationsList,
@@ -11,7 +12,11 @@ import type {
   RagIndex,
   WorkspaceTool,
 } from '@/types/agent'
-import type { TextAppointment, TextAppointmentStatus } from '@/types/textAgent'
+import type {
+  TextAgentTemplateKey,
+  TextAppointment,
+  TextAppointmentStatus,
+} from '@/types/textAgent'
 
 export type VoiceRuntimeConfig = {
   id: string
@@ -52,7 +57,7 @@ function getError(error: unknown): string {
   return 'Error al conectar'
 }
 
-export async function getAgents(options?: UserScopeOptions) {
+export async function getAgents(options?: UserScopeOptions): Promise<{ agents: AgentListItem[] }> {
   const userId = options?.userId ?? options?.user_id
   try {
     const { data } = await api.get('/agents', {
@@ -60,7 +65,10 @@ export async function getAgents(options?: UserScopeOptions) {
         user_id: userId || undefined,
       },
     })
-    return data
+    return {
+      ...data,
+      agents: Array.isArray(data?.agents) ? (data.agents as AgentListItem[]) : [],
+    }
   } catch (error) {
     throw new Error(getError(error))
   }
@@ -68,6 +76,7 @@ export async function getAgents(options?: UserScopeOptions) {
 
 export async function createAgent(payload: {
   name: string
+  template_key?: TextAgentTemplateKey
   conversation_config: AgentDetail['conversation_config']
 }) {
   try {

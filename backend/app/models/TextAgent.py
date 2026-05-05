@@ -28,10 +28,14 @@ class TextAgent(SQLModel, table=True):
     language: str = Field(default="es", nullable=False)
     temperature: float = Field(default=0.7, nullable=False)
     max_tokens: int = Field(default=512, nullable=False)
+    template_key: str = Field(default="sofia", nullable=False, index=True)
     sofia_mode: bool = Field(default=False, nullable=False)
     sofia_config_json: str = Field(default="{}", nullable=False)
     embed_enabled: bool = Field(default=True, nullable=False)
     embed_token: str = Field(default="", nullable=False, index=True)
+    embed_primary_color: str = Field(default="#271173", nullable=False)
+    embed_position: str = Field(default="bottom-right", nullable=False)
+    embed_logo_url: str = Field(default="", nullable=False)
     legal_notice: str = Field(
         default="",
         sa_column=Column(LONG_TEXT, nullable=False),

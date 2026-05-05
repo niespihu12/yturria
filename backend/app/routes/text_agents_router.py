@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, File, Form, Query, Request, UploadFile
+from fastapi import HTTPException
 
 from app.controllers.TextAgentController import TextAgentController
 from app.controllers.deps.auth import CurrentUser
 from app.controllers.deps.db_session import SessionDep
+from app.models.TextAgent import TextAgent
+from app.models.TextConversation import TextConversation
+from app.services.analytics_service import get_funnel_metrics
+from app.services.crm_integration import push_lead_to_crm, LeadData, is_crm_configured
 
 text_agents_router = APIRouter(prefix="/text-agents", tags=["Text Agents"])
 
@@ -77,6 +82,12 @@ async def list_text_agents(
     user_id: str | None = Query(default=None),
 ):
     return await TextAgentController.list_agents(current_user, session, user_id)
+
+
+@text_agents_router.get("/templates")
+async def list_text_agent_templates(current_user: CurrentUser):
+    del current_user
+    return await TextAgentController.list_templates()
 
 
 @text_agents_router.post("")
@@ -445,3 +456,64 @@ async def delete_text_agent(
     session: SessionDep,
 ):
     return await TextAgentController.delete_agent(text_agent_id, current_user, session)
+
+
+@text_agents_router.post("/{text_agent_id}/conversations/{conversation_id}/push-to-crm")
+async def push_conversation_to_crm(
+    text_agent_id: str,
+    conversation_id: str,
+    current_user: CurrentUser,
+    session: SessionDep,
+    request: Request,
+):
+    agent = session.get(TextAgent, text_agent_id)
+    if not agent or agent.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Agente no encontrado")
+
+    conv = session.get(TextConversation, conversation_id)
+    if not conv or conv.text_agent_id != text_agent_id:
+        raise HTTPException(status_code=404, detail="Conversación no encontrada")
+
+    if not is_crm_configured():
+        raise HTTPException(
+            status_code=400,
+            detail="Ningún CRM configurado. Define HUBSPOT_API_KEY o SALESFORCE_CLIENT_ID en el entorno."
+        )
+
+    payload = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
+    lead = LeadData(
+        name=payload.get("name", conv.title or "Sin nombre"),
+        phone=payload.get("phone", ""),
+        email=payload.get("email", ""),
+        source="sofia_agent",
+        agent_id=text_agent_id,
+        conversation_id=conversation_id,
+        notes=payload.get("notes", f"Escalado: {conv.escalation_reason}"),
+    )
+    results = await push_lead_to_crm(lead)
+    return {"pushed": results}
+
+
+@text_agents_router.get("/{text_agent_id}/analytics/funnel")
+async def get_analytics_funnel(
+    text_agent_id: str,
+    current_user: CurrentUser,
+    session: SessionDep,
+    period_days: int = Query(default=30, ge=1, le=365),
+):
+    agent = session.get(TextAgent, text_agent_id)
+    if not agent or agent.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Agente no encontrado")
+    metrics = get_funnel_metrics(session, text_agent_id, period_days)
+    return {
+        "agent_id": metrics.agent_id,
+        "period_days": metrics.period_days,
+        "conversations_started": metrics.conversations_started,
+        "leads_qualified": metrics.leads_qualified,
+        "appointments_scheduled": metrics.appointments_scheduled,
+        "appointments_completed": metrics.appointments_completed,
+        "escalations_total": metrics.escalations_total,
+        "escalations_resolved": metrics.escalations_resolved,
+        "conversion_rate_pct": metrics.conversion_rate_pct,
+        "estimated_savings_cop": metrics.estimated_savings_cop,
+    }

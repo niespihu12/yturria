@@ -5,12 +5,20 @@ valores de ejemplo. Llamar desde el lifespan de FastAPI antes de
 levantar rutas.
 
 Bypass: SKIP_STARTUP_CHECK=true  (solo para entornos de tests CI).
+
+Cloudflare Tunnel (opcional):
+  Si CLOUDFLARE_TUNNEL_TOKEN está definido, arranca cloudflared como
+  subproceso y verifica que el tunnel esté activo antes de marcar el
+  servicio como listo. Requiere que 'cloudflared' esté instalado.
 """
 from __future__ import annotations
 
 import logging
 import os
+import shutil
+import subprocess
 import sys
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -129,3 +137,60 @@ def validate_startup_secrets() -> None:
         )
         logger.critical(msg)
         sys.exit(1)
+
+
+# ── Cloudflare Tunnel ──────────────────────────────────────────────────────────
+
+_cf_process: subprocess.Popen | None = None
+
+
+def start_cloudflare_tunnel() -> None:
+    """Arranca cloudflared tunnel si CLOUDFLARE_TUNNEL_TOKEN está definido.
+
+    No bloquea el arranque si cloudflared no está instalado, pero sí
+    termina con sys.exit(1) si el token está definido y el proceso falla.
+    """
+    token = os.getenv("CLOUDFLARE_TUNNEL_TOKEN", "").strip()
+    if not token:
+        return
+
+    if not shutil.which("cloudflared"):
+        logger.error(
+            "CLOUDFLARE_TUNNEL_TOKEN está definido pero 'cloudflared' no está instalado. "
+            "Instala con: curl -L https://github.com/cloudflare/cloudflared/releases/latest"
+            "/download/cloudflared-linux-amd64 -o /usr/local/bin/cloudflared && chmod +x "
+            "/usr/local/bin/cloudflared"
+        )
+        sys.exit(1)
+
+    global _cf_process
+    logger.info("Iniciando Cloudflare Tunnel...")
+    _cf_process = subprocess.Popen(
+        ["cloudflared", "tunnel", "--no-autoupdate", "run", "--token", token],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+
+    # Esperar hasta 15 segundos a que el tunnel se establezca
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        if _cf_process.poll() is not None:
+            stderr_out = _cf_process.stderr.read().decode(errors="replace")
+            logger.error("cloudflared terminó inesperadamente:\n%s", stderr_out)
+            sys.exit(1)
+        time.sleep(0.5)
+
+    logger.info("Cloudflare Tunnel activo (PID %s)", _cf_process.pid)
+
+
+def stop_cloudflare_tunnel() -> None:
+    """Detiene el proceso cloudflared al apagar el servidor."""
+    global _cf_process
+    if _cf_process and _cf_process.poll() is None:
+        _cf_process.terminate()
+        try:
+            _cf_process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            _cf_process.kill()
+        logger.info("Cloudflare Tunnel detenido")
+    _cf_process = None

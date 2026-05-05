@@ -56,30 +56,6 @@ export const dataCollectionFieldSchema = z.object({
   description: z.string().optional(),
 })
 
-export const conversationSchema = z.object({
-  conversation_id: z.string(),
-  agent_id: z.string(),
-  start_time_unix_secs: z.number(),
-  call_duration_secs: z.number().optional(),
-  status: z.string(),
-  transcript: z
-    .array(
-      z.object({
-        role: z.string(),
-        message: z.string(),
-        time_in_call_secs: z.number().optional(),
-      })
-    )
-    .optional(),
-})
-
-export const conversationsListSchema = z.object({
-  conversations: z.array(conversationSchema),
-  has_more: z.boolean().optional(),
-  next_cursor: z.string().optional().nullable(),
-  cursor: z.string().optional().nullable(),
-})
-
 export const conversationAnalysisSchema = z.object({
   evaluation_criteria_results: z
     .record(
@@ -103,6 +79,31 @@ export const conversationAnalysisSchema = z.object({
     .optional(),
   call_successful: z.string().optional(),
   transcript_summary: z.string().optional(),
+})
+
+export const conversationSchema = z.object({
+  conversation_id: z.string(),
+  agent_id: z.string(),
+  start_time_unix_secs: z.number(),
+  call_duration_secs: z.number().optional(),
+  status: z.string(),
+  transcript: z
+    .array(
+      z.object({
+        role: z.string(),
+        message: z.string(),
+        time_in_call_secs: z.number().optional(),
+      })
+    )
+    .optional(),
+  analysis: conversationAnalysisSchema.optional().nullable(),
+})
+
+export const conversationsListSchema = z.object({
+  conversations: z.array(conversationSchema),
+  has_more: z.boolean().optional(),
+  next_cursor: z.string().optional().nullable(),
+  cursor: z.string().optional().nullable(),
 })
 
 export const conversationDetailSchema = z.object({
@@ -441,4 +442,3 @@ export const SYSTEM_TOOLS = [
     description: 'Detecta si se conect\u00f3 a un buz\u00f3n de voz.',
   },
 ]
-
