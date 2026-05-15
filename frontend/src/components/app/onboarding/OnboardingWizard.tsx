@@ -12,7 +12,7 @@ import {
   ExclamationCircleIcon,
   ChatBubbleLeftRightIcon,
 } from '@heroicons/react/24/outline'
-import { updateTextAgent, upsertWhatsAppConfig, getWhatsAppConfig, getTextAgentEmbedConfig } from '@/api/TextAgentsAPI'
+import { updateTextAgent, upsertWhatsAppConfig, getWhatsAppConfig, getTextAgentEmbedConfig, createTextKnowledgeBaseDocumentFromFile, attachKnowledgeBaseDocument } from '@/api/TextAgentsAPI'
 import type { WhatsAppProvider } from '@/types/textAgent'
 import ChannelSelectionStep from './ChannelSelectionStep'
 
@@ -39,6 +39,7 @@ interface WizardData {
   business_hours: string
   carriers: string
   company_context: string
+  presentation_file: File | null
   wp_provider: WhatsAppProvider
   wp_phone: string
   wp_account_sid: string
@@ -51,14 +52,21 @@ interface WizardData {
   wp_saved: boolean
   wp_skipped: boolean
   advisor_phone: string
+  risk_checks: {
+    meta_restrictions: boolean
+    certification_time: boolean
+    no_uppercase: boolean
+    meta_business_verified: boolean
+  }
 }
 
 const INIT: WizardData = {
-  company_name: '', business_hours: '', carriers: '', company_context: '',
+  company_name: '', business_hours: '', carriers: '', company_context: '', presentation_file: null,
   wp_provider: 'twilio', wp_phone: '', wp_account_sid: '', wp_auth_token: '',
   wp_access_token: '', wp_app_secret: '', wp_phone_number_id: '', wp_business_account_id: '',
   wp_config_id: '', wp_saved: false, wp_skipped: false,
   advisor_phone: '',
+  risk_checks: { meta_restrictions: false, certification_time: false, no_uppercase: false, meta_business_verified: false },
 }
 
 export default function OnboardingWizard({ agentId, onComplete }: Props) {
@@ -251,33 +259,49 @@ export default function OnboardingWizard({ agentId, onComplete }: Props) {
                 />
               </div>
 
-              {/* Live preview */}
-              {data.company_name.trim() && (
-                <div className="rounded-2xl border border-[#e4e0f5] bg-[#f8f7ff] p-4">
-                  <div className="mb-2 flex items-center gap-1.5">
-                    <ChatBubbleLeftRightIcon className="h-4 w-4 text-[#271173]" />
-                    <span className="text-xs font-semibold text-[#271173]">Preview de Sofía</span>
-                  </div>
-                  <div className="rounded-xl bg-white p-3 shadow-sm">
-                    <div className="max-w-[85%] rounded-xl rounded-tl-none bg-[#f3f0ff] px-3 py-2 text-xs text-black">
-                      ¡Hola! Soy Sofía, asistente virtual de{' '}
-                      <span className="font-semibold">{data.company_name}</span>.
-                      {data.carriers ? ` Trabajamos con ${data.carriers}.` : ''}
-                      {data.business_hours ? ` Nuestro horario es ${data.business_hours}.` : ''}
-                      {' '}¿En qué puedo ayudarte?
-                    </div>
-                  </div>
+              <div>
+                <label className={labelClass}>Presentación corporativa (PDF)</label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="file"
+                    accept=".pdf"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0] ?? null
+                      upd({ presentation_file: file })
+                    }}
+                    className="block w-full text-sm text-black/60 file:mr-3 file:rounded-xl file:border-0 file:bg-[#f5f3ff] file:px-3 file:py-2 file:text-sm file:font-medium file:text-[#271173] hover:file:bg-[#ede9ff]"
+                  />
                 </div>
-              )}
+                <p className="mt-1 text-[11px] text-black/40">
+                  Se subirá como base de conocimiento para que Sofía entienda tu empresa.
+                </p>
+              </div>
 
-              <div className="flex justify-end pt-2">
+              <div>
                 <button
                   type="button"
                   disabled={!data.company_name.trim()}
-                  onClick={() => setStep(1)}
-                  className="rounded-xl bg-[#271173] px-6 py-2.5 text-sm font-semibold text-white hover:bg-[#1f0d5a] disabled:opacity-40 transition-colors"
+                  onClick={() => {
+                    const sofiaJson = buildSofiaJson()
+                    saveSofia(sofiaJson, {
+                      onSuccess: () => {
+                        // Subir PDF si existe
+                        if (data.presentation_file) {
+                          createTextKnowledgeBaseDocumentFromFile(data.presentation_file, data.presentation_file.name)
+                            .then((doc) => attachKnowledgeBaseDocument(agentId, doc.id))
+                            .then(() => toast.success('Presentación subida correctamente'))
+                            .catch((e: Error) => toast.error(e.message))
+                        }
+                        setStep(1)
+                      },
+                    })
+                  }}
+                  className="flex items-center gap-2 rounded-xl bg-[#271173] px-6 py-2.5 text-sm font-semibold text-white hover:bg-[#1f0d5a] disabled:opacity-40 transition-colors"
                 >
-                  Siguiente →
+                  {savingSofia && (
+                    <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                  )}
+                  Continuar →
                 </button>
               </div>
             </div>
@@ -551,6 +575,51 @@ export default function OnboardingWizard({ agentId, onComplete }: Props) {
                   Puedes completar la configuración pendiente desde las pestañas del agente.
                 </p>
               )}
+
+              <div className="space-y-2 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                <p className="text-xs font-semibold text-amber-800 uppercase tracking-wide">
+                  ⚠️ Riesgos y restricciones de Meta
+                </p>
+                <p className="text-[11px] text-amber-700">
+                  Antes de usar WhatsApp Business, confirma que entiendes estas restricciones:
+                </p>
+                <label className="flex items-start gap-2 text-xs text-amber-800">
+                  <input
+                    type="checkbox"
+                    checked={data.risk_checks.meta_restrictions}
+                    onChange={(e) => upd({ risk_checks: { ...data.risk_checks, meta_restrictions: e.target.checked } })}
+                    className="mt-0.5"
+                  />
+                  Entiendo que Meta puede restringir o bloquear números de WhatsApp sin previo aviso.
+                </label>
+                <label className="flex items-start gap-2 text-xs text-amber-800">
+                  <input
+                    type="checkbox"
+                    checked={data.risk_checks.certification_time}
+                    onChange={(e) => upd({ risk_checks: { ...data.risk_checks, certification_time: e.target.checked } })}
+                    className="mt-0.5"
+                  />
+                  Entiendo que la certificación de Meta puede tardar 2-3 semanas.
+                </label>
+                <label className="flex items-start gap-2 text-xs text-amber-800">
+                  <input
+                    type="checkbox"
+                    checked={data.risk_checks.no_uppercase}
+                    onChange={(e) => upd({ risk_checks: { ...data.risk_checks, no_uppercase: e.target.checked } })}
+                    className="mt-0.5"
+                  />
+                  Evitaré usar MAYÚSCULAS excesivas en mensajes para no generar strikes.
+                </label>
+                <label className="flex items-start gap-2 text-xs text-amber-800">
+                  <input
+                    type="checkbox"
+                    checked={data.risk_checks.meta_business_verified}
+                    onChange={(e) => upd({ risk_checks: { ...data.risk_checks, meta_business_verified: e.target.checked } })}
+                    className="mt-0.5"
+                  />
+                  Tengo o solicitaré una cuenta de Meta Business verificada.
+                </label>
+              </div>
 
               <div className="flex justify-end pt-2">
                 <button

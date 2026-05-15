@@ -28,6 +28,7 @@ from app.models.TextKnowledgeBaseChunk import TextKnowledgeBaseChunk
 from app.models.TextKnowledgeBaseDocument import TextKnowledgeBaseDocument
 from app.models.TextMessage import TextMessage
 from app.models.TextProviderConfig import TextProviderConfig
+from app.models.UserCalendarConnection import UserCalendarConnection
 from app.utils.crypto import decrypt_secret, encrypt_secret, mask_secret
 from app.models.User import User
 from app.utils.client_defaults import TENANT

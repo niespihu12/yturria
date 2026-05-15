@@ -194,6 +194,38 @@ class AdminUsersResponse(BaseModel):
     users: list[AdminUserSummaryResponse]
 
 
+class AdminCreateUserRequest(BaseSchema):
+    email: str = ""
+    name: str = ""
+    password: str = ""
+    role: str = "agent"
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def validate_email(cls, value: object) -> str:
+        email = _validate_required(value, "E-mail no valido")
+        if not EMAIL_PATTERN.match(email):
+            raise ValueError("E-mail no valido")
+        return email
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def validate_name(cls, value: object) -> str:
+        return _validate_required(value, "El nombre no puede ir vacio")
+
+    @field_validator("password", mode="before")
+    @classmethod
+    def validate_password_required(cls, value: object) -> str:
+        return _validate_required(value, "El password es muy corto, minimo 8 caracteres")
+
+    @field_validator("password")
+    @classmethod
+    def validate_password_length(cls, value: str) -> str:
+        if len(value) < 8:
+            raise ValueError("El password es muy corto, minimo 8 caracteres")
+        return value
+
+
 class MfaChallengeResponse(BaseModel):
     requires_mfa: bool = True
     mfa_token: str

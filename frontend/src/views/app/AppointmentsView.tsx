@@ -9,6 +9,8 @@ import {
   PlusIcon,
   TrashIcon,
   XMarkIcon,
+  LinkIcon,
+  CheckCircleIcon,
 } from '@heroicons/react/24/outline'
 import {
   createTextAgentAppointment,
@@ -25,6 +27,7 @@ import {
   updateVoiceAgentAppointment,
 } from '@/api/VoiceRuntimeAPI'
 import type { TextAppointment, TextAppointmentStatus } from '@/types/textAgent'
+import { getCalendarConnections, getGoogleAuthUrl, disconnectCalendar } from '@/api/CalendarsAPI'
 
 type Channel = 'text' | 'voice'
 type ChannelFilter = 'all' | Channel
@@ -246,6 +249,33 @@ export default function AppointmentsView() {
   const [modalForm, setModalForm] = useState<ModalFormState>(() =>
     buildDefaultModalForm([], new Date(), 'text')
   )
+
+  const { data: calendarConnectionsData } = useQuery({
+    queryKey: ['calendar-connections'],
+    queryFn: getCalendarConnections,
+  })
+  const hasGoogleCalendar = (calendarConnectionsData?.connections ?? []).some(
+    (c) => c.provider === 'google' && c.active
+  )
+
+  const connectCalendarMutation = useMutation({
+    mutationFn: getGoogleAuthUrl,
+    onSuccess: (data) => {
+      if (data.auth_url) {
+        window.location.href = data.auth_url
+      }
+    },
+    onError: (err: Error) => toast.error(err.message),
+  })
+
+  const disconnectMutation = useMutation({
+    mutationFn: disconnectCalendar,
+    onSuccess: () => {
+      toast.success('Calendario desconectado')
+      queryClient.invalidateQueries({ queryKey: ['calendar-connections'] })
+    },
+    onError: (err: Error) => toast.error(err.message),
+  })
 
   const { data, isLoading, isError, error } = useQuery<CalendarData>({
     queryKey: ['appointments-dashboard'],
@@ -554,6 +584,33 @@ export default function AppointmentsView() {
               <p className="mt-2 max-w-2xl text-sm text-black/60">
                 Vista mensual para planear, crear y actualizar citas de agentes de texto y voz.
               </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              {hasGoogleCalendar ? (
+                <div className="inline-flex items-center gap-2 rounded-xl bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700">
+                  <CheckCircleIcon className="h-4 w-4" />
+                  Google Calendar conectado
+                  <button
+                    onClick={() => {
+                      const conn = calendarConnectionsData?.connections.find((c) => c.provider === 'google')
+                      if (conn) disconnectMutation.mutate(conn.id)
+                    }}
+                    className="ml-1 text-xs text-emerald-600 underline hover:text-emerald-800"
+                  >
+                    Desconectar
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => connectCalendarMutation.mutate('/citas')}
+                  disabled={connectCalendarMutation.isPending}
+                  className="inline-flex items-center gap-2 rounded-xl bg-[#271173] px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-[#3a1d9e] disabled:opacity-50 transition-colors"
+                >
+                  <LinkIcon className="h-4 w-4" />
+                  Conectar Google Calendar
+                </button>
+              )}
             </div>
 
             <div className="flex flex-wrap items-end gap-2">

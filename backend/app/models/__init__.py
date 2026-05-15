@@ -17,6 +17,9 @@ from app.models.User import User, UserRole
 from app.models.UserAgent import UserAgent
 from app.models.UserPhoneNumber import UserPhoneNumber
 from app.models.UserTool import UserTool
+from app.models.Contact import Contact
+from app.models.VoiceMessage import VoiceMessage
+from app.models.UserCalendarConnection import UserCalendarConnection
 
 __all__ = [
 	"Token",
@@ -39,4 +42,7 @@ __all__ = [
 	"UserAgent",
 	"UserPhoneNumber",
 	"UserTool",
+	"Contact",
+	"VoiceMessage",
+	"UserCalendarConnection",
 ]

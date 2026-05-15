@@ -1,9 +1,11 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
-import { ShieldCheckIcon, UsersIcon } from '@heroicons/react/24/outline'
-import { getAdminUsers, getAuthenticatedUser } from '@/api/AuthAPI'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { ShieldCheckIcon, UsersIcon, PlusIcon, XMarkIcon } from '@heroicons/react/24/outline'
+import { getAdminUsers, getAuthenticatedUser, adminCreateUser } from '@/api/AuthAPI'
 import type { AdminUserSummary } from '@/types/index'
+import { useForm } from 'react-hook-form'
+import { toast } from 'react-toastify'
 
 function formatDate(unixSecs: number) {
   return new Date(unixSecs * 1000).toLocaleDateString('es-CO', {
@@ -20,7 +22,17 @@ function roleLabel(role: AdminUserSummary['role']) {
   return 'Agente'
 }
 
+type CreateUserForm = {
+  name: string
+  email: string
+  password: string
+  role: string
+}
+
 export default function AdminUsersView() {
+  const queryClient = useQueryClient()
+  const [showModal, setShowModal] = useState(false)
+
   const {
     data: currentUser,
     isLoading: isLoadingUser,
@@ -43,6 +55,35 @@ export default function AdminUsersView() {
   })
 
   const users = useMemo(() => data?.users ?? [], [data])
+
+  const {
+    register,
+    handleSubmit,
+    reset,
+    formState: { errors },
+  } = useForm<CreateUserForm>({
+    defaultValues: { name: '', email: '', password: '', role: 'agent' },
+  })
+
+  const createMutation = useMutation({
+    mutationFn: adminCreateUser,
+    onSuccess: (data) => {
+      toast.success(data.message)
+      queryClient.invalidateQueries({ queryKey: ['admin-users'] })
+      setShowModal(false)
+      reset()
+    },
+    onError: (err: Error) => toast.error(err.message),
+  })
+
+  const onSubmit = (form: CreateUserForm) => {
+    createMutation.mutate({
+      name: form.name.trim(),
+      email: form.email.trim(),
+      password: form.password,
+      role: form.role,
+    })
+  }
 
   const totals = useMemo(() => {
     return users.reduce(
@@ -99,9 +140,18 @@ export default function AdminUsersView() {
                 usuario.
               </p>
             </div>
-            <div className="inline-flex items-center gap-2 rounded-xl bg-[#ede9ff] px-3 py-2 text-sm font-medium text-[#271173]">
-              <UsersIcon className="h-4 w-4" />
-              {users.length} usuarios
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setShowModal(true)}
+                className="inline-flex items-center gap-2 rounded-xl bg-[#271173] px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-[#3a1d9e] transition-colors"
+              >
+                <PlusIcon className="h-4 w-4" />
+                Crear usuario
+              </button>
+              <div className="inline-flex items-center gap-2 rounded-xl bg-[#ede9ff] px-3 py-2 text-sm font-medium text-[#271173]">
+                <UsersIcon className="h-4 w-4" />
+                {users.length} usuarios
+              </div>
             </div>
           </div>
         </section>
@@ -211,6 +261,48 @@ export default function AdminUsersView() {
             </table>
           )}
         </div>
+
+        {showModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+            <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="text-lg font-bold text-[#271173]">Crear nuevo usuario</h2>
+                <button onClick={() => { setShowModal(false); reset() }} className="rounded-lg p-1 text-black/40 hover:bg-black/5">
+                  <XMarkIcon className="h-5 w-5" />
+                </button>
+              </div>
+              <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-black/60">Nombre completo *</label>
+                  <input {...register('name', { required: 'El nombre es requerido' })} className="w-full rounded-xl border border-[#e4e0f5] bg-white px-4 py-2.5 text-sm outline-none focus:border-[#271173] focus:ring-1 focus:ring-[#271173]" placeholder="Ej: Enrique Yturria" />
+                  {errors.name && <p className="mt-1 text-xs text-rose-500">{errors.name.message}</p>}
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-black/60">Email *</label>
+                  <input {...register('email', { required: 'El email es requerido' })} type="email" className="w-full rounded-xl border border-[#e4e0f5] bg-white px-4 py-2.5 text-sm outline-none focus:border-[#271173] focus:ring-1 focus:ring-[#271173]" placeholder="correo@ejemplo.com" />
+                  {errors.email && <p className="mt-1 text-xs text-rose-500">{errors.email.message}</p>}
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-black/60">Contraseña temporal *</label>
+                  <input {...register('password', { required: 'La contraseña es requerida', minLength: { value: 8, message: 'Mínimo 8 caracteres' } })} type="password" className="w-full rounded-xl border border-[#e4e0f5] bg-white px-4 py-2.5 text-sm outline-none focus:border-[#271173] focus:ring-1 focus:ring-[#271173]" placeholder="Mínimo 8 caracteres" />
+                  {errors.password && <p className="mt-1 text-xs text-rose-500">{errors.password.message}</p>}
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-black/60">Rol</label>
+                  <select {...register('role')} className="w-full rounded-xl border border-[#e4e0f5] bg-white px-4 py-2.5 text-sm outline-none focus:border-[#271173] focus:ring-1 focus:ring-[#271173]">
+                    <option value="agent">Agente</option>
+                    <option value="supervisor">Supervisor</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                </div>
+                <div className="pt-2 flex justify-end gap-3">
+                  <button type="button" onClick={() => { setShowModal(false); reset() }} className="rounded-xl border border-[#e4e0f5] px-4 py-2.5 text-sm font-medium text-black/60 hover:bg-[#f5f3ff]">Cancelar</button>
+                  <button type="submit" disabled={createMutation.isPending} className="rounded-xl bg-[#271173] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#3a1d9e] disabled:opacity-50">Crear usuario</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

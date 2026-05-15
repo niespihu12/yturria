@@ -18,6 +18,8 @@ from app.routes.text_agents_router import text_agents_router
 from app.routes.webhooks_router import webhooks_router
 from app.routes.sofia_errors_router import sofia_errors_router
 from app.routes.audit_router import audit_router
+from app.routes.contacts_router import contacts_router
+from app.routes.calendars_router import calendars_router
 from app.services.renewal_scheduler import run_due_renewal_reminders, RENEWAL_REMINDER_DAYS_AHEAD
 from app.utils.roles import PLATFORM_SUPER_ADMIN_EMAILS, normalize_email
 from app.utils.startup_check import validate_startup_secrets, start_cloudflare_tunnel, stop_cloudflare_tunnel
@@ -144,6 +146,112 @@ def ensure_user_auth_columns() -> None:
         for column_name, ddl in columns.items():
             if not _column_exists(connection, "users", column_name):
                 connection.execute(text(f"ALTER TABLE users ADD COLUMN {column_name} {ddl}"))
+        session.commit()
+
+
+def _ensure_userrole_enum_has_super_admin() -> None:
+    """Idempotently add 'super_admin' to the PostgreSQL userrole enum."""
+    if _dialect() != "postgresql":
+        return
+    with Session(engine) as session:
+        connection = session.connection()
+        result = connection.execute(
+            text(
+                """
+                SELECT EXISTS (
+                    SELECT 1 FROM pg_enum
+                    WHERE enumtypid = (SELECT oid FROM pg_type WHERE typname = 'userrole')
+                    AND enumlabel = 'super_admin'
+                )
+                """
+            )
+        ).scalar()
+        if not result:
+            connection.execute(text("ALTER TYPE userrole ADD VALUE 'super_admin'"))
+        session.commit()
+
+
+def ensure_contacts_table() -> None:
+    with Session(engine) as session:
+        connection = session.connection()
+        if not _table_exists(connection, "contacts"):
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE contacts (
+                        id VARCHAR(36) PRIMARY KEY,
+                        user_id VARCHAR(36) NOT NULL,
+                        name VARCHAR(255) NOT NULL,
+                        last_name VARCHAR(255) NOT NULL DEFAULT '',
+                        specialty VARCHAR(255) NOT NULL DEFAULT '',
+                        phone VARCHAR(50) NOT NULL DEFAULT '',
+                        email VARCHAR(255) NOT NULL DEFAULT '',
+                        whatsapp VARCHAR(50) NOT NULL DEFAULT '',
+                        active BOOLEAN NOT NULL DEFAULT TRUE,
+                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        INDEX ix_contacts_user_id (user_id),
+                        INDEX ix_contacts_name (name),
+                        INDEX ix_contacts_specialty (specialty)
+                    )
+                    """
+                )
+            )
+        session.commit()
+
+
+def ensure_voice_messages_table() -> None:
+    with Session(engine) as session:
+        connection = session.connection()
+        if not _table_exists(connection, "voice_messages"):
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE voice_messages (
+                        id VARCHAR(36) PRIMARY KEY,
+                        user_id VARCHAR(36) NOT NULL,
+                        voice_agent_id VARCHAR(255) NOT NULL,
+                        caller_number VARCHAR(50) NOT NULL,
+                        requested_person VARCHAR(255) NOT NULL DEFAULT '',
+                        message_summary TEXT NOT NULL DEFAULT '',
+                        full_transcript TEXT NOT NULL DEFAULT '',
+                        whatsapp_sent BOOLEAN NOT NULL DEFAULT FALSE,
+                        whatsapp_sent_at TIMESTAMP NULL,
+                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        INDEX ix_voice_messages_user_id (user_id),
+                        INDEX ix_voice_messages_voice_agent_id (voice_agent_id)
+                    )
+                    """
+                )
+            )
+        session.commit()
+
+
+def ensure_user_calendar_connections_table() -> None:
+    with Session(engine) as session:
+        connection = session.connection()
+        if not _table_exists(connection, "user_calendar_connections"):
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE user_calendar_connections (
+                        id VARCHAR(36) PRIMARY KEY,
+                        user_id VARCHAR(36) NOT NULL,
+                        provider VARCHAR(50) NOT NULL DEFAULT 'google',
+                        calendar_id VARCHAR(255) NOT NULL DEFAULT 'primary',
+                        calendar_name VARCHAR(255) NOT NULL DEFAULT '',
+                        access_token_encrypted TEXT NOT NULL DEFAULT '',
+                        refresh_token_encrypted TEXT NOT NULL DEFAULT '',
+                        token_expires_at TIMESTAMP NULL,
+                        is_default BOOLEAN NOT NULL DEFAULT FALSE,
+                        active BOOLEAN NOT NULL DEFAULT TRUE,
+                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        INDEX ix_user_calendar_connections_user_id (user_id)
+                    )
+                    """
+                )
+            )
         session.commit()
 
 
@@ -502,6 +610,7 @@ async def lifespan(_: FastAPI):
 
     if _needs_schema_migrations():
         ensure_user_auth_columns()
+        _ensure_userrole_enum_has_super_admin()
         ensure_platform_super_admin_role()
         ensure_token_auth_columns()
         ensure_text_agents_content_columns()
@@ -514,6 +623,9 @@ async def lifespan(_: FastAPI):
         ensure_text_conversations_channel_column()
         ensure_sofia_error_label_column()
         ensure_embed_customization_columns()
+        ensure_contacts_table()
+        ensure_voice_messages_table()
+        ensure_user_calendar_connections_table()
 
     scheduler_stop = asyncio.Event()
     scheduler_task = asyncio.create_task(_renewal_scheduler_loop(scheduler_stop))
@@ -540,6 +652,8 @@ app.include_router(privacy_router, prefix="/api")
 app.include_router(webhooks_router, prefix="/api")
 app.include_router(sofia_errors_router, prefix="/api")
 app.include_router(audit_router, prefix="/api")
+app.include_router(contacts_router, prefix="/api")
+app.include_router(calendars_router, prefix="/api")
 
 
 @app.get("/health", include_in_schema=False)

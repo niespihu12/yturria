@@ -20,6 +20,9 @@ from app.controllers.TextAgentController import (
 from app.controllers.deps.db_session import SessionDep
 from app.models.TextAgentWhatsApp import TextAgentWhatsApp
 from app.models.UserAgent import UserAgent
+from app.models.VoiceMessage import VoiceMessage
+from app.models.UserWhatsAppConfig import UserWhatsAppConfig
+from app.services.whatsapp_service import has_valid_credentials, send_whatsapp_message
 from app.utils.crypto import decrypt_secret
 
 webhooks_router = APIRouter(prefix="/webhooks", tags=["Webhooks"])
@@ -255,3 +258,112 @@ async def voice_tool_schedule_appointment(request: Request, session: SessionDep)
         current_user,
         session,
     )
+
+
+@webhooks_router.post("/voice/tools/take-message")
+async def voice_tool_take_message(request: Request, session: SessionDep):
+    """Recibe un recado de voz cuando no se pudo transferir la llamada.
+
+    Guarda el recado y envía WhatsApp al asesor con el resumen.
+    """
+    _validate_voice_tool_token(request)
+
+    payload = await request.json()
+    if not isinstance(payload, dict):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Payload invalido",
+        )
+
+    agent_id = str(payload.get("agent_id") or "").strip()
+    caller_number = str(payload.get("caller_number") or "").strip()
+    requested_person = str(payload.get("requested_person") or "").strip()
+    message_summary = str(payload.get("message_summary") or "").strip()
+    full_transcript = str(payload.get("full_transcript") or "").strip()
+
+    if not agent_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="agent_id es requerido",
+        )
+
+    current_user = _tool_runtime_user_for_agent(agent_id, session)
+
+    # Guardar el recado en la base de datos
+    voice_message = VoiceMessage(
+        user_id=current_user.id,
+        voice_agent_id=agent_id,
+        caller_number=caller_number,
+        requested_person=requested_person,
+        message_summary=message_summary,
+        full_transcript=full_transcript,
+    )
+    session.add(voice_message)
+
+    # Buscar configuración de WhatsApp del usuario
+    wa_config = session.exec(
+        select(UserWhatsAppConfig).where(
+            UserWhatsAppConfig.user_id == current_user.id,
+            UserWhatsAppConfig.active == True,
+        )
+    ).first()
+
+    whatsapp_sent = False
+    if wa_config and has_valid_credentials(wa_config):
+        # Buscar el número de escalamiento del agente
+        from app.models.VoiceAgentRuntimeConfig import VoiceAgentRuntimeConfig
+
+        runtime = session.exec(
+            select(VoiceAgentRuntimeConfig).where(
+                VoiceAgentRuntimeConfig.agent_id == agent_id
+            )
+        ).first()
+
+        advisor_number = ""
+        if runtime and runtime.escalation_phone_number:
+            advisor_number = runtime.escalation_phone_number
+        elif wa_config.default_sender_number:
+            # Fallback: no enviar al mismo número del remitente, sino buscar un contacto
+            pass
+
+        # Si no hay número de escalamiento, buscar en contactos
+        if not advisor_number:
+            from app.models.Contact import Contact
+            contact = session.exec(
+                select(Contact).where(
+                    Contact.user_id == current_user.id,
+                    Contact.active == True,
+                ).order_by(Contact.created_at)
+            ).first()
+            if contact and contact.whatsapp:
+                advisor_number = contact.whatsapp
+            elif contact and contact.phone:
+                advisor_number = contact.phone
+
+        if advisor_number:
+            try:
+                msg_body = (
+                    f"📞 *Recado de llamada*\n\n"
+                    f"*Llamante:* {caller_number}\n"
+                    f"*Buscaba a:* {requested_person or 'No especificado'}\n"
+                    f"*Resumen:* {message_summary or 'No proporcionado'}\n\n"
+                    f"*Agente:* {agent_id}"
+                )
+                send_whatsapp_message(
+                    wa_config,
+                    to_number=advisor_number,
+                    message=msg_body,
+                )
+                whatsapp_sent = True
+                from datetime import datetime
+                voice_message.whatsapp_sent = True
+                voice_message.whatsapp_sent_at = datetime.utcnow()
+            except Exception:
+                pass
+
+    session.commit()
+    return {
+        "status": "ok",
+        "voice_message_id": voice_message.id,
+        "whatsapp_sent": whatsapp_sent,
+    }

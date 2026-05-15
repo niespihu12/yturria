@@ -82,8 +82,18 @@ def sync_google_calendar_for_appointment(
     appointment: TextAppointment,
     *,
     operation: str = "upsert",
+    user_calendar_connection = None,
 ) -> dict[str, str]:
     calendar_id = str(os.getenv("GOOGLE_CALENDAR_ID", "primary")).strip() or "primary"
+
+    # If user has OAuth connection, use it first
+    if user_calendar_connection is not None:
+        from app.services.google_calendar_oauth import sync_appointment_via_oauth
+        return sync_appointment_via_oauth(
+            user_calendar_connection,
+            appointment,
+            operation=operation,
+        )
 
     if not _is_google_calendar_enabled():
         return {

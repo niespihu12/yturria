@@ -21,6 +21,7 @@ import WhatsAppConfigView from '@/views/app/WhatsAppConfigView'
 import TextAgentEmbedView from '@/views/embed/TextAgentEmbedView'
 import SofiaErrorsView from '@/views/app/sofia-errors/SofiaErrorsView'
 import VoiceAnalyticsView from '@/views/app/voice-analytics/VoiceAnalyticsView'
+import ContactsView from '@/views/app/ContactsView'
 
 export default function Router() {
   return (
@@ -52,6 +53,7 @@ export default function Router() {
           <Route path="/whatsapp_config" element={<WhatsAppConfigView />} />
           <Route path="/numeros_telefono" element={<PhoneNumbersView />} />
           <Route path="/admin/usuarios" element={<AdminUsersView />} />
+          <Route path="/directorio" element={<ContactsView />} />
           <Route path="/configuracion" element={<SettingsView />} />
           <Route index element={<Navigate to="/agentes_voz" replace />} />
           <Route path="*" element={<Navigate to="/agentes_voz" replace />} />

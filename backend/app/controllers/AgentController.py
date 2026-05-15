@@ -19,6 +19,8 @@ from app.models.UserWhatsAppConfig import UserWhatsAppConfig
 from app.models.VoiceAgentRuntimeConfig import VoiceAgentRuntimeConfig
 from app.models.UserPhoneNumber import UserPhoneNumber
 from app.models.UserTool import UserTool
+from app.models.UserCalendarConnection import UserCalendarConnection
+from app.models.Contact import Contact
 from app.services.appointment_service import (
     format_appointment_for_humans,
     is_time_slot_available,
@@ -36,6 +38,8 @@ from app.utils.crypto import encrypt_secret
 from app.utils.client_defaults import (
     apply_client_voice_defaults,
     build_client_voice_payload,
+    build_contact_catalog_prompt,
+    build_client_built_in_tools,
 )
 from app.utils.text_agent_templates import (
     TEXT_AGENT_DEFAULT_TEMPLATE_KEY,
@@ -308,8 +312,21 @@ def _apply_google_calendar_sync(
     *,
     operation: str = "upsert",
 ) -> None:
+    # Buscar conexion OAuth del usuario
+    user_conn = session.exec(
+        select(UserCalendarConnection).where(
+            UserCalendarConnection.user_id == appointment.user_id,
+            UserCalendarConnection.active == True,
+            UserCalendarConnection.is_default == True,
+        )
+    ).first()
+
     try:
-        result = sync_google_calendar_for_appointment(appointment, operation=operation)
+        result = sync_google_calendar_for_appointment(
+            appointment,
+            operation=operation,
+            user_calendar_connection=user_conn,
+        )
     except Exception:
         logger.exception("No se pudo sincronizar cita de voz con Google Calendar")
         appointment.google_sync_status = "error"
@@ -524,12 +541,30 @@ class AgentController:
                     ),
                 )
 
+            user_contacts = session.exec(
+                select(Contact).where(
+                    Contact.user_id == current_user.id,
+                    Contact.active == True,
+                ).order_by(Contact.name, Contact.last_name)
+            ).all()
+
             payload = apply_client_voice_defaults(
                 payload,
                 prompt_override=template_prompt,
                 first_message_override=template_first_message,
                 language_override=template_language,
+                contacts=user_contacts,
             )
+
+            # Contexto adicional: catálogo de contactos en el prompt
+            contact_catalog = build_contact_catalog_prompt(current_user.id, session)
+            if contact_catalog:
+                conv_cfg = payload.setdefault("conversation_config", {})
+                agent_cfg = conv_cfg.setdefault("agent", {})
+                prompt_cfg = agent_cfg.setdefault("prompt", {})
+                current_prompt = str(prompt_cfg.get("prompt") or "").strip()
+                if current_prompt and "--- DIRECTORIO DE ASESORES ---" not in current_prompt:
+                    prompt_cfg["prompt"] = current_prompt + "\n" + contact_catalog
         else:
             conv_cfg = payload.setdefault("conversation_config", {})
             agent_cfg = conv_cfg.setdefault("agent", {})
@@ -541,6 +576,25 @@ class AgentController:
                 agent_cfg["first_message"] = template_first_message
             if not str(agent_cfg.get("language") or "").strip():
                 agent_cfg["language"] = template_language
+
+        # Inyectar transfers y catálogo para super_admin también
+        if is_super_admin:
+            user_contacts = session.exec(
+                select(Contact).where(
+                    Contact.user_id == current_user.id,
+                    Contact.active == True,
+                ).order_by(Contact.name, Contact.last_name)
+            ).all()
+            conv_cfg = payload.setdefault("conversation_config", {})
+            agent_cfg = conv_cfg.setdefault("agent", {})
+            prompt_cfg = agent_cfg.setdefault("prompt", {})
+            prompt_cfg["built_in_tools"] = build_client_built_in_tools(user_contacts)
+
+            contact_catalog = build_contact_catalog_prompt(current_user.id, session)
+            if contact_catalog:
+                current_prompt = str(prompt_cfg.get("prompt") or "").strip()
+                if current_prompt and "--- DIRECTORIO DE ASESORES ---" not in current_prompt:
+                    prompt_cfg["prompt"] = current_prompt + "\n" + contact_catalog
 
         payload.pop("template_key", None)
 
@@ -576,7 +630,23 @@ class AgentController:
             return {"created": False, "agent_id": existing_rows[0].agent_id}
 
         display_name = (current_user.name or "").strip() or "Sofía - Yturria"
-        payload = build_client_voice_payload(display_name)
+        user_contacts = session.exec(
+            select(Contact).where(
+                Contact.user_id == current_user.id,
+                Contact.active == True,
+            ).order_by(Contact.name, Contact.last_name)
+        ).all()
+        payload = build_client_voice_payload(display_name, contacts=user_contacts)
+
+        # Contexto adicional: catálogo de contactos en el prompt de bootstrap
+        contact_catalog = build_contact_catalog_prompt(current_user.id, session)
+        if contact_catalog:
+            conv_cfg = payload.setdefault("conversation_config", {})
+            agent_cfg = conv_cfg.setdefault("agent", {})
+            prompt_cfg = agent_cfg.setdefault("prompt", {})
+            current_prompt = str(prompt_cfg.get("prompt") or "").strip()
+            if current_prompt and "--- DIRECTORIO DE ASESORES ---" not in current_prompt:
+                prompt_cfg["prompt"] = current_prompt + "\n" + contact_catalog
 
         try:
             el_agent = _elevenlabs_post("/convai/agents/create", payload)
@@ -597,8 +667,26 @@ class AgentController:
         agent_id: str, payload: dict, current_user: CurrentUser, session: SessionDep
     ):
         _require_owned_agent(agent_id, current_user, session)
+        user_contacts = session.exec(
+            select(Contact).where(
+                Contact.user_id == current_user.id,
+                Contact.active == True,
+            ).order_by(Contact.name, Contact.last_name)
+        ).all()
+
         if not is_super_admin_user(current_user):
-            payload = apply_client_voice_defaults(payload)
+            payload = apply_client_voice_defaults(payload, contacts=user_contacts)
+
+        # Contexto adicional: catálogo de contactos en updates
+        contact_catalog = build_contact_catalog_prompt(current_user.id, session)
+        if contact_catalog:
+            conv_cfg = payload.setdefault("conversation_config", {})
+            agent_cfg = conv_cfg.setdefault("agent", {})
+            prompt_cfg = agent_cfg.setdefault("prompt", {})
+            current_prompt = str(prompt_cfg.get("prompt") or "").strip()
+            if current_prompt and "--- DIRECTORIO DE ASESORES ---" not in current_prompt:
+                prompt_cfg["prompt"] = current_prompt + "\n" + contact_catalog
+
         return _elevenlabs_patch(f"/convai/agents/{agent_id}", payload)
 
     @staticmethod

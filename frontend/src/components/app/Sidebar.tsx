@@ -11,6 +11,7 @@ import {
   InboxIcon,
   CalendarDaysIcon,
   ChatBubbleOvalLeftEllipsisIcon,
+  UsersIcon,
 } from '@heroicons/react/24/outline'
 import {
   DevicePhoneMobileIcon as DevicePhoneMobileSolid,
@@ -21,6 +22,7 @@ import {
   InboxIcon as InboxSolid,
   CalendarDaysIcon as CalendarDaysSolid,
   ChatBubbleOvalLeftEllipsisIcon as ChatBubbleOvalLeftEllipsisSolid,
+  UsersIcon as UsersSolid,
 } from '@heroicons/react/24/solid'
 import Logo from '@/components/Logo'
 import { getAuthenticatedUser } from '@/api/AuthAPI'
@@ -67,6 +69,12 @@ const baseNavItems = [
     path: '/numeros_telefono',
     icon: DevicePhoneMobileIcon,
     iconActive: DevicePhoneMobileSolid,
+  },
+  {
+    label: 'Directorio',
+    path: '/directorio',
+    icon: UsersIcon,
+    iconActive: UsersSolid,
   },
 ]
 

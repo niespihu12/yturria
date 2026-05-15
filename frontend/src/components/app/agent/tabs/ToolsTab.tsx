@@ -1920,22 +1920,34 @@ export default function ToolsTab({
 
                       {systemToolType === 'transfer_to_number' && (
                         <div className="space-y-2.5">
+                          {isClient && (
+                            <div className="rounded-xl border border-blue-200 bg-blue-50 p-3">
+                              <p className="text-xs font-medium text-blue-800">
+                                📇 Destinos sincronizados desde el Directorio
+                              </p>
+                              <p className="mt-0.5 text-[11px] text-blue-700">
+                                Los números y condiciones de transferencia se gestionan automáticamente desde <strong>/directorio</strong>. Edita tus contactos allí para actualizar los destinos.
+                              </p>
+                            </div>
+                          )}
                           <div className="flex items-center justify-between gap-3">
                             <p className="text-xs font-medium text-black/70">
                               Destinos de transferencia (E.164)
                             </p>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setTransferRows(tool.name, [
-                                  ...numberTransfers,
-                                  { phone_number: '', condition: '' },
-                                ])
-                              }
-                              className="rounded-lg border border-[#271173]/25 px-2.5 py-1 text-[11px] font-medium text-[#271173] hover:bg-[#f5f3ff]"
-                            >
-                              + Agregar
-                            </button>
+                            {!isClient && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setTransferRows(tool.name, [
+                                    ...numberTransfers,
+                                    { phone_number: '', condition: '' },
+                                  ])
+                                }
+                                className="rounded-lg border border-[#271173]/25 px-2.5 py-1 text-[11px] font-medium text-[#271173] hover:bg-[#f5f3ff]"
+                              >
+                                + Agregar
+                              </button>
+                            )}
                           </div>
 
                           {numberTransfers.map((transfer, index) => (

@@ -171,3 +171,19 @@ export async function getAdminUsers() {
         throw new Error(getApiErrorMessage(error))
     }
 }
+
+export type AdminCreateUserForm = {
+    email: string
+    name: string
+    password: string
+    role?: string
+}
+
+export async function adminCreateUser(formData: AdminCreateUserForm) {
+    try {
+        const { data } = await api.post<{ id: string; email: string; name: string; role: string; confirmed: boolean; message: string }>('/auth/admin/users', formData)
+        return data
+    } catch (error) {
+        throw new Error(getApiErrorMessage(error))
+    }
+}

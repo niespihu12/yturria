@@ -112,8 +112,12 @@ SYSTEM_TOOL_TYPE_BY_NAME = {
 }
 
 
-def build_client_built_in_tools() -> dict[str, Any]:
-    """Retorna built_in_tools en formato SystemToolConfig por herramienta."""
+def build_client_built_in_tools(contacts: list[Any] | None = None) -> dict[str, Any]:
+    """Retorna built_in_tools en formato SystemToolConfig por herramienta.
+
+    Si se proporciona una lista de Contactos, se generan los destinos de
+    transferencia (transfers) para la herramienta transfer_to_number.
+    """
     built_in_tools: dict[str, Any] = {}
 
     for tool_name in CLIENT_SYSTEM_TOOLS:
@@ -122,7 +126,22 @@ def build_client_built_in_tools() -> dict[str, Any]:
 
         # Este tool requiere transfers explícito (puede estar vacío).
         if system_tool_type == "transfer_to_number":
-            params["transfers"] = []
+            transfers: list[dict[str, str]] = []
+            if contacts:
+                for c in contacts:
+                    phone = str(getattr(c, "phone", "") or "").strip()
+                    if not phone:
+                        continue
+                    name = f"{getattr(c, 'name', '')} {getattr(c, 'last_name', '')}".strip()
+                    specialty = str(getattr(c, "specialty", "") or "").strip()
+                    condition_parts: list[str] = []
+                    if name:
+                        condition_parts.append(f"cuando el cliente pida hablar con {name}")
+                    if specialty:
+                        condition_parts.append(f"cuando la consulta sea sobre {specialty}")
+                    condition = " o ".join(condition_parts) if condition_parts else f"transferir a {name or 'asesor'}"
+                    transfers.append({"phone_number": phone, "condition": condition})
+            params["transfers"] = transfers
             params["enable_client_message"] = True
 
         built_in_tools[tool_name] = {
@@ -135,7 +154,7 @@ def build_client_built_in_tools() -> dict[str, Any]:
     return built_in_tools
 
 
-def build_client_voice_payload(name: str) -> dict[str, Any]:
+def build_client_voice_payload(name: str, contacts: list[Any] | None = None) -> dict[str, Any]:
     """Payload completo listo para ElevenLabs con defaults Sofía."""
     safe_name = (name or "").strip() or "Sofía - Yturria"
     return {
@@ -145,7 +164,7 @@ def build_client_voice_payload(name: str) -> dict[str, Any]:
                 "prompt": {
                     "prompt": SOFIA_VOICE_PROMPT,
                     "llm": DEFAULT_VOICE_LLM,
-                    "built_in_tools": build_client_built_in_tools(),
+                    "built_in_tools": build_client_built_in_tools(contacts),
                 },
                 "first_message": SOFIA_FIRST_MESSAGE,
                 "language": DEFAULT_LANGUAGE,
@@ -168,12 +187,58 @@ def _resolve_non_empty(
     return fallback
 
 
+def build_contact_catalog_prompt(user_id: str, session: Any) -> str:
+    """Genera un bloque de texto con el directorio de contactos del usuario
+    para inyectar en el prompt del agente de voz."""
+    try:
+        from sqlmodel import select
+        from app.models.Contact import Contact
+
+        contacts = session.exec(
+            select(Contact).where(
+                Contact.user_id == user_id,
+                Contact.active == True,
+            ).order_by(Contact.name, Contact.last_name)
+        ).all()
+
+        if not contacts:
+            return ""
+
+        lines = ["\n--- DIRECTORIO DE ASESORES ---"]
+        for c in contacts:
+            entry_parts = [f"- {c.name} {c.last_name}".strip()]
+            if c.specialty:
+                entry_parts.append(f"Especialidad: {c.specialty}")
+            if c.phone:
+                entry_parts.append(f"Teléfono: {c.phone}")
+            if c.whatsapp:
+                entry_parts.append(f"WhatsApp: {c.whatsapp}")
+            if c.email:
+                entry_parts.append(f"Email: {c.email}")
+            lines.append(" | ".join(entry_parts))
+
+        lines.append(
+            "\nINSTRUCCIONES DE TRANSFERENCIA:\n"
+            "Cuando el cliente pida hablar con alguien por nombre, apellido o especialidad, "
+            "busca en este directorio y transfiere al número correspondiente usando transfer_to_number. "
+            "Si el cliente dice 'quiero hablar con alguien de seguros de auto', transfiere al asesor "
+            "cuya especialidad sea 'seguros de auto'. Si no hay coincidencia exacta, transfiere al "
+            "asesor principal. Si la persona no contesta o hay buzón de voz, toma un recado con nombre, "
+            "teléfono y motivo de llamada, y confirma al cliente que enviarás el mensaje por WhatsApp al asesor.\n"
+            "--- FIN DIRECTORIO ---\n"
+        )
+        return "\n".join(lines)
+    except Exception:
+        return ""
+
+
 def apply_client_voice_defaults(
     payload: dict[str, Any],
     *,
     prompt_override: str | None = None,
     first_message_override: str | None = None,
     language_override: str | None = None,
+    contacts: list[Any] | None = None,
 ) -> dict[str, Any]:
     """Mezcla defaults sobre un payload existente del cliente.
 
@@ -196,7 +261,7 @@ def apply_client_voice_defaults(
     )
 
     prompt_cfg["llm"] = DEFAULT_VOICE_LLM
-    prompt_cfg["built_in_tools"] = build_client_built_in_tools()
+    prompt_cfg["built_in_tools"] = build_client_built_in_tools(contacts)
 
     agent_cfg["first_message"] = _resolve_non_empty(
         first_message_override,

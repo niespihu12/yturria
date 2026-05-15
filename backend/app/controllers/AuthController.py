@@ -15,6 +15,7 @@ from app.models.User import User
 from app.models.UserAgent import UserAgent
 from app.models.UserPhoneNumber import UserPhoneNumber
 from app.schemas.auth import (
+    AdminCreateUserRequest,
     CheckPasswordRequest,
     ConfirmAccountRequest,
     CreateAccountRequest,
@@ -453,6 +454,42 @@ class AuthController:
                 }
                 for user in users
             ]
+        }
+
+    @staticmethod
+    def admin_create_user(
+        payload: AdminCreateUserRequest,
+        current_user: CurrentUser,
+        session: SessionDep,
+    ) -> dict:
+        AuthController._require_super_admin(current_user)
+
+        normalized_email = normalize_email(payload.email)
+        user_exists = AuthController._get_user_by_email(session, normalized_email)
+        if user_exists:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="El Usuario ya esta registrado",
+            )
+
+        user = User(
+            email=normalized_email,
+            name=payload.name,
+            password=hash_password(payload.password),
+            role=payload.role,
+            confirmed=True,
+        )
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+
+        return {
+            "id": user.id,
+            "email": user.email,
+            "name": user.name,
+            "role": role_as_value(user.role),
+            "confirmed": user.confirmed,
+            "message": "Usuario creado correctamente",
         }
 
     @staticmethod
