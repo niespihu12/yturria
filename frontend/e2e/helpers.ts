@@ -17,8 +17,8 @@ export async function login(page: Page, user: Credentials) {
   await page.goto('/auth/login')
   await page.getByPlaceholder('correo@empresa.com').fill(user.email)
   await page.getByPlaceholder('••••••••').fill(user.password)
-  await page.getByRole('button', { name: 'Iniciar Sesion' }).click()
-  await expect(page).toHaveURL(/\/agentes_voz$/)
+  await page.getByRole('button', { name: 'Iniciar sesión' }).click()
+  await expect(page).toHaveURL(/\/dashboard$/)
 }
 
 export async function apiToken(request: APIRequestContext, user: Credentials) {

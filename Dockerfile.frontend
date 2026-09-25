@@ -11,6 +11,9 @@ COPY frontend/ .
 # reenvía al backend. Sobrescribir solo si la API vive en otro dominio.
 ARG VITE_API_URL=/api
 ENV VITE_API_URL=$VITE_API_URL
+# Marca de la interfaz: vacío = marca propia; "bolivar" = tema de demostración Seguros Bolívar.
+ARG VITE_BRAND=
+ENV VITE_BRAND=$VITE_BRAND
 
 RUN npm run build
 

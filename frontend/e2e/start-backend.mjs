@@ -1,6 +1,7 @@
 // Levanta el backend para E2E contra una SQLite desechable, sin claves reales.
 import { spawn, spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
+import net from 'node:net'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -10,6 +11,18 @@ const venvPython = process.platform === 'win32'
   : path.join(backendDir, '.venv', 'bin', 'python')
 const python = existsSync(venvPython) ? venvPython : 'python'
 const port = process.env.E2E_BACKEND_PORT ?? '8002'
+
+// Si ya hay un backend escuchando en el puerto, no se re-siembra la base: hacerlo
+// vaciaría los datos de ese servidor en marcha (comparten el mismo archivo SQLite).
+const portInUse = await new Promise((resolve) => {
+  const socket = net.connect({ host: '127.0.0.1', port: Number(port) })
+  socket.once('connect', () => { socket.destroy(); resolve(true) })
+  socket.once('error', () => resolve(false))
+})
+if (portInUse) {
+  console.error(`start-backend: el puerto ${port} ya está en uso; no se toca la base de E2E.`)
+  process.exit(1)
+}
 
 const env = {
   ...process.env,

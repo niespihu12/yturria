@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { PaperAirplaneIcon } from '@heroicons/react/24/solid'
@@ -7,20 +7,44 @@ import {
   chatWithPublicTextAgentEmbed,
   getPublicTextAgentEmbedInfo,
 } from '@/api/TextAgentsAPI'
+import Logo from '@/components/Logo'
+import TypingIndicator from '@/components/app/text-agent/TypingIndicator'
+import { brand } from '@/brand'
 
 type ChatMessage = {
   role: 'user' | 'assistant'
   content: string
 }
 
+const SEND_ERROR =
+  'No pudimos responder en este momento. Por favor, intente de nuevo en unos minutos.'
+
+function generateSessionId() {
+  return Math.random().toString(36).slice(2, 12)
+}
+
+/** En iframes de terceros el almacenamiento puede estar bloqueado: nunca debe romper el chat. */
 function resolveSessionId(agentId: string) {
   const key = `text-agent-embed-session:${agentId}`
-  const existing = localStorage.getItem(key)
-  if (existing) return existing
+  try {
+    const existing = localStorage.getItem(key)
+    if (existing) return existing
+    const generated = generateSessionId()
+    localStorage.setItem(key, generated)
+    return generated
+  } catch {
+    return generateSessionId()
+  }
+}
 
-  const generated = Math.random().toString(36).slice(2, 12)
-  localStorage.setItem(key, generated)
-  return generated
+function ChatShell({ children }: { children: ReactNode }) {
+  return (
+    <main className="flex h-dvh bg-bg-secondary sm:p-4">
+      <section className="mx-auto flex h-full w-full max-w-2xl flex-col overflow-hidden bg-surface sm:rounded-2xl sm:border sm:border-border-default sm:shadow-sm">
+        {children}
+      </section>
+    </main>
+  )
 }
 
 export default function TextAgentEmbedView() {
@@ -35,7 +59,9 @@ export default function TextAgentEmbedView() {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [isSending, setIsSending] = useState(false)
-  const [sendError, setSendError] = useState('')
+  const [failedMessage, setFailedMessage] = useState<string | null>(null)
+  const logRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (!agentId) return
@@ -46,6 +72,7 @@ export default function TextAgentEmbedView() {
     queryKey: ['public-text-agent-embed-info', agentId, token],
     queryFn: () => getPublicTextAgentEmbedInfo(agentId, token),
     enabled: !!agentId && !!token,
+    retry: 1,
   })
 
   useEffect(() => {
@@ -57,14 +84,17 @@ export default function TextAgentEmbedView() {
     })
   }, [infoQuery.data?.welcome_message])
 
-  async function handleSend() {
-    const message = input.trim()
+  useEffect(() => {
+    const log = logRef.current
+    if (log) log.scrollTop = log.scrollHeight
+  }, [messages, isSending, failedMessage])
+
+  async function send(message: string, { retry = false } = {}) {
     if (!message || !agentId || !token || !sessionId || isSending) return
 
-    setInput('')
-    setSendError('')
+    setFailedMessage(null)
     setIsSending(true)
-    setMessages((prev) => [...prev, { role: 'user', content: message }])
+    if (!retry) setMessages((prev) => [...prev, { role: 'user', content: message }])
 
     try {
       const result = await chatWithPublicTextAgentEmbed(agentId, {
@@ -76,95 +106,146 @@ export default function TextAgentEmbedView() {
 
       setConversationId(result.conversation_id)
       setMessages((prev) => [...prev, { role: 'assistant', content: result.response }])
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : 'No se pudo enviar el mensaje'
-      setSendError(detail)
+    } catch {
+      setFailedMessage(message)
     } finally {
       setIsSending(false)
+      inputRef.current?.focus()
     }
   }
 
+  function handleSubmit(event: FormEvent) {
+    event.preventDefault()
+    const message = input.trim()
+    if (!message || isSending) return
+    setInput('')
+    void send(message)
+  }
+
+  const agentName = infoQuery.data?.name || 'Asistente virtual'
+  const showBrandMark = brand.key === 'bolivar'
+
   if (!token) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-[#f5f3ff] p-6 text-center">
-        <section className="w-full max-w-md rounded-2xl border border-rose-200 bg-white p-6 shadow-sm">
-          <h1 className="text-lg font-semibold text-rose-700">Token inválido</h1>
-          <p className="mt-2 text-sm text-black/65">
-            Esta URL de integración no contiene un token válido.
+      <ChatShell>
+        <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
+          {showBrandMark && <Logo variant="mark" className="mb-2 h-10 w-10 rounded-lg" />}
+          <h1 className="text-base font-semibold text-text-primary">El chat no está disponible</h1>
+          <p className="max-w-sm text-sm text-text-secondary">
+            Este enlace no es válido. Si administra este sitio, copie de nuevo el código del chat
+            desde la consola.
           </p>
-        </section>
-      </main>
+        </div>
+      </ChatShell>
     )
   }
 
   return (
-    <main className="min-h-screen bg-[#f5f3ff] p-4">
-      <section className="mx-auto flex h-[calc(100vh-2rem)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-[#e4e0f5] bg-white shadow-sm">
-        <header className="border-b border-[#e4e0f5] px-4 py-3">
-          <p className="text-xs uppercase tracking-[0.14em] text-[#271173]/70">Asistente embebido</p>
-          <h1 className="mt-1 text-base font-semibold text-[#1a1a2f]">
-            {infoQuery.data?.name || 'Agente de texto'}
+    <ChatShell>
+      <header className="flex items-center gap-3 border-b border-border-default px-4 py-3 sm:px-5">
+        {showBrandMark && <Logo variant="mark" className="h-9 w-9 shrink-0 rounded-lg" />}
+        <div className="min-w-0">
+          <h1 className="truncate text-base font-semibold text-text-primary">
+            {infoQuery.isLoading ? 'Cargando…' : agentName}
           </h1>
-        </header>
-
-        <div className="flex-1 space-y-3 overflow-y-auto bg-[#fcfbff] px-4 py-4">
-          {infoQuery.isLoading && (
-            <div className="rounded-xl border border-[#ece8fb] bg-white p-3 text-sm text-black/65">
-              Cargando agente...
-            </div>
-          )}
-
-          {infoQuery.isError && (
-            <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
-              No se pudo inicializar el chat embebido.
-            </div>
-          )}
-
-          {messages.map((message, index) => {
-            const user = message.role === 'user'
-            return (
-              <div key={`${message.role}-${index}`} className={`flex ${user ? 'justify-end' : 'justify-start'}`}>
-                <div
-                  className={`max-w-[86%] rounded-2xl px-3 py-2 text-sm leading-relaxed ${
-                    user
-                      ? 'bg-[#271173] text-white'
-                      : 'border border-[#e4e0f5] bg-white text-[#1a1a2f]'
-                  }`}
-                >
-                  {message.content}
-                </div>
-              </div>
-            )
-          })}
+          <p className="text-xs text-text-tertiary">Asistente virtual</p>
         </div>
+      </header>
 
-        <footer className="border-t border-[#e4e0f5] bg-white px-4 py-3">
-          {sendError && <p className="mb-2 text-xs text-rose-600">{sendError}</p>}
+      <div
+        ref={logRef}
+        role="log"
+        aria-live="polite"
+        aria-relevant="additions"
+        aria-label={`Conversación con ${agentName}`}
+        className="flex-1 space-y-3 overflow-y-auto bg-bg-secondary px-4 py-5 sm:px-5"
+      >
+        {infoQuery.isLoading && (
+          <div className="space-y-2" aria-hidden="true">
+            <div className="skeleton h-10 w-2/3 rounded-2xl" />
+            <div className="skeleton h-10 w-1/2 rounded-2xl" />
+          </div>
+        )}
 
-          <div className="relative">
-            <input
-              value={input}
-              onChange={(event) => setInput(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') {
-                  event.preventDefault()
-                  handleSend()
-                }
-              }}
-              placeholder="Escribe tu mensaje..."
-              className="w-full rounded-xl border border-[#d8d3ee] py-2.5 pl-3 pr-11 text-sm text-[#1a1a2f] placeholder:text-black/45 focus:border-[#271173] focus:outline-none"
-            />
+        {infoQuery.isError && (
+          <p className="mx-auto max-w-sm py-6 text-center text-sm text-text-secondary">
+            No pudimos abrir el chat en este momento. Por favor, recargue la página o intente más
+            tarde.
+          </p>
+        )}
+
+        {messages.map((message, index) => {
+          const fromUser = message.role === 'user'
+          return (
+            <div key={`${message.role}-${index}`} className={`flex ${fromUser ? 'justify-end' : 'justify-start'}`}>
+              <p
+                className={`max-w-[85%] whitespace-pre-wrap break-words rounded-2xl px-3.5 py-2.5 text-[15px] leading-relaxed sm:text-sm ${
+                  fromUser
+                    ? 'rounded-br-md bg-primary-700 text-text-inverse'
+                    : 'rounded-bl-md border border-border-default bg-surface text-text-primary'
+                }`}
+              >
+                <span className="sr-only">{fromUser ? 'Usted: ' : 'Asistente: '}</span>
+                {message.content}
+              </p>
+            </div>
+          )
+        })}
+
+        {isSending && (
+          <div className="flex justify-start">
+            <TypingIndicator />
+          </div>
+        )}
+      </div>
+
+      <footer className="border-t border-border-default bg-surface px-4 pb-3 pt-3 sm:px-5">
+        {failedMessage && (
+          <div
+            role="alert"
+            className="mb-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-lg bg-danger-50 px-3 py-2"
+          >
+            <p data-testid="embed-send-error" className="text-sm text-danger-700">
+              {SEND_ERROR}
+            </p>
             <button
               type="button"
-              onClick={handleSend}
-              disabled={isSending || !input.trim()}
-              className="absolute inset-y-1 right-1 inline-flex w-9 items-center justify-center rounded-lg bg-[#271173] text-white transition-colors hover:bg-[#1f0d5a] disabled:cursor-not-allowed disabled:opacity-60"
+              onClick={() => void send(failedMessage, { retry: true })}
+              disabled={isSending}
+              className="text-sm font-semibold text-primary-700 underline-offset-2 hover:underline disabled:opacity-60"
             >
-              <PaperAirplaneIcon className="h-4 w-4" />
+              Reintentar
             </button>
           </div>
-        </footer>
-      </section>
-    </main>
+        )}
+
+        <form onSubmit={handleSubmit} className="flex items-center gap-2">
+          <label htmlFor="embed-chat-input" className="sr-only">
+            Mensaje
+          </label>
+          <input
+            ref={inputRef}
+            id="embed-chat-input"
+            value={input}
+            onChange={(event) => setInput(event.target.value)}
+            placeholder="Escriba su mensaje…"
+            autoComplete="off"
+            disabled={infoQuery.isError}
+            className="h-11 min-w-0 flex-1 rounded-lg border border-border-strong bg-surface px-3.5 text-base text-text-primary placeholder:text-text-tertiary focus:border-primary-600 focus-visible:outline-none disabled:bg-surface-muted sm:text-sm"
+          />
+          <button
+            type="submit"
+            aria-label="Enviar mensaje"
+            disabled={isSending || !input.trim()}
+            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-primary-700 text-text-inverse transition-colors hover:bg-primary-800 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <PaperAirplaneIcon className="h-5 w-5" aria-hidden="true" />
+          </button>
+        </form>
+        <p className="mt-2 text-center text-xs text-text-tertiary">
+          Las respuestas las da un asistente virtual; un asesor puede confirmarle cualquier dato.
+        </p>
+      </footer>
+    </ChatShell>
   )
 }

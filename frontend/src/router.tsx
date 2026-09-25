@@ -3,11 +3,13 @@ import { BrowserRouter, Navigate, Routes, Route } from 'react-router-dom'
 import AuthLayout from '@/layouts/AuthLayout'
 import AppLayout from '@/layouts/AppLayout'
 import LoginView from '@/views/auth/LoginView'
-import RegisterView from '@/views/auth/RegisterView'
-import ConfirmAccountView from '@/views/auth/ConfirmAccountView'
-import RequestNewCodeView from '@/views/auth/RequestNewCodeView'
-import ForgotPasswordView from '@/views/auth/ForgotPasswordView'
-import NewPasswordView from '@/views/auth/NewPasswordView'
+
+// Solo el login va en el bundle inicial; el resto de pantallas de acceso se cargan al usarse.
+const RegisterView = lazy(() => import('@/views/auth/RegisterView'))
+const ConfirmAccountView = lazy(() => import('@/views/auth/ConfirmAccountView'))
+const RequestNewCodeView = lazy(() => import('@/views/auth/RequestNewCodeView'))
+const ForgotPasswordView = lazy(() => import('@/views/auth/ForgotPasswordView'))
+const NewPasswordView = lazy(() => import('@/views/auth/NewPasswordView'))
 
 const VoiceAgentsView = lazy(() => import('@/views/app/VoiceAgentsView'))
 const VoiceAgentDetailView = lazy(() => import('@/views/app/VoiceAgentDetailView'))
@@ -59,8 +61,8 @@ export default function Router() {
           <Route path="/admin/usuarios" element={<AdminUsersView />} />
           <Route path="/directorio" element={<ContactsView />} />
           <Route path="/configuracion" element={<SettingsView />} />
-          <Route index element={<Navigate to="/agentes_voz" replace />} />
-          <Route path="*" element={<Navigate to="/agentes_voz" replace />} />
+          <Route index element={<Navigate to="/dashboard" replace />} />
+          <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Route>
       </Routes>
       </Suspense>

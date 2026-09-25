@@ -1,9 +1,9 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { ArrowRightIcon } from '@heroicons/react/24/outline'
 import { getTextAgents } from '@/api/TextAgentsAPI'
 import api from '@/lib/axios'
 import type { TextAgentSummary } from '@/types/textAgent'
+import Skeleton from '@/components/ui/Skeleton'
 
 type FunnelMetrics = {
   agent_id: string
@@ -25,53 +25,31 @@ async function fetchFunnel(agentId: string, periodDays: number): Promise<FunnelM
   return data
 }
 
-function FunnelStep({
-  label,
-  value,
-  total,
-  color,
-  isLast,
-}: {
-  label: string
-  value: number
-  total: number
-  color: string
-  isLast?: boolean
-}) {
+const SELECT_CLASS =
+  'h-10 rounded-lg border border-border-default bg-surface px-3 text-sm text-text-primary focus-visible:border-primary-600'
+
+function FunnelStep({ label, value, total }: { label: string; value: number; total: number }) {
   const pct = total > 0 ? Math.round((value / total) * 100) : 0
   return (
-    <div className="flex items-center gap-3">
-      <div className="flex-1">
-        <div className="mb-1 flex items-center justify-between">
-          <span className="text-xs font-medium text-black/60">{label}</span>
-          <span className="text-sm font-bold text-black">{value.toLocaleString('es-CO')}</span>
-        </div>
-        <div className="h-2 w-full overflow-hidden rounded-full bg-gray-100">
-          <div
-            className={`h-2 rounded-full transition-all duration-500 ${color}`}
-            style={{ width: `${pct}%` }}
-          />
-        </div>
-        <p className="mt-0.5 text-right text-[10px] text-black/30">{pct}% del total</p>
+    <li>
+      <div className="flex items-baseline justify-between gap-3 text-sm">
+        <span className="text-text-primary">{label}</span>
+        <span className="tabular-nums text-text-secondary">
+          <span className="font-semibold text-text-primary">{value.toLocaleString('es-CO')}</span> · {pct} %
+        </span>
       </div>
-      {!isLast && <ArrowRightIcon className="h-4 w-4 shrink-0 text-black/20" />}
-    </div>
-  )
-}
-
-function MetricCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
-  return (
-    <div className="rounded-2xl border border-[#e4e0f5] bg-white p-4 shadow-sm">
-      <p className="text-xs font-semibold uppercase tracking-wide text-black/40">{label}</p>
-      <p className="mt-1 text-2xl font-bold text-[#271173]">{value}</p>
-      {sub && <p className="mt-0.5 text-xs text-black/40">{sub}</p>}
-    </div>
+      <div aria-hidden="true" className="mt-1.5 h-2 overflow-hidden rounded-full bg-neutral-100">
+        <div className="h-full rounded-full bg-primary-600" style={{ width: `${pct}%` }} />
+      </div>
+    </li>
   )
 }
 
 export default function ConversionFunnel() {
   const [selectedAgentId, setSelectedAgentId] = useState('')
   const [periodDays, setPeriodDays] = useState(30)
+  const agentSelectId = useId()
+  const periodSelectId = useId()
 
   const { data: agentsData } = useQuery({
     queryKey: ['text-agents'],
@@ -86,33 +64,28 @@ export default function ConversionFunnel() {
     enabled: !!selectedAgentId,
   })
 
-  const savingsFormatted = metrics
-    ? `$${metrics.estimated_savings_cop.toLocaleString('es-CO')}`
-    : '—'
-
   return (
-    <div className="rounded-[28px] border border-[#e4e0f5] bg-white p-6 shadow-sm">
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#271173]">
-            Analytics
-          </p>
-          <h2 className="mt-1 text-xl font-bold text-black">Embudo de Conversión</h2>
-        </div>
+    <section className="rounded-xl border border-border-default bg-surface p-5 sm:p-6">
+      <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
+        <h2 className="text-base font-semibold text-text-primary">De la conversación a la cita</h2>
         <div className="flex flex-wrap gap-2">
+          <label htmlFor={agentSelectId} className="sr-only">Agente</label>
           <select
+            id={agentSelectId}
             value={selectedAgentId}
             onChange={e => setSelectedAgentId(e.target.value)}
-            className="rounded-xl border border-[#e4e0f5] px-3 py-1.5 text-sm text-black focus:border-[#271173] focus:outline-none"
+            className={SELECT_CLASS}
           >
             {agents.map(a => (
               <option key={a.agent_id} value={a.agent_id}>{a.name}</option>
             ))}
           </select>
+          <label htmlFor={periodSelectId} className="sr-only">Periodo</label>
           <select
+            id={periodSelectId}
             value={periodDays}
             onChange={e => setPeriodDays(Number(e.target.value))}
-            className="rounded-xl border border-[#e4e0f5] px-3 py-1.5 text-sm text-black focus:border-[#271173] focus:outline-none"
+            className={SELECT_CLASS}
           >
             <option value={7}>Últimos 7 días</option>
             <option value={30}>Últimos 30 días</option>
@@ -122,65 +95,48 @@ export default function ConversionFunnel() {
       </div>
 
       {isLoading || !metrics ? (
-        <div className="flex h-40 items-center justify-center">
-          <div className="h-7 w-7 animate-spin rounded-full border-2 border-[#271173] border-t-transparent" />
+        <div className="space-y-3">
+          <Skeleton height={16} width="60%" />
+          <Skeleton height={16} width="45%" />
+          <Skeleton height={16} width="50%" />
         </div>
       ) : (
         <>
-          {/* KPI cards */}
-          <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <MetricCard
-              label="Conversión"
-              value={`${metrics.conversion_rate_pct}%`}
-              sub="conv → cita"
-            />
-            <MetricCard
-              label="Ahorro est."
-              value={savingsFormatted}
-              sub={`${periodDays} días vs secretaria`}
-            />
-            <MetricCard
-              label="Escalaciones"
-              value={String(metrics.escalations_total)}
-              sub={`${metrics.escalations_resolved} resueltas`}
-            />
-            <MetricCard
-              label="Citas completadas"
-              value={String(metrics.appointments_completed)}
-              sub={`de ${metrics.appointments_scheduled} agendadas`}
-            />
-          </div>
+          <dl className="mb-6 grid grid-cols-2 gap-x-6 gap-y-4 border-b border-border-subtle pb-5 sm:grid-cols-4">
+            <div>
+              <dt className="text-sm text-text-secondary">Conversión a cita</dt>
+              <dd className="mt-1 text-2xl font-semibold tabular-nums text-text-primary">{metrics.conversion_rate_pct} %</dd>
+            </div>
+            <div>
+              <dt className="text-sm text-text-secondary">Ahorro estimado</dt>
+              <dd className="mt-1 text-2xl font-semibold tabular-nums text-text-primary">
+                ${metrics.estimated_savings_cop.toLocaleString('es-CO')}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-sm text-text-secondary">Pasaron a una persona</dt>
+              <dd className="mt-1 text-2xl font-semibold tabular-nums text-text-primary">
+                {metrics.escalations_total}
+                <span className="ml-1 text-sm font-normal text-text-secondary">{metrics.escalations_resolved} resueltas</span>
+              </dd>
+            </div>
+            <div>
+              <dt className="text-sm text-text-secondary">Citas cumplidas</dt>
+              <dd className="mt-1 text-2xl font-semibold tabular-nums text-text-primary">
+                {metrics.appointments_completed}
+                <span className="ml-1 text-sm font-normal text-text-secondary">de {metrics.appointments_scheduled}</span>
+              </dd>
+            </div>
+          </dl>
 
-          {/* Funnel steps */}
-          <div className="flex flex-col gap-4">
-            <FunnelStep
-              label="Conversaciones iniciadas"
-              value={metrics.conversations_started}
-              total={metrics.conversations_started}
-              color="bg-[#271173]"
-            />
-            <FunnelStep
-              label="Leads calificados"
-              value={metrics.leads_qualified}
-              total={metrics.conversations_started}
-              color="bg-[#4f3cba]"
-            />
-            <FunnelStep
-              label="Citas agendadas"
-              value={metrics.appointments_scheduled}
-              total={metrics.conversations_started}
-              color="bg-[#7b68d4]"
-            />
-            <FunnelStep
-              label="Citas completadas"
-              value={metrics.appointments_completed}
-              total={metrics.conversations_started}
-              color="bg-emerald-500"
-              isLast
-            />
-          </div>
+          <ol className="space-y-4">
+            <FunnelStep label="Conversaciones iniciadas" value={metrics.conversations_started} total={metrics.conversations_started} />
+            <FunnelStep label="Clientes interesados" value={metrics.leads_qualified} total={metrics.conversations_started} />
+            <FunnelStep label="Citas agendadas" value={metrics.appointments_scheduled} total={metrics.conversations_started} />
+            <FunnelStep label="Citas cumplidas" value={metrics.appointments_completed} total={metrics.conversations_started} />
+          </ol>
         </>
       )}
-    </div>
+    </section>
   )
 }

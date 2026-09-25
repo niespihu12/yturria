@@ -1,0 +1,18 @@
+{
+  "aos": {
+    "key": "aos",
+    "productName": "Consola omnicanal",
+    "documentTitle": "AOS · Consola omnicanal",
+    "logo": { "src": "/logo.png", "alt": "AOS", "surface": "dark", "width": 741, "height": 320 },
+    "mark": { "src": "/logo.png", "alt": "AOS", "width": 741, "height": 320 },
+    "fontStylesheet": "https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap"
+  },
+  "bolivar": {
+    "key": "bolivar",
+    "productName": "Centro de atención digital",
+    "documentTitle": "Seguros Bolívar · Centro de atención digital",
+    "logo": { "src": "/brands/bolivar/logo.png", "alt": "Seguros Bolívar", "surface": "light", "width": 576, "height": 168 },
+    "mark": { "src": "/brands/bolivar/mark.png", "alt": "Seguros Bolívar", "width": 161, "height": 168 },
+    "fontStylesheet": "https://fonts.googleapis.com/css2?family=Albert+Sans:wght@400;500;600;700&family=Marcellus&display=swap"
+  }
+}

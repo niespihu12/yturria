@@ -1,15 +1,12 @@
-﻿import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'react-toastify'
 import {
-  CheckCircleIcon,
+  ArrowPathIcon,
   ArrowUpTrayIcon,
-  BookOpenIcon,
-  CircleStackIcon,
-  CloudArrowUpIcon,
   DocumentTextIcon,
-  LinkIcon,
-  SparklesIcon,
+  GlobeAltIcon,
+  PencilSquareIcon,
   TrashIcon,
 } from '@heroicons/react/24/outline'
 import {
@@ -27,6 +24,14 @@ import {
   type KnowledgeBaseItem,
   type KnowledgeBaseUsageMode,
 } from '@/types/agent'
+import AdvancedSection from '@/components/ui/AdvancedSection'
+import Badge from '@/components/ui/Badge'
+import Button from '@/components/ui/Button'
+import { useConfirm } from '@/components/ui/ConfirmDialog'
+import { cn } from '@/lib/utils'
+import { Field, SectionHeading, SliderField, SwitchField } from '../fields'
+import { describeError, inputClass, textareaClass } from '../agentUi'
+import { pluralize } from '@/lib/format'
 
 type Props = {
   agentId: string
@@ -46,56 +51,49 @@ type RagDraft = {
   max_retrieved_rag_chunks_count: number
 }
 
-const inputClass =
-  'w-full rounded-xl border border-border-default bg-surface px-3.5 py-2.5 text-sm text-text-primary placeholder:text-text-primary/40 focus:border-primary-500 focus:outline-none transition-colors'
+type BadgeVariant = 'default' | 'success' | 'warning' | 'danger' | 'info'
 
-const sliderClass =
-  'w-full h-1.5 rounded-full appearance-none bg-[#e4e0f5] [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary-600 [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:shadow-md'
+const UPLOAD_MODES: Array<{ id: UploadMode; label: string }> = [
+  { id: 'file', label: 'Archivo' },
+  { id: 'url', label: 'Página web' },
+  { id: 'text', label: 'Texto' },
+]
+
+const TYPE_LABELS: Record<string, string> = {
+  file: 'Archivo',
+  url: 'Página web',
+  text: 'Texto',
+}
+
+const USAGE_LABELS: Record<KnowledgeBaseUsageMode, string> = {
+  auto: 'Consultar cuando haga falta',
+  prompt: 'Tener siempre presente',
+}
 
 function formatBytes(value?: number) {
-  if (!value) return 'Tamano no disponible'
+  if (!value) return null
   if (value < 1024) return `${value} B`
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
   return `${(value / (1024 * 1024)).toFixed(1)} MB`
 }
 
-function statusTone(status: string) {
+function describeStatus(status: string): { label: string; variant: BadgeVariant } {
   switch (status) {
     case 'succeeded':
-      return 'border-emerald-200 bg-accent-50 text-accent-700'
+      return { label: 'Listo', variant: 'success' }
     case 'processing':
+      return { label: 'Procesando', variant: 'info' }
     case 'created':
-      return 'border-amber-200 bg-amber-50 text-amber-700'
+      return { label: 'En cola', variant: 'info' }
     case 'failed':
-      return 'border-red-200 bg-red-50 text-red-700'
+      return { label: 'No se pudo procesar', variant: 'danger' }
+    case 'not_indexed':
+      return { label: 'Sin procesar', variant: 'default' }
     case 'disabled':
-      return 'border-gray-200 bg-gray-50 text-text-tertiary'
+      return { label: 'Búsqueda desactivada', variant: 'default' }
     default:
-      return 'border-border-default bg-primary-50 text-primary-600'
+      return { label: status, variant: 'default' }
   }
-}
-
-function typeTone(type: string) {
-  switch (type) {
-    case 'file':
-      return 'bg-blue-50 text-blue-700 border-blue-200'
-    case 'url':
-      return 'bg-purple-50 text-purple-700 border-purple-200'
-    case 'text':
-      return 'bg-amber-50 text-amber-700 border-amber-200'
-    default:
-      return 'bg-[#f5f3ff] text-text-secondary border-border-default'
-  }
-}
-
-function normalizeStatusLabel(status: string) {
-  if (status === 'not_indexed') return 'Sin indice'
-  if (status === 'disabled') return 'RAG apagado'
-  if (status === 'processing') return 'Indexando'
-  if (status === 'succeeded') return 'Listo'
-  if (status === 'created') return 'Creado'
-  if (status === 'failed') return 'Fallo'
-  return status
 }
 
 function dedupeDocuments(documents: KnowledgeBaseItem[]) {
@@ -120,32 +118,16 @@ function buildRagDraft(agent: AgentDetail): RagDraft {
   }
 }
 
-function TogglePill({
-  enabled,
-  onClick,
-}: {
-  enabled: boolean
-  onClick: () => void
-}) {
-  return (
-    <div
-      onClick={onClick}
-      className={`relative h-5 w-10 cursor-pointer rounded-full transition-colors duration-200 ${
-        enabled ? 'bg-primary-600' : 'bg-black/20'
-      }`}
-    >
-      <div
-        className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-surface shadow transition-transform duration-200 ${
-          enabled ? 'translate-x-5' : 'translate-x-0'
-        }`}
-      />
-    </div>
-  )
+function DocumentIcon({ type }: { type: string }) {
+  const Icon = type === 'url' ? GlobeAltIcon : type === 'text' ? PencilSquareIcon : DocumentTextIcon
+  return <Icon className="mt-0.5 h-5 w-5 shrink-0 text-primary-600" aria-hidden="true" />
 }
 
 export default function KnowledgeBaseTab({ agentId, agent, knowledgeBase, onUpdate, isClient = false }: Props) {
   const fileRef = useRef<HTMLInputElement>(null)
   const queryClient = useQueryClient()
+  const [confirm, confirmDialog] = useConfirm()
+  const baseId = useId()
   const [uploadMode, setUploadMode] = useState<UploadMode>('file')
   const [dragOver, setDragOver] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
@@ -255,8 +237,8 @@ export default function KnowledgeBaseTab({ agentId, agent, knowledgeBase, onUpda
       const succeeded = results.length - failed
       toast.warn(
         succeeded > 0
-          ? `Indexacion iniciada en ${succeeded} documento(s). ${failed} no pudieron indexarse (pueden ser muy pequenos o estar en formato no soportado).`
-          : 'No se pudo iniciar la indexacion. Los documentos pueden ser muy pequenos o estar en formato no soportado por RAG.'
+          ? `Procesamiento iniciado en ${pluralize(succeeded, 'documento', 'documentos')}. ${failed === 1 ? 'Uno no se pudo procesar' : `${failed} no se pudieron procesar`}: pueden ser muy cortos o tener un formato no compatible.`
+          : 'No se pudo iniciar el procesamiento. Los documentos pueden ser muy cortos o tener un formato no compatible.'
       )
     }
 
@@ -303,8 +285,7 @@ export default function KnowledgeBaseTab({ agentId, agent, knowledgeBase, onUpda
       )
       await handleAttachDocument(createdDocument, 'file')
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'No se pudo subir el archivo'
-      toast.error(message)
+      toast.error(describeError(error, 'No pudimos subir el archivo. Intente de nuevo.'))
     } finally {
       setIsUploading(false)
     }
@@ -331,8 +312,7 @@ export default function KnowledgeBaseTab({ agentId, agent, knowledgeBase, onUpda
       setUrlName('')
       setUrlValue('')
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'No se pudo agregar la URL'
-      toast.error(message)
+      toast.error(describeError(error, 'No pudimos agregar la página. Revise la dirección e intente de nuevo.'))
     } finally {
       setIsUploading(false)
     }
@@ -344,14 +324,13 @@ export default function KnowledgeBaseTab({ agentId, agent, knowledgeBase, onUpda
     try {
       const createdDocument = await createKnowledgeBaseDocumentFromText(
         textValue.trim(),
-        textName.trim() || 'Documento sin titulo'
+        textName.trim() || 'Documento sin título'
       )
       await handleAttachDocument(createdDocument, 'text')
       setTextName('')
       setTextValue('')
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'No se pudo crear el documento'
-      toast.error(message)
+      toast.error(describeError(error, 'No pudimos crear el documento. Intente de nuevo.'))
     } finally {
       setIsUploading(false)
     }
@@ -366,25 +345,33 @@ export default function KnowledgeBaseTab({ agentId, agent, knowledgeBase, onUpda
       const nextKnowledgeBase = knowledgeBase.map((document) =>
         document.id === documentId ? { ...document, usage_mode: usageMode } : document
       )
-      await persistAgentKnowledge(nextKnowledgeBase, ragDraft, 'Modo de uso actualizado', [documentId])
+      await persistAgentKnowledge(nextKnowledgeBase, ragDraft, 'Uso del documento actualizado', [documentId])
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'No se pudo actualizar el documento'
-      toast.error(message)
+      toast.error(describeError(error, 'No pudimos actualizar el documento. Intente de nuevo.'))
     } finally {
       setBusyDocId(null)
     }
   }
 
-  const handleDetachDocument = async (documentId: string) => {
+  const handleDetachDocument = async (document: KnowledgeBaseItem) => {
+    const accepted = await confirm({
+      title: `¿Quitar «${document.name}» de este agente?`,
+      description:
+        'El agente dejará de usar este documento para responder. El documento seguirá guardado en su cuenta y podrá volver a agregarlo.',
+      confirmLabel: 'Quitar documento',
+      tone: 'danger',
+    })
+    if (!accepted) return
+
+    const documentId = document.id
     setBusyDocId(documentId)
     try {
-      const nextKnowledgeBase = knowledgeBase.filter((document) => document.id !== documentId)
+      const nextKnowledgeBase = knowledgeBase.filter((item) => item.id !== documentId)
       await persistAgentKnowledge(nextKnowledgeBase, ragDraft, 'Documento retirado del agente', [
         documentId,
       ])
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'No se pudo retirar el documento'
-      toast.error(message)
+      toast.error(describeError(error, 'No pudimos retirar el documento. Intente de nuevo.'))
     } finally {
       setBusyDocId(null)
     }
@@ -395,10 +382,9 @@ export default function KnowledgeBaseTab({ agentId, agent, knowledgeBase, onUpda
     try {
       await computeKnowledgeBaseRagIndex(documentId, ragDraft.embedding_model)
       await queryClient.invalidateQueries({ queryKey: ['knowledge-base-rag-index', documentId] })
-      toast.success('Indexacion RAG iniciada')
+      toast.success('Procesamiento del documento iniciado')
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'No se pudo indexar el documento'
-      toast.error(message)
+      toast.error(describeError(error, 'No pudimos procesar el documento. Intente de nuevo.'))
     } finally {
       setBusyDocId(null)
     }
@@ -407,7 +393,7 @@ export default function KnowledgeBaseTab({ agentId, agent, knowledgeBase, onUpda
   const handleSaveRag = async () => {
     setIsSavingRag(true)
     try {
-      await persistAgentKnowledge(knowledgeBase, ragDraft, 'Configuracion RAG actualizada', [])
+      await persistAgentKnowledge(knowledgeBase, ragDraft, 'Búsqueda en documentos actualizada', [])
       if (ragDraft.enabled) {
         await ensureRagIndexes(
           knowledgeBase.map((document) => document.id),
@@ -415,8 +401,7 @@ export default function KnowledgeBaseTab({ agentId, agent, knowledgeBase, onUpda
         )
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'No se pudo guardar RAG'
-      toast.error(message)
+      toast.error(describeError(error, 'No pudimos guardar la configuración. Intente de nuevo.'))
     } finally {
       setIsSavingRag(false)
     }
@@ -424,111 +409,50 @@ export default function KnowledgeBaseTab({ agentId, agent, knowledgeBase, onUpda
 
   const docsSorted = [...knowledgeBase].sort((left, right) => left.name.localeCompare(right.name))
 
+  const summary = [
+    `${knowledgeBase.length} ${knowledgeBase.length === 1 ? 'documento' : 'documentos'}`,
+    ragDraft.enabled ? `${indexedDocsCount} listos para consulta` : null,
+    promptDocsCount > 0 ? `${promptDocsCount} siempre presentes` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ')
+
   return (
-    <div className="space-y-5">
-      {/* Header stats */}
-      <section className="overflow-hidden rounded-3xl border border-border-default bg-surface shadow-sm">
-        <div className="flex flex-col gap-6 px-6 py-6 lg:flex-row lg:items-start lg:justify-between">
-          <div className="max-w-2xl">
-            <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-border-default bg-primary-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-primary-600">
-              <SparklesIcon className="h-3.5 w-3.5" />
-              Knowledge Base
-            </div>
-            <h2 className="text-xl font-semibold text-text-primary">Documentos listos para respuestas con contexto</h2>
-            <p className="mt-2 max-w-xl text-sm leading-6 text-text-secondary">
-              Segun la documentacion oficial de la plataforma, los documentos se crean primero en la
-              knowledge base del workspace y luego se vinculan al agente.
-            </p>
-          </div>
+    <div className="space-y-10">
+      <section aria-labelledby={`${baseId}-add`} className="space-y-5">
+        <SectionHeading
+          id={`${baseId}-add`}
+          title="Base de conocimiento"
+          description="Documentos que el agente consulta para responder. Puede subir un archivo, enlazar una página web o pegar un texto."
+        />
 
-          <div className="grid w-full gap-3 sm:grid-cols-3 lg:w-95">
-            {[
-              {
-                label: 'Documentos',
-                value: knowledgeBase.length,
-                sub: 'Adjuntos al agente',
-                icon: BookOpenIcon,
-              },
-              {
-                label: 'RAG listo',
-                value: indexedDocsCount,
-                sub: 'Documentos indexados',
-                icon: SparklesIcon,
-              },
-              {
-                label: 'Prompt fijo',
-                value: promptDocsCount,
-                sub: 'Modo prompt',
-                icon: CircleStackIcon,
-              },
-            ].map((stat) => (
-              <div
-                key={stat.label}
-                className="relative overflow-hidden rounded-2xl border border-border-default bg-linear-to-br from-[#f5f3ff] to-white p-4"
-              >
-                <stat.icon className="pointer-events-none absolute -bottom-3 -right-3 h-16 w-16 text-primary-600 opacity-5" />
-                <p className="text-xs uppercase tracking-[0.18em] text-text-tertiary">{stat.label}</p>
-                <p className="mt-2 text-3xl font-bold text-primary-600">{stat.value}</p>
-                <p className="mt-1 text-xs text-text-tertiary">{stat.sub}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Upload section */}
-      <section className="rounded-2xl border border-border-default bg-surface p-5 shadow-sm">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h3 className="text-sm font-semibold text-text-primary">Agregar conocimiento</h3>
-            <p className="mt-1 text-xs text-text-tertiary">
-              Puedes montar archivos, URLs o texto libre y adjuntarlo al agente.
-            </p>
-          </div>
-          <div className="inline-flex rounded-xl border border-border-default bg-[#f5f3ff] p-1">
-            {(['file', 'url', 'text'] as UploadMode[]).map((mode) => (
-              <button
-                key={mode}
-                type="button"
-                onClick={() => setUploadMode(mode)}
-                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
-                  uploadMode === mode
-                    ? 'bg-primary-600 text-white shadow-sm'
-                    : 'text-text-secondary hover:text-primary-600'
-                }`}
-              >
-                {mode === 'file' ? (
-                  <ArrowUpTrayIcon className="h-3.5 w-3.5" />
-                ) : mode === 'url' ? (
-                  <LinkIcon className="h-3.5 w-3.5" />
-                ) : (
-                  <DocumentTextIcon className="h-3.5 w-3.5" />
-                )}
-                {mode === 'file' ? 'Archivo' : mode === 'url' ? 'URL' : 'Texto'}
-              </button>
-            ))}
-          </div>
+        <div role="group" aria-label="Tipo de documento" className="inline-flex rounded-lg border border-border-default bg-surface-muted p-1">
+          {UPLOAD_MODES.map((mode) => (
+            <button
+              key={mode.id}
+              type="button"
+              aria-pressed={uploadMode === mode.id}
+              onClick={() => setUploadMode(mode.id)}
+              className={cn(
+                'rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+                uploadMode === mode.id
+                  ? 'bg-surface text-primary-700 shadow-sm'
+                  : 'text-text-secondary hover:text-text-primary',
+              )}
+            >
+              {mode.label}
+            </button>
+          ))}
         </div>
 
         {uploadMode === 'file' && (
-          <div
-            onDragOver={(event) => {
-              event.preventDefault()
-              setDragOver(true)
-            }}
-            onDragLeave={() => setDragOver(false)}
-            onDrop={handleDrop}
-            onClick={() => fileRef.current?.click()}
-            className={`cursor-pointer rounded-2xl border-2 border-dashed px-6 py-10 text-center transition-all ${
-              dragOver
-                ? 'border-[#271173] bg-primary-50 ring-2 ring-[#271173] ring-offset-2'
-                : 'border-border-default bg-[#f5f3ff] hover:border-[#271173]/40 hover:bg-primary-50/50'
-            }`}
-          >
+          <>
             <input
               ref={fileRef}
               type="file"
               className="hidden"
+              tabIndex={-1}
+              aria-label="Elegir archivo"
               accept=".pdf,.txt,.doc,.docx,.md"
               onChange={(event) => {
                 const file = event.target.files?.[0]
@@ -538,98 +462,152 @@ export default function KnowledgeBaseTab({ agentId, agent, knowledgeBase, onUpda
                 event.target.value = ''
               }}
             />
-            <ArrowUpTrayIcon
-              className={`mx-auto h-10 w-10 text-primary-600/50 ${dragOver ? 'animate-bounce' : ''}`}
-            />
-            <p className="mt-3 text-sm font-medium text-text-primary">
-              {isUploading ? 'Subiendo documento...' : 'Arrastra un archivo o haz clic para abrir'}
-            </p>
-            <p className="mt-1 text-xs text-text-muted">PDF, TXT, DOC, DOCX o MD</p>
-          </div>
+            <button
+              type="button"
+              disabled={isUploading}
+              aria-describedby={`${baseId}-formats`}
+              onDragOver={(event) => {
+                event.preventDefault()
+                setDragOver(true)
+              }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={handleDrop}
+              onClick={() => fileRef.current?.click()}
+              className={cn(
+                'flex w-full flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-10 text-center transition-colors disabled:cursor-wait',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2',
+                dragOver
+                  ? 'border-primary-600 bg-primary-50'
+                  : 'border-border-strong bg-surface-muted hover:border-primary-300 hover:bg-primary-50/50',
+              )}
+            >
+              <ArrowUpTrayIcon className="h-8 w-8 text-primary-600" aria-hidden="true" />
+              <span className="mt-3 text-sm font-medium text-text-primary">
+                {isUploading ? 'Subiendo documento…' : 'Arrastre un archivo aquí o haga clic para elegirlo'}
+              </span>
+              <span id={`${baseId}-formats`} className="mt-1 text-xs text-text-tertiary">
+                PDF, TXT, DOC, DOCX o MD
+              </span>
+            </button>
+          </>
         )}
 
         {uploadMode === 'url' && (
-          <div className="grid gap-3 md:grid-cols-[1.3fr_0.8fr_auto]">
-            <input
-              type="url"
-              value={urlValue}
-              onChange={(event) => setUrlValue(event.target.value)}
-              placeholder="https://docs.tuempresa.com/manual"
-              className={inputClass}
-            />
-            <input
-              type="text"
-              value={urlName}
-              onChange={(event) => setUrlName(event.target.value)}
-              placeholder="Nombre opcional"
-              className={inputClass}
-            />
-            <button
+          <div className="grid gap-4 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_auto] md:items-end">
+            <Field label="Dirección de la página">
+              {(control) => (
+                <input
+                  {...control}
+                  type="url"
+                  inputMode="url"
+                  value={urlValue}
+                  onChange={(event) => setUrlValue(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault()
+                      handleUrlSubmit()
+                    }
+                  }}
+                  placeholder="https://www.ejemplo.com/preguntas-frecuentes"
+                  className={inputClass}
+                />
+              )}
+            </Field>
+            <Field label="Nombre (opcional)">
+              {(control) => (
+                <input
+                  {...control}
+                  type="text"
+                  value={urlName}
+                  onChange={(event) => setUrlName(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault()
+                      handleUrlSubmit()
+                    }
+                  }}
+                  placeholder="Preguntas frecuentes"
+                  className={inputClass}
+                />
+              )}
+            </Field>
+            <Button
               type="button"
+              variant="secondary"
               onClick={handleUrlSubmit}
-              disabled={isUploading || !urlValue.trim()}
-              className="rounded-xl bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-60"
+              isLoading={isUploading}
+              disabled={!urlValue.trim()}
             >
-              {isUploading ? 'Agregando...' : 'Agregar URL'}
-            </button>
+              {isUploading ? 'Agregando…' : 'Agregar página'}
+            </Button>
           </div>
         )}
 
         {uploadMode === 'text' && (
-          <div className="space-y-3">
-            <input
-              type="text"
-              value={textName}
-              onChange={(event) => setTextName(event.target.value)}
-              placeholder="Nombre del documento"
-              className={inputClass}
-            />
-            <textarea
-              rows={7}
-              value={textValue}
-              onChange={(event) => setTextValue(event.target.value)}
-              placeholder="Pega aqui el contenido que quieres que el agente recuerde..."
-              className={`${inputClass} resize-none`}
-            />
+          <div className="space-y-4">
+            <Field label="Nombre del documento">
+              {(control) => (
+                <input
+                  {...control}
+                  type="text"
+                  value={textName}
+                  onChange={(event) => setTextName(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') event.preventDefault()
+                  }}
+                  placeholder="Horarios de atención"
+                  className={inputClass}
+                />
+              )}
+            </Field>
+            <Field label="Contenido">
+              {(control) => (
+                <textarea
+                  {...control}
+                  rows={7}
+                  value={textValue}
+                  onChange={(event) => setTextValue(event.target.value)}
+                  placeholder="Pegue aquí la información que el agente debe conocer…"
+                  className={textareaClass}
+                />
+              )}
+            </Field>
             <div className="flex justify-end">
-              <button
+              <Button
                 type="button"
+                variant="secondary"
                 onClick={handleTextSubmit}
-                disabled={isUploading || !textValue.trim()}
-                className="rounded-xl bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-60"
+                isLoading={isUploading}
+                disabled={!textValue.trim()}
               >
-                {isUploading ? 'Creando...' : 'Crear documento'}
-              </button>
+                {isUploading ? 'Creando…' : 'Crear documento'}
+              </Button>
             </div>
           </div>
         )}
       </section>
 
-      {/* Documents list */}
-      <section className="rounded-2xl border border-border-default bg-surface p-5 shadow-sm">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h3 className="text-sm font-semibold text-text-primary">Documentos vinculados al agente</h3>
-            <p className="mt-1 text-xs text-text-tertiary">
-              Administra el modo de uso y el estado de indexacion sin salir del detalle del agente.
-            </p>
-          </div>
-          <div className="inline-flex items-center gap-2 rounded-full border border-border-default bg-[#f5f3ff] px-3 py-1.5 text-xs text-text-secondary">
-            <CircleStackIcon className="h-3.5 w-3.5 text-primary-600" />
-            Workspace docs: {workspaceKnowledgeBase?.documents?.length ?? 0}
-          </div>
-        </div>
+      <section aria-labelledby={`${baseId}-docs`} className="space-y-4 border-t border-border-default pt-8">
+        <SectionHeading
+          id={`${baseId}-docs`}
+          title="Documentos del agente"
+          description={
+            docsSorted.length > 0 ? (
+              <span className="tabular-nums">{summary}</span>
+            ) : undefined
+          }
+        />
 
         {docsSorted.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-border-default bg-[#f5f3ff] px-6 py-10 text-center">
-            <BookOpenIcon className="mx-auto h-10 w-10 text-text-primary/30" />
-            <p className="mt-3 text-sm font-medium text-text-primary">Todavia no hay documentos montados</p>
-            <p className="mt-1 text-xs text-text-muted">
-              Sube el primero y luego activa RAG si quieres respuestas por recuperacion semantica.
+          <div className="rounded-xl border border-dashed border-border-strong px-6 py-10 text-center">
+            <p className="text-sm font-medium text-text-primary">Aún no hay documentos</p>
+            <p className="mx-auto mt-1 max-w-[55ch] text-sm text-text-secondary">
+              Agregue manuales, preguntas frecuentes o condiciones de sus productos para que el
+              agente responda con información de su empresa.
             </p>
           </div>
         ) : (
-          <div className="space-y-3">
+          <ul className="divide-y divide-border-subtle rounded-xl border border-border-default bg-surface">
             {docsSorted.map((document) => {
               const workspaceDoc = workspaceDocumentMap.get(document.id)
               const supportedUsages = workspaceDoc?.supported_usages ?? ['auto', 'prompt']
@@ -639,185 +617,156 @@ export default function KnowledgeBaseTab({ agentId, agent, knowledgeBase, onUpda
               const rawStatus = ragDraft.enabled
                 ? statusIndex?.status?.toLowerCase?.() ?? 'not_indexed'
                 : 'disabled'
+              const status = describeStatus(rawStatus)
+              const size = formatBytes(workspaceDoc?.metadata?.size_bytes)
+              const isBusy = busyDocId === document.id
+              const usageId = `${baseId}-usage-${document.id}`
 
               return (
-                <div
-                  key={document.id}
-                  className="rounded-2xl border border-border-default bg-surface p-4 shadow-sm transition-shadow hover:shadow-md"
-                >
-                  <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <li key={document.id} className="flex flex-col gap-4 p-4 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="flex min-w-0 items-start gap-3">
+                    <DocumentIcon type={document.type} />
                     <div className="min-w-0">
-                      <div className="flex items-start gap-3">
-                        <div className="rounded-xl bg-primary-50 p-2">
-                          {document.type === 'url' ? (
-                            <LinkIcon className="h-5 w-5 text-primary-600" />
-                          ) : document.type === 'text' ? (
-                            <CloudArrowUpIcon className="h-5 w-5 text-primary-600" />
-                          ) : (
-                            <DocumentTextIcon className="h-5 w-5 text-primary-600" />
+                      <p className="truncate text-sm font-semibold text-text-primary">{document.name}</p>
+                      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-text-tertiary">
+                        <span>{TYPE_LABELS[document.type] ?? document.type}</span>
+                        {size && (
+                          <>
+                            <span aria-hidden="true">·</span>
+                            <span className="tabular-nums">{size}</span>
+                          </>
+                        )}
+                        <Badge variant={status.variant} size="sm">
+                          {status.label}
+                          {statusIndex?.progress_percentage !== undefined && rawStatus === 'processing' && (
+                            <span className="tabular-nums">
+                              {' '}
+                              {Math.round(statusIndex.progress_percentage)} %
+                            </span>
                           )}
-                        </div>
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold text-text-primary">{document.name}</p>
-                          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-text-tertiary">
-                            <span
-                              className={`rounded-full border px-2 py-1 uppercase tracking-[0.16em] ${typeTone(document.type)}`}
-                            >
-                              {document.type}
-                            </span>
-                            <span>{formatBytes(workspaceDoc?.metadata?.size_bytes)}</span>
-                            <span
-                              className={`inline-flex items-center rounded-full border px-2 py-1 ${statusTone(rawStatus)}`}
-                            >
-                              {rawStatus === 'succeeded' && (
-                                <span className="relative mr-1 inline-flex h-3 w-3 items-center justify-center">
-                                  <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400/70 animate-[ping_1s_ease-in-out_1]" />
-                                  <CheckCircleIcon className="relative h-3 w-3 text-accent-700" />
-                                </span>
-                              )}
-                              {normalizeStatusLabel(rawStatus)}
-                            </span>
-                            {statusIndex?.progress_percentage !== undefined &&
-                              rawStatus === 'processing' && (
-                                <span>{Math.round(statusIndex.progress_percentage)}%</span>
-                              )}
-                          </div>
-                        </div>
+                        </Badge>
                       </div>
-                    </div>
-
-                    <div className="flex flex-col gap-3 lg:min-w-[320px]">
-                      <div className="grid gap-3 md:grid-cols-[1fr_auto_auto]">
-                        <select
-                          value={document.usage_mode ?? (ragDraft.enabled ? 'auto' : 'prompt')}
-                          disabled={busyDocId === document.id}
-                          onChange={(event) =>
-                            handleUsageModeChange(
-                              document.id,
-                              event.target.value as KnowledgeBaseUsageMode
-                            )
-                          }
-                          className={inputClass}
-                        >
-                          {(['auto', 'prompt'] as KnowledgeBaseUsageMode[]).map((mode) => (
-                            <option
-                              key={mode}
-                              value={mode}
-                              disabled={!supportedUsages.includes(mode)}
-                            >
-                              {mode === 'auto' ? 'Auto / RAG' : 'Prompt fijo'}
-                            </option>
-                          ))}
-                        </select>
-
-                        <button
-                          type="button"
-                          onClick={() => handleReindexDocument(document.id)}
-                          disabled={busyDocId === document.id || !ragDraft.enabled}
-                          className="rounded-xl border border-border-default bg-primary-50 px-3 py-2.5 text-sm font-medium text-primary-600 transition-colors hover:bg-[#e0d9ff] disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          Reindexar
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => handleDetachDocument(document.id)}
-                          disabled={busyDocId === document.id}
-                          className="rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-sm font-medium text-red-600 transition-colors hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          <span className="inline-flex items-center gap-1.5">
-                            <TrashIcon className="h-4 w-4" />
-                            Quitar
-                          </span>
-                        </button>
-                      </div>
-
                       {supportedUsages.length === 1 && supportedUsages[0] === 'prompt' && (
-                        <p className="text-xs text-amber-600">
-                          Este documento solo admite modo prompt. la plataforma no lo puede indexar
-                          para RAG en su estado actual.
+                        <p className="mt-1.5 text-xs text-text-tertiary">
+                          Este documento es muy corto para consultarse por partes; el agente lo
+                          tendrá siempre presente.
                         </p>
                       )}
                     </div>
                   </div>
-                </div>
+
+                  <div className="flex flex-wrap items-center gap-2 lg:shrink-0">
+                    <label htmlFor={usageId} className="sr-only">
+                      Uso de «{document.name}» en las respuestas
+                    </label>
+                    <select
+                      id={usageId}
+                      value={document.usage_mode ?? (ragDraft.enabled ? 'auto' : 'prompt')}
+                      disabled={isBusy}
+                      onChange={(event) =>
+                        handleUsageModeChange(
+                          document.id,
+                          event.target.value as KnowledgeBaseUsageMode
+                        )
+                      }
+                      className={cn(inputClass, 'w-auto min-w-56 py-2')}
+                    >
+                      {(['auto', 'prompt'] as KnowledgeBaseUsageMode[]).map((mode) => (
+                        <option key={mode} value={mode} disabled={!supportedUsages.includes(mode)}>
+                          {USAGE_LABELS[mode]}
+                        </option>
+                      ))}
+                    </select>
+
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleReindexDocument(document.id)}
+                      disabled={isBusy || !ragDraft.enabled}
+                      aria-label={`Volver a procesar «${document.name}»`}
+                      leftIcon={<ArrowPathIcon className="h-4 w-4" aria-hidden="true" />}
+                    >
+                      Volver a procesar
+                    </Button>
+
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleDetachDocument(document)}
+                      disabled={isBusy}
+                      aria-label={`Quitar «${document.name}» del agente`}
+                      className="hover:bg-danger-50 hover:text-danger-700"
+                      leftIcon={<TrashIcon className="h-4 w-4" aria-hidden="true" />}
+                    >
+                      Quitar
+                    </Button>
+                  </div>
+                </li>
               )
             })}
-          </div>
+          </ul>
         )}
       </section>
 
-      {/* RAG Config */}
       {!isClient && (
-      <section className="rounded-2xl border border-border-default bg-surface p-5 shadow-sm">
-        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h3 className="text-sm font-semibold text-text-primary">Configuracion RAG</h3>
-            <p className="mt-1 text-xs text-text-tertiary">
-              la plataforma recomienda RAG para bases grandes y deja el modo prompt para contexto
-              critico o documentos pequenos.
-            </p>
-          </div>
+        <AdvancedSection
+          defaultOpen
+          title="Búsqueda en documentos"
+          description="Cómo busca el agente dentro de documentos extensos. Configuración técnica."
+        >
+          <SwitchField
+            label="Búsqueda inteligente en documentos"
+            description="Recomendada para documentos extensos: el agente consulta solo las partes relevantes de cada documento."
+            checked={ragDraft.enabled}
+            onChange={(next) =>
+              setRagDraft((current) => ({
+                ...current,
+                enabled: next,
+              }))
+            }
+          />
 
-          <div className="inline-flex items-center gap-3 rounded-xl border border-border-default bg-surface px-3 py-2">
-            <div>
-              <p className="text-xs font-semibold text-text-primary">
-                {ragDraft.enabled ? 'RAG activado' : 'RAG desactivado'}
-              </p>
-              <p className="text-[11px] text-text-muted">Activa recuperacion semantica en respuestas</p>
-            </div>
-            <TogglePill
-              enabled={ragDraft.enabled}
-              onClick={() =>
-                setRagDraft((current) => ({
-                  ...current,
-                  enabled: !current.enabled,
-                }))
-              }
-            />
-          </div>
-        </div>
-
-        <div className="grid gap-5 lg:grid-cols-2">
-          <div>
-            <label className="mb-1.5 block text-xs font-medium text-text-secondary">
-              Embedding model
-            </label>
-            <select
-              value={ragDraft.embedding_model}
-              onChange={(event) =>
-                setRagDraft((current) => ({
-                  ...current,
-                  embedding_model: event.target.value,
-                }))
-              }
-              className={inputClass}
+          <div className="grid gap-6 lg:grid-cols-2">
+            <Field
+              label="Modelo de indexación"
+              help="Modelo que prepara los documentos para la búsqueda."
             >
-              {RAG_EMBEDDING_MODELS.map((model) => (
-                <option key={model.value} value={model.value}>
-                  {model.label}
-                </option>
-              ))}
-            </select>
-            {modelChanged && (
-              <p className="mt-1.5 text-xs text-amber-600">
-                Al guardar, todos los documentos seran reindexados con este modelo.
-              </p>
-            )}
-          </div>
+              {(control) => (
+                <>
+                  <select
+                    {...control}
+                    value={ragDraft.embedding_model}
+                    onChange={(event) =>
+                      setRagDraft((current) => ({
+                        ...current,
+                        embedding_model: event.target.value,
+                      }))
+                    }
+                    className={inputClass}
+                  >
+                    {RAG_EMBEDDING_MODELS.map((model) => (
+                      <option key={model.value} value={model.value}>
+                        {model.label}
+                      </option>
+                    ))}
+                  </select>
+                  {modelChanged && (
+                    <p className="mt-1.5 text-xs text-warning-700">
+                      Al guardar, todos los documentos se volverán a procesar con este modelo.
+                    </p>
+                  )}
+                </>
+              )}
+            </Field>
 
-          <div>
-            <div className="mb-2 flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-text-primary">Chunks recuperados</p>
-                <p className="text-xs text-text-tertiary">Numero de bloques recuperados por consulta</p>
-              </div>
-              <span className="min-w-12 rounded-lg bg-primary-50 px-2.5 py-1 text-center text-sm font-semibold text-primary-600">
-                {ragDraft.max_retrieved_rag_chunks_count}
-              </span>
-            </div>
-            <input
-              type="range"
+            <SliderField
+              label="Fragmentos consultados por pregunta"
+              description="Cuántas partes de los documentos revisa el agente antes de responder."
+              displayValue={String(ragDraft.max_retrieved_rag_chunks_count)}
+              minLabel="1"
+              maxLabel="20"
               min={1}
               max={20}
               step={1}
@@ -828,26 +777,14 @@ export default function KnowledgeBaseTab({ agentId, agent, knowledgeBase, onUpda
                   max_retrieved_rag_chunks_count: Number(event.target.value || 1),
                 }))
               }
-              className={sliderClass}
             />
-            <div className="mt-1 flex justify-between text-xs text-text-primary/40">
-              <span>1</span>
-              <span>20</span>
-            </div>
-          </div>
 
-          <div>
-            <div className="mb-2 flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-text-primary">Distancia vectorial maxima</p>
-                <p className="text-xs text-text-tertiary">Umbral de distancia para recuperar contexto</p>
-              </div>
-              <span className="min-w-12 rounded-lg bg-primary-50 px-2.5 py-1 text-center text-sm font-semibold text-primary-600">
-                {ragDraft.max_vector_distance.toFixed(2)}
-              </span>
-            </div>
-            <input
-              type="range"
+            <SliderField
+              label="Umbral de similitud"
+              description="Distancia máxima permitida. Valores bajos exigen coincidencias más cercanas a la pregunta."
+              displayValue={ragDraft.max_vector_distance.toFixed(2)}
+              minLabel="Estricto"
+              maxLabel="Amplio"
               min={0}
               max={1}
               step={0.05}
@@ -858,26 +795,14 @@ export default function KnowledgeBaseTab({ agentId, agent, knowledgeBase, onUpda
                   max_vector_distance: Number(event.target.value || 0),
                 }))
               }
-              className={sliderClass}
             />
-            <div className="mt-1 flex justify-between text-xs text-text-primary/40">
-              <span>0.00</span>
-              <span>1.00</span>
-            </div>
-          </div>
 
-          <div>
-            <div className="mb-2 flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-text-primary">Longitud maxima del contexto</p>
-                <p className="text-xs text-text-tertiary">Limite de caracteres del contexto recuperado</p>
-              </div>
-              <span className="min-w-16 rounded-lg bg-primary-50 px-2.5 py-1 text-center text-sm font-semibold text-primary-600">
-                {ragDraft.max_documents_length}
-              </span>
-            </div>
-            <input
-              type="range"
+            <SliderField
+              label="Longitud máxima del contexto"
+              description="Cantidad máxima de caracteres de los documentos que se usan en cada respuesta."
+              displayValue={ragDraft.max_documents_length.toLocaleString('es-CO')}
+              minLabel="1.000"
+              maxLabel="100.000"
               min={1000}
               max={100000}
               step={1000}
@@ -888,38 +813,24 @@ export default function KnowledgeBaseTab({ agentId, agent, knowledgeBase, onUpda
                   max_documents_length: Number(event.target.value || 1000),
                 }))
               }
-              className={sliderClass}
             />
-            <div className="mt-1 flex justify-between text-xs text-text-primary/40">
-              <span>1000</span>
-              <span>100000</span>
-            </div>
           </div>
-        </div>
 
-        <div className="mt-4 rounded-xl border border-border-default bg-[#f5f3ff] px-4 py-3 text-xs leading-6 text-text-tertiary">
-          Indexing no es instantaneo. la plataforma indica que puede tardar unos minutos en documentos
-          grandes, y los archivos menores a 500 bytes se quedan en modo prompt.
-        </div>
-
-        <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
-          <p className="text-xs text-text-tertiary">
-            Al guardar, tambien se intentan reindexar los documentos del agente con el modelo
-            seleccionado.
+          <p className="text-xs leading-relaxed text-text-tertiary">
+            El procesamiento puede tardar unos minutos en documentos grandes. Los archivos de menos
+            de 500 bytes siempre se incluyen completos. Al guardar, los documentos del agente se
+            vuelven a procesar con el modelo seleccionado.
           </p>
-          <button
-            type="button"
-            onClick={handleSaveRag}
-            disabled={isSavingRag}
-            className="rounded-xl bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {isSavingRag ? 'Guardando...' : 'Guardar configuracion RAG'}
-          </button>
-        </div>
-      </section>
+
+          <div className="flex justify-end">
+            <Button type="button" variant="secondary" onClick={handleSaveRag} isLoading={isSavingRag}>
+              {isSavingRag ? 'Guardando…' : 'Guardar búsqueda'}
+            </Button>
+          </div>
+        </AdvancedSection>
       )}
+
+      {confirmDialog}
     </div>
   )
 }
-
-

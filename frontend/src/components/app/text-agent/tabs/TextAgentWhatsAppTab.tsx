@@ -1,70 +1,72 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'react-toastify'
-import {
-  CheckCircleIcon,
-  ClipboardDocumentIcon,
-  PauseCircleIcon,
-  PlayCircleIcon,
-  TrashIcon,
-} from '@heroicons/react/24/outline'
+import { CheckIcon, ClipboardDocumentIcon } from '@heroicons/react/24/outline'
 import { deleteWhatsAppConfig, getWhatsAppConfig, upsertWhatsAppConfig } from '@/api/TextAgentsAPI'
 import { WHATSAPP_PROVIDER_OPTIONS, type WhatsAppProvider } from '@/types/textAgent'
 import { absoluteApiBaseUrl } from '@/lib/apiUrl'
+import AdvancedSection from '@/components/ui/AdvancedSection'
+import Badge from '@/components/ui/Badge'
+import Button from '@/components/ui/Button'
+import { useConfirm } from '@/components/ui/ConfirmDialog'
+import { useCurrentUser } from '@/hooks/useCurrentUser'
 
 type Props = {
   agentId: string
 }
 
 const inputClass =
-  'w-full rounded-xl border border-[#e4e0f5] bg-white px-3 py-2.5 text-sm text-black placeholder:text-black/40 transition-colors focus:border-[#271173] focus:outline-none'
+  'h-10 w-full rounded-lg border border-border-default bg-surface px-3 text-sm text-text-primary placeholder:text-text-tertiary transition-colors focus:border-primary-600'
 
-const labelClass = 'mb-1.5 block text-xs font-semibold uppercase tracking-wide text-black/50'
+const labelClass = 'mb-1.5 block text-sm font-medium text-text-primary'
+const hintClass = 'mt-1.5 text-xs leading-relaxed text-text-tertiary'
+const KEEP_SECRET = 'Déjelo vacío para conservar el actual'
 
-// Derive webhook base URL from VITE_API_URL (already contains /api)
+// La URL base del webhook sale de VITE_API_URL (ya incluye /api)
 const API_BASE = absoluteApiBaseUrl()
 
 function CopyField({ label, value }: { label: string; value: string }) {
   const [copied, setCopied] = useState(false)
+  const id = useId()
 
   function copy() {
-    navigator.clipboard.writeText(value).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    })
+    navigator.clipboard.writeText(value).then(
+      () => {
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
+      },
+      () => toast.error('No se pudo copiar. Selecciónelo y cópielo manualmente.'),
+    )
   }
 
   return (
     <div>
-      <label className={labelClass}>{label}</label>
+      <label htmlFor={id} className={labelClass}>
+        {label}
+      </label>
       <div className="flex gap-2">
         <input
+          id={id}
           type="text"
           readOnly
           value={value}
-          className="min-w-0 flex-1 rounded-xl border border-[#e4e0f5] bg-[#fafafa] px-3 py-2.5 font-mono text-xs text-black/70 focus:outline-none"
+          onFocus={(event) => event.currentTarget.select()}
+          className="h-10 min-w-0 flex-1 rounded-lg border border-border-default bg-surface-muted px-3 font-mono text-xs text-text-secondary"
         />
-        <button
+        <Button
           type="button"
+          variant="outline"
           onClick={copy}
-          className={`flex shrink-0 items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold transition-all ${
-            copied
-              ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-              : 'border-[#e4e0f5] text-black/60 hover:border-[#271173] hover:text-[#271173]'
-          }`}
+          leftIcon={
+            copied ? (
+              <CheckIcon className="h-4 w-4 text-success-600" aria-hidden="true" />
+            ) : (
+              <ClipboardDocumentIcon className="h-4 w-4" aria-hidden="true" />
+            )
+          }
         >
-          {copied ? (
-            <>
-              <CheckCircleIcon className="h-3.5 w-3.5" />
-              Copiado
-            </>
-          ) : (
-            <>
-              <ClipboardDocumentIcon className="h-3.5 w-3.5" />
-              Copiar
-            </>
-          )}
-        </button>
+          {copied ? 'Copiado' : 'Copiar'}
+        </Button>
       </div>
     </div>
   )
@@ -72,6 +74,10 @@ function CopyField({ label, value }: { label: string; value: string }) {
 
 export default function TextAgentWhatsAppTab({ agentId }: Props) {
   const queryClient = useQueryClient()
+  const { isSuperAdmin } = useCurrentUser()
+  const [confirm, confirmDialog] = useConfirm()
+  const baseId = useId()
+  const fieldId = (name: string) => `${baseId}-${name}`
 
   const { data, isLoading } = useQuery({
     queryKey: ['text-agent-whatsapp', agentId],
@@ -89,7 +95,7 @@ export default function TextAgentWhatsAppTab({ agentId }: Props) {
   const [phoneNumberId, setPhoneNumberId] = useState('')
   const [businessAccountId, setBusinessAccountId] = useState('')
 
-  // Hydrate form state when config identity changes (setState-during-render pattern)
+  // Hidrata el formulario cuando cambia la configuración (setState durante el render)
   const [lastConfigId, setLastConfigId] = useState<string | undefined>(undefined)
   const [lastConfigProvider, setLastConfigProvider] = useState<string | undefined>(undefined)
   if (config && (config.id !== lastConfigId || config.provider !== lastConfigProvider)) {
@@ -100,7 +106,7 @@ export default function TextAgentWhatsAppTab({ agentId }: Props) {
     setAccountSid(config.account_sid)
     setPhoneNumberId(config.phone_number_id)
     setBusinessAccountId(config.business_account_id)
-    // Tokens are secrets — never returned by API, don't overwrite user input
+    // Los secretos nunca vuelven de la API: no sobrescribir lo que el usuario escribe
   }
 
   const refresh = () => {
@@ -133,7 +139,7 @@ export default function TextAgentWhatsAppTab({ agentId }: Props) {
     mutationFn: () =>
       upsertWhatsAppConfig(agentId, { provider: config!.provider, active: !config!.active }),
     onSuccess: () => {
-      toast.success(config?.active ? 'Canal pausado' : 'Canal activado')
+      toast.success(config?.active ? 'WhatsApp en pausa' : 'WhatsApp activado')
       refresh()
     },
     onError: (e: Error) => toast.error(e.message),
@@ -142,7 +148,7 @@ export default function TextAgentWhatsAppTab({ agentId }: Props) {
   const { mutate: remove, isPending: isRemoving } = useMutation({
     mutationFn: () => deleteWhatsAppConfig(agentId),
     onSuccess: () => {
-      toast.success('Configuración eliminada')
+      toast.success('WhatsApp desconectado')
       setPhoneNumber('')
       setAccountSid('')
       setAuthToken('')
@@ -155,6 +161,16 @@ export default function TextAgentWhatsAppTab({ agentId }: Props) {
     onError: (e: Error) => toast.error(e.message),
   })
 
+  const handleRemove = async () => {
+    const accepted = await confirm({
+      title: '¿Desconectar WhatsApp?',
+      description: `El agente dejará de responder en ${config?.phone_number || 'este número'} y se borrarán las credenciales guardadas. Podrá conectarlo de nuevo cuando quiera.`,
+      confirmLabel: 'Desconectar',
+      tone: 'danger',
+    })
+    if (accepted) remove()
+  }
+
   const webhookUrl = config
     ? `${API_BASE}/webhooks/whatsapp/${config.id}/${config.provider}`
     : ''
@@ -163,229 +179,248 @@ export default function TextAgentWhatsAppTab({ agentId }: Props) {
 
   if (isLoading) {
     return (
-      <div className="flex h-40 items-center justify-center gap-2 text-black/60">
-        <div className="h-4 w-4 animate-spin rounded-full border-2 border-[#271173] border-t-transparent" />
-        Cargando configuración...
+      <div className="max-w-2xl space-y-3" aria-label="Cargando configuración de WhatsApp">
+        <div className="skeleton h-16" />
+        <div className="skeleton h-10 w-1/2" />
       </div>
     )
   }
 
   return (
-    <div className="max-w-2xl space-y-6">
-      {/* Status banner */}
+    <div className="max-w-2xl space-y-8">
       {config ? (
-        <div className="flex items-center gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4">
-          <CheckCircleIcon className="h-5 w-5 shrink-0 text-emerald-600" />
-          <div className="flex-1">
-            <p className="text-sm font-semibold text-emerald-800">
-              WhatsApp conectado via {config.provider === 'meta' ? 'Meta Cloud API' : 'Twilio'}
-            </p>
-            <p className="text-xs text-emerald-700">
-              {config.has_credentials ? 'Credenciales configuradas' : 'Faltan credenciales'} ·{' '}
-              {config.active ? 'Activo' : 'Pausado'}
+        <section className="flex flex-col gap-4 rounded-xl border border-border-default bg-surface p-5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-base font-semibold text-text-primary">WhatsApp conectado</h2>
+              <Badge variant={config.active ? 'success' : 'warning'} size="sm">
+                {config.active ? 'Activo' : 'En pausa'}
+              </Badge>
+            </div>
+            <p className="mt-1 text-sm text-text-secondary">
+              {config.phone_number ? `Número ${config.phone_number}` : 'Número sin registrar'}
+              {!config.has_credentials && ' · faltan las credenciales del proveedor'}
             </p>
           </div>
-          <button
-            type="button"
-            disabled={isToggling}
-            onClick={() => toggle()}
-            title={config.active ? 'Pausar canal' : 'Activar canal'}
-            className="rounded-lg border border-amber-200 p-1.5 text-amber-600 transition-colors hover:bg-amber-50 disabled:opacity-50"
-          >
-            {config.active ? (
-              <PauseCircleIcon className="h-4 w-4" />
-            ) : (
-              <PlayCircleIcon className="h-4 w-4" />
-            )}
-          </button>
-          <button
-            type="button"
-            disabled={isRemoving}
-            onClick={() => remove()}
-            className="rounded-lg border border-rose-200 p-1.5 text-rose-500 transition-colors hover:bg-rose-50 disabled:opacity-50"
-            title="Eliminar configuración"
-          >
-            <TrashIcon className="h-4 w-4" />
-          </button>
-        </div>
+          <div className="flex shrink-0 flex-wrap gap-2">
+            <Button type="button" variant="outline" size="sm" disabled={isToggling} onClick={() => toggle()}>
+              {config.active ? 'Pausar' : 'Activar'}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={isRemoving}
+              onClick={() => void handleRemove()}
+              className="text-danger-700 hover:bg-danger-50 hover:text-danger-700"
+            >
+              Desconectar
+            </Button>
+          </div>
+        </section>
       ) : (
-        <div className="rounded-2xl border border-[#e4e0f5] bg-[#fafafa] px-5 py-4">
-          <p className="text-sm font-semibold text-black">Conectar WhatsApp</p>
-          <p className="mt-1 text-xs text-black/50">
-            Conecta este agente a un número de WhatsApp para recibir y responder mensajes
-            automáticamente.
+        <div>
+          <h2 className="text-base font-semibold text-text-primary">Conectar WhatsApp</h2>
+          <p className="mt-1 max-w-[60ch] text-sm text-text-secondary">
+            Conecte este agente a un número de WhatsApp Business para que responda los mensajes
+            de sus clientes automáticamente.
           </p>
         </div>
       )}
 
-      {/* Provider selector */}
-      <div>
-        <label className={labelClass}>Proveedor</label>
-        <div className="grid gap-3 sm:grid-cols-2">
-          {WHATSAPP_PROVIDER_OPTIONS.map((opt) => (
-            <button
-              key={opt.value}
-              type="button"
-              onClick={() => setProvider(opt.value)}
-              className={`rounded-xl border p-4 text-left transition-colors duration-150 ease-out ${
-                provider === opt.value
-                  ? 'border-[#271173] bg-[#ede9ff] ring-1 ring-[#271173]'
-                  : 'border-[#e4e0f5] bg-white hover:border-[#271173]/30 hover:bg-[#f5f3ff]'
-              }`}
-            >
-              <p className="text-sm font-semibold text-black">{opt.label}</p>
-              <p className="mt-1 text-xs text-black/50 leading-relaxed">{opt.description}</p>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Credentials form */}
-      <div className="space-y-4 rounded-2xl border border-[#e4e0f5] bg-white p-5">
-        <h3 className="text-sm font-semibold text-black">Credenciales</h3>
-
-        <div>
-          <label className={labelClass}>Número de WhatsApp</label>
+      <section className="space-y-5">
+        <div className="max-w-sm">
+          <label htmlFor={fieldId('phone')} className={labelClass}>
+            Número de WhatsApp
+          </label>
           <input
+            id={fieldId('phone')}
             type="tel"
             value={phoneNumber}
             onChange={(e) => setPhoneNumber(e.target.value)}
-            placeholder="+573001234567"
+            placeholder="Ej: +57 300 123 4567"
             className={inputClass}
           />
         </div>
 
-        {provider === 'twilio' && (
-          <>
-            <div>
-              <label className={labelClass}>Account SID</label>
-              <input
-                type="text"
-                value={accountSid}
-                onChange={(e) => setAccountSid(e.target.value)}
-                placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-                className={inputClass}
-              />
-            </div>
-            <div>
-              <label className={labelClass}>Auth Token</label>
-              <input
-                type="password"
-                value={authToken}
-                onChange={(e) => setAuthToken(e.target.value)}
-                placeholder={config?.has_credentials ? '••••••••  (dejar vacío para mantener)' : 'Tu auth token de Twilio'}
-                className={inputClass}
-              />
-              <p className="mt-1 text-[11px] text-black/40">
-                Usado para validar la firma <code>X-Twilio-Signature</code> en cada webhook entrante.
-              </p>
-            </div>
-          </>
-        )}
-
-        {provider === 'meta' && (
-          <>
-            <div>
-              <label className={labelClass}>Access Token</label>
-              <input
-                type="password"
-                value={accessToken}
-                onChange={(e) => setAccessToken(e.target.value)}
-                placeholder={config?.has_credentials ? '••••••••  (dejar vacío para mantener)' : 'Token de acceso de Meta API'}
-                className={inputClass}
-              />
-            </div>
-            <div>
-              <label className={labelClass}>App Secret</label>
-              <input
-                type="password"
-                value={appSecret}
-                onChange={(e) => setAppSecret(e.target.value)}
-                placeholder={config?.has_app_secret ? '••••••••  (dejar vacío para mantener)' : 'App Secret de tu Meta App'}
-                className={inputClass}
-              />
-              <p className="mt-1 text-[11px] text-black/40">
-                Usado para validar la firma <code>X-Hub-Signature-256</code> en cada webhook entrante.
-                Se encuentra en Meta Developers → Tu App → Configuración → Básica.
-              </p>
-            </div>
-            <div>
-              <label className={labelClass}>Phone Number ID</label>
-              <input
-                type="text"
-                value={phoneNumberId}
-                onChange={(e) => setPhoneNumberId(e.target.value)}
-                placeholder="ID del número en Meta"
-                className={inputClass}
-              />
-            </div>
-            <div>
-              <label className={labelClass}>WhatsApp Business Account ID</label>
-              <input
-                type="text"
-                value={businessAccountId}
-                onChange={(e) => setBusinessAccountId(e.target.value)}
-                placeholder="ID de tu cuenta de negocio"
-                className={inputClass}
-              />
-            </div>
-          </>
-        )}
-
-        <button
-          type="button"
-          disabled={isSaving}
-          onClick={() => save()}
-          className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#271173] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#1f0d5a] disabled:opacity-60"
+        <AdvancedSection
+          key={isSuperAdmin ? 'admin' : 'client'}
+          title="Credenciales de WhatsApp"
+          description="Datos del proveedor que conecta su número. Se los entrega su equipo técnico o el proveedor."
+          defaultOpen={isSuperAdmin}
         >
-          {isSaving && (
-            <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
-          )}
-          Guardar configuración
-        </button>
-      </div>
+          <fieldset>
+            <legend className={labelClass}>Proveedor</legend>
+            <div className="grid gap-2 @lg:grid-cols-2">
+              {WHATSAPP_PROVIDER_OPTIONS.map((opt) => {
+                const selected = provider === opt.value
+                return (
+                  <label
+                    key={opt.value}
+                    className={`cursor-pointer rounded-lg border p-3 transition-colors has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-border-focus ${
+                      selected
+                        ? 'border-primary-600 bg-primary-50'
+                        : 'border-border-default bg-surface hover:border-primary-300'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name={fieldId('provider')}
+                      value={opt.value}
+                      checked={selected}
+                      onChange={() => setProvider(opt.value)}
+                      className="sr-only"
+                    />
+                    <span className="block text-sm font-semibold text-text-primary">{opt.label}</span>
+                    <span className="mt-0.5 block text-xs leading-relaxed text-text-tertiary">
+                      {opt.description}
+                    </span>
+                  </label>
+                )
+              })}
+            </div>
+          </fieldset>
 
-      {/* Webhook info */}
-      {config && (
-        <div className="space-y-4 rounded-2xl border border-[#e4e0f5] bg-white p-5">
-          <div>
-            <h3 className="text-sm font-semibold text-black">Configuración del webhook</h3>
-            <p className="mt-1 text-xs text-black/50">
-              Usa estas URLs y tokens en el panel de {config.provider === 'meta' ? 'Meta Developers' : 'Twilio Console'}.
-            </p>
-          </div>
-
-          <CopyField label="URL del webhook" value={webhookUrl} />
-          {config.provider === 'meta' && (
-            <CopyField label="Token de verificación" value={verifyToken} />
-          )}
-
-          {config.provider === 'twilio' && (
-            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
-              <p className="text-xs font-semibold text-amber-800">Instrucciones Twilio</p>
-              <ol className="mt-2 list-decimal space-y-1 pl-4 text-xs text-amber-700">
-                <li>Ve a Twilio Console → Messaging → Senders → WhatsApp senders</li>
-                <li>Selecciona tu número de WhatsApp</li>
-                <li>En "A message comes in" pega la URL del webhook (HTTP POST)</li>
-                <li>Guarda los cambios</li>
-              </ol>
+          {provider === 'twilio' && (
+            <div className="grid gap-4 @lg:grid-cols-2">
+              <div>
+                <label htmlFor={fieldId('sid')} className={labelClass}>
+                  Account SID
+                </label>
+                <input
+                  id={fieldId('sid')}
+                  type="text"
+                  autoComplete="off"
+                  value={accountSid}
+                  onChange={(e) => setAccountSid(e.target.value)}
+                  placeholder="ACxxxxxxxxxxxxxxxx"
+                  className={`${inputClass} font-mono`}
+                />
+              </div>
+              <div>
+                <label htmlFor={fieldId('auth')} className={labelClass}>
+                  Auth Token
+                </label>
+                <input
+                  id={fieldId('auth')}
+                  type="password"
+                  autoComplete="off"
+                  value={authToken}
+                  onChange={(e) => setAuthToken(e.target.value)}
+                  placeholder={config?.has_credentials ? KEEP_SECRET : 'Token de Twilio'}
+                  className={inputClass}
+                />
+                <p className={hintClass}>Permite comprobar que cada mensaje viene de Twilio.</p>
+              </div>
             </div>
           )}
 
-          {config.provider === 'meta' && (
-            <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
-              <p className="text-xs font-semibold text-blue-800">Instrucciones Meta</p>
-              <ol className="mt-2 list-decimal space-y-1 pl-4 text-xs text-blue-700">
-                <li>Ve a Meta Developers → Tu App → WhatsApp → Configuración</li>
-                <li>En "Webhooks" agrega la URL del webhook</li>
-                <li>Pega el Token de verificación y haz clic en "Verify and save"</li>
-                <li>Suscríbete al evento <code>messages</code></li>
-                <li>Para validación de firma, agrega el App Secret en Credenciales</li>
-              </ol>
+          {provider === 'meta' && (
+            <div className="grid gap-4 @lg:grid-cols-2">
+              <div>
+                <label htmlFor={fieldId('access')} className={labelClass}>
+                  Access Token
+                </label>
+                <input
+                  id={fieldId('access')}
+                  type="password"
+                  autoComplete="off"
+                  value={accessToken}
+                  onChange={(e) => setAccessToken(e.target.value)}
+                  placeholder={config?.has_credentials ? KEEP_SECRET : 'Token de acceso de Meta'}
+                  className={inputClass}
+                />
+              </div>
+              <div>
+                <label htmlFor={fieldId('secret')} className={labelClass}>
+                  App Secret
+                </label>
+                <input
+                  id={fieldId('secret')}
+                  type="password"
+                  autoComplete="off"
+                  value={appSecret}
+                  onChange={(e) => setAppSecret(e.target.value)}
+                  placeholder={config?.has_app_secret ? KEEP_SECRET : 'App Secret de su app de Meta'}
+                  className={inputClass}
+                />
+                <p className={hintClass}>
+                  Permite comprobar que cada mensaje viene de Meta. Está en Meta Developers → su app →
+                  Configuración → Básica.
+                </p>
+              </div>
+              <div>
+                <label htmlFor={fieldId('phone-id')} className={labelClass}>
+                  Phone Number ID
+                </label>
+                <input
+                  id={fieldId('phone-id')}
+                  type="text"
+                  autoComplete="off"
+                  value={phoneNumberId}
+                  onChange={(e) => setPhoneNumberId(e.target.value)}
+                  placeholder="ID del número en Meta"
+                  className={`${inputClass} font-mono`}
+                />
+              </div>
+              <div>
+                <label htmlFor={fieldId('waba')} className={labelClass}>
+                  WhatsApp Business Account ID
+                </label>
+                <input
+                  id={fieldId('waba')}
+                  type="text"
+                  autoComplete="off"
+                  value={businessAccountId}
+                  onChange={(e) => setBusinessAccountId(e.target.value)}
+                  placeholder="ID de la cuenta de negocio"
+                  className={`${inputClass} font-mono`}
+                />
+              </div>
             </div>
           )}
+
+          {config && (
+            <div className="space-y-4 border-t border-border-default pt-4">
+              <div>
+                <h3 className="text-sm font-semibold text-text-primary">Datos para el proveedor</h3>
+                <p className="mt-1 text-xs text-text-tertiary">
+                  Registre estos datos en {config.provider === 'meta' ? 'Meta Developers' : 'la consola de Twilio'} para
+                  que los mensajes lleguen al agente.
+                </p>
+              </div>
+
+              <CopyField label="URL del webhook" value={webhookUrl} />
+              {config.provider === 'meta' && <CopyField label="Token de verificación" value={verifyToken} />}
+
+              {config.provider === 'twilio' ? (
+                <ol className="list-decimal space-y-1 pl-5 text-xs leading-relaxed text-text-secondary">
+                  <li>En la consola de Twilio, abra Messaging → Senders → WhatsApp senders.</li>
+                  <li>Seleccione su número de WhatsApp.</li>
+                  <li>En «A message comes in», pegue la URL del webhook (HTTP POST).</li>
+                  <li>Guarde los cambios.</li>
+                </ol>
+              ) : (
+                <ol className="list-decimal space-y-1 pl-5 text-xs leading-relaxed text-text-secondary">
+                  <li>En Meta Developers, abra su app → WhatsApp → Configuración.</li>
+                  <li>En «Webhooks», agregue la URL del webhook.</li>
+                  <li>Pegue el token de verificación y elija «Verify and save».</li>
+                  <li>Suscríbase al evento «messages».</li>
+                  <li>Para comprobar la firma de los mensajes, registre el App Secret arriba.</li>
+                </ol>
+              )}
+            </div>
+          )}
+        </AdvancedSection>
+
+        <div className="flex justify-end">
+          <Button type="button" isLoading={isSaving} onClick={() => save()}>
+            {config ? 'Guardar cambios de WhatsApp' : 'Conectar WhatsApp'}
+          </Button>
         </div>
-      )}
+      </section>
+
+      {confirmDialog}
     </div>
   )
 }

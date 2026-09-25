@@ -1,18 +1,13 @@
-﻿import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowDownTrayIcon,
   ArrowPathIcon,
-  ChatBubbleLeftRightIcon,
+  ArrowTopRightOnSquareIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
-  ClockIcon,
-  PhoneIcon,
   PlusIcon,
-  SpeakerWaveIcon,
-  SparklesIcon,
   TrashIcon,
-  XMarkIcon,
 } from '@heroicons/react/24/outline'
 import { toast } from 'react-toastify'
 import {
@@ -34,6 +29,13 @@ import {
   DATA_COLLECTION_TYPES,
   SUPPORTED_LANGUAGES,
 } from '@/types/agent'
+import AdvancedSection from '@/components/ui/AdvancedSection'
+import Badge from '@/components/ui/Badge'
+import Button from '@/components/ui/Button'
+import Modal from '@/components/ui/Modal'
+import { cn } from '@/lib/utils'
+import { Field, SectionHeading, SwitchField } from '../fields'
+import { describeError, inputClass, subsectionTitleClass, textareaClass } from '../agentUi'
 
 type Props = {
   agentId: string
@@ -57,12 +59,22 @@ type EditableDataField = {
   description: string
 }
 
-const cardClass = 'rounded-xl border border-border-default bg-surface'
-const inputClass =
-  'w-full rounded-lg border border-border-default bg-surface px-3 py-2.5 text-sm text-text-primary placeholder:text-text-tertiary transition-colors focus:border-primary-500 focus:outline-none'
-const textareaClass = `${inputClass} resize-none`
+type BadgeVariant = 'default' | 'success' | 'warning' | 'danger' | 'info'
 
 type ConfigTab = 'criteria' | 'data' | 'language'
+
+const CONFIG_TABS: Array<{ id: ConfigTab; label: string }> = [
+  { id: 'criteria', label: 'Criterios' },
+  { id: 'data', label: 'Datos a extraer' },
+  { id: 'language', label: 'Idioma del resumen' },
+]
+
+const DATA_TYPE_LABELS: Record<string, string> = {
+  string: 'Texto',
+  boolean: 'Sí o no',
+  integer: 'Número entero',
+  number: 'Número',
+}
 
 const CONVERSATIONS_PAGE_SIZE = 10
 
@@ -116,7 +128,7 @@ function mapDataCollection(
 }
 
 function formatDuration(secs?: number) {
-  if (!secs) return '-'
+  if (!secs) return '—'
   const minutes = Math.floor(secs / 60)
   const seconds = secs % 60
   return `${minutes}:${String(seconds).padStart(2, '0')}`
@@ -170,58 +182,30 @@ function getConversationAudioUrl(detail: ConversationDetail | undefined): string
   )
 }
 
-function StatusBadge({ status }: { status: string }) {
-  const map: Record<string, string> = {
-    done: 'border-green-200 bg-green-50 text-green-700',
-    processing: 'border-amber-200 bg-amber-50 text-amber-700',
-    failed: 'border-red-200 bg-red-50 text-red-600',
-    'in-progress': 'border-border-default bg-primary-50 text-primary-600',
+function describeCallStatus(status: string): { label: string; variant: BadgeVariant } {
+  switch (status) {
+    case 'done':
+      return { label: 'Completada', variant: 'success' }
+    case 'processing':
+      return { label: 'Procesando', variant: 'info' }
+    case 'in-progress':
+      return { label: 'En curso', variant: 'info' }
+    case 'failed':
+      return { label: 'Fallida', variant: 'danger' }
+    default:
+      return { label: status, variant: 'default' }
   }
-  const cls = map[status] ?? 'border-border-default bg-[#f5f3ff] text-text-primary/70'
-
-  return (
-    <span
-      className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium ${cls}`}
-    >
-      {status}
-    </span>
-  )
 }
 
-function CriteriaResultBadge({ result }: { result: string }) {
+function describeCriteriaResult(result: string): { label: string; variant: BadgeVariant } {
   const normalized = result.toLowerCase()
-
-  let cls = 'border-gray-200 bg-gray-50 text-gray-600'
   if (['success', 'passed', 'pass', 'done'].includes(normalized)) {
-    cls = 'border-green-200 bg-green-50 text-green-700'
-  } else if (['failure', 'failed', 'fail', 'error'].includes(normalized)) {
-    cls = 'border-red-200 bg-red-50 text-red-700'
+    return { label: 'Cumplido', variant: 'success' }
   }
-
-  return (
-    <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium ${cls}`}>
-      {result}
-    </span>
-  )
-}
-
-function TogglePill({ enabled, onToggle }: { enabled: boolean; onToggle: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onToggle}
-      className={`relative h-5 w-10 cursor-pointer rounded-full transition-colors duration-200 ${
-        enabled ? 'bg-primary-600' : 'bg-black/20'
-      }`}
-      aria-pressed={enabled}
-    >
-      <span
-        className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-surface shadow transition-transform duration-200 ${
-          enabled ? 'translate-x-5' : 'translate-x-0'
-        }`}
-      />
-    </button>
-  )
+  if (['failure', 'failed', 'fail', 'error'].includes(normalized)) {
+    return { label: 'No cumplido', variant: 'danger' }
+  }
+  return { label: 'Sin determinar', variant: 'default' }
 }
 
 function AnalysisSummary({ detail }: { detail: ConversationDetail }) {
@@ -234,88 +218,68 @@ function AnalysisSummary({ detail }: { detail: ConversationDetail }) {
     : []
 
   return (
-    <div className="space-y-4">
-      <div className="rounded-xl border border-border-default bg-linear-to-br from-[#ede9ff] to-[#f5f3ff] p-4">
-        <div className="mb-2 flex items-center gap-2 text-sm font-medium text-text-primary">
-          <SparklesIcon className="h-4 w-4 text-primary-600" />
-          Resumen del analisis
-        </div>
+    <div className="space-y-6">
+      <section>
+        <h3 className={subsectionTitleClass}>Resumen</h3>
         {analysis?.transcript_summary ? (
-          <p className="text-sm leading-relaxed text-text-primary/85">
+          <p className="mt-2 text-sm leading-relaxed text-text-primary">
             {analysis.transcript_summary}
           </p>
         ) : (
-          <p className="text-sm text-text-secondary">
-            Esta conversacion aun no tiene resumen disponible.
+          <p className="mt-2 text-sm text-text-secondary">
+            Esta llamada aún no tiene resumen.
           </p>
         )}
-      </div>
+      </section>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <div className="rounded-xl border border-border-default bg-[#f5f3ff] p-4">
-          <p className="mb-3 text-sm font-medium text-text-primary">
-            Criterios evaluados
-          </p>
-          <div className="space-y-3">
-            {criteriaResults.length > 0 ? (
-              criteriaResults.map((result, index) => (
-                <div
-                  key={`${result.criteria_id ?? 'criterion'}-${index}`}
-                  className="rounded-lg border border-border-default bg-surface p-3"
-                >
-                  <div className="mb-1 flex items-center justify-between gap-3">
+      <section>
+        <h3 className={subsectionTitleClass}>Criterios evaluados</h3>
+        {criteriaResults.length > 0 ? (
+          <ul className="mt-2 divide-y divide-border-subtle">
+            {criteriaResults.map((result, index) => {
+              const outcome = describeCriteriaResult(result.result ?? 'unknown')
+              return (
+                <li key={`${result.criteria_id ?? 'criterion'}-${index}`} className="py-3">
+                  <div className="flex items-center justify-between gap-3">
                     <p className="text-sm font-medium text-text-primary">
-                      {result.criteria_id ?? `criterio_${index + 1}`}
+                      {result.criteria_id ?? `Criterio ${index + 1}`}
                     </p>
-                    <CriteriaResultBadge result={result.result ?? 'unknown'} />
+                    <Badge variant={outcome.variant} size="sm">
+                      {outcome.label}
+                    </Badge>
                   </div>
-                  <p className="text-xs leading-relaxed text-text-primary/70">
-                    {result.rationale ?? 'Sin justificacion disponible.'}
+                  <p className="mt-1 text-sm leading-relaxed text-text-secondary">
+                    {result.rationale ?? 'Sin justificación disponible.'}
                   </p>
-                </div>
-              ))
-            ) : (
-              <p className="text-sm text-text-secondary">
-                Sin resultados de evaluacion todavia.
-              </p>
-            )}
-          </div>
-        </div>
+                </li>
+              )
+            })}
+          </ul>
+        ) : (
+          <p className="mt-2 text-sm text-text-secondary">Aún no hay resultados de evaluación.</p>
+        )}
+      </section>
 
-        <div className="rounded-xl border border-border-default bg-[#f5f3ff] p-4">
-          <p className="mb-3 text-sm font-medium text-text-primary">
-            Datos extraidos
-          </p>
-          <div className="space-y-3">
-            {dataResults.length > 0 ? (
-              dataResults.map(([key, result]) => (
-                <div
-                  key={key}
-                  className="rounded-lg border border-border-default bg-surface p-3"
-                >
-                  <p className="text-xs uppercase tracking-wide text-text-secondary">
-                    {key}
-                  </p>
-                  <p className="mt-1 text-sm text-text-primary">
-                    {result.value === null || result.value === undefined
-                      ? '-'
-                      : String(result.value)}
-                  </p>
-                  {result.rationale && (
-                    <p className="mt-1 text-xs leading-relaxed text-text-primary/70">
-                      {result.rationale}
-                    </p>
-                  )}
-                </div>
-              ))
-            ) : (
-              <p className="text-sm text-text-secondary">
-                No hay datos extraidos para esta llamada.
-              </p>
-            )}
-          </div>
-        </div>
-      </div>
+      <section>
+        <h3 className={subsectionTitleClass}>Datos extraídos</h3>
+        {dataResults.length > 0 ? (
+          <dl className="mt-2 divide-y divide-border-subtle">
+            {dataResults.map(([key, result]) => (
+              <div key={key} className="py-3">
+                <dt className="text-xs font-medium text-text-tertiary">{key}</dt>
+                <dd className="mt-0.5 text-sm text-text-primary">
+                  {result.value === null || result.value === undefined ? '—' : String(result.value)}
+                </dd>
+                {result.rationale && (
+                  <dd className="mt-1 text-sm leading-relaxed text-text-secondary">{result.rationale}</dd>
+                )}
+              </div>
+            ))}
+          </dl>
+        ) : (
+          <p className="mt-2 text-sm text-text-secondary">No se extrajeron datos de esta llamada.</p>
+        )}
+      </section>
     </div>
   )
 }
@@ -329,10 +293,11 @@ function ConversationDetailModal({
 }) {
   const queryClient = useQueryClient()
   const [proxyAudioUrl, setProxyAudioUrl] = useState<string | null>(null)
+  const safeId = conversationId
 
   const { data, isLoading } = useQuery({
-    queryKey: ['conversation', conversationId],
-    queryFn: () => getConversationDetail(conversationId),
+    queryKey: ['conversation', safeId],
+    queryFn: () => getConversationDetail(safeId),
   })
 
   const detailAudioUrl = getConversationAudioUrl(data)
@@ -341,8 +306,8 @@ function ConversationDetailModal({
     data: proxyAudioBlob,
     isLoading: isLoadingProxyAudio,
   } = useQuery({
-    queryKey: ['conversation-audio', conversationId],
-    queryFn: () => getConversationAudioBlob(conversationId),
+    queryKey: ['conversation-audio', safeId],
+    queryFn: () => getConversationAudioBlob(safeId),
     enabled: !isLoading && !detailAudioUrl,
     retry: false,
   })
@@ -365,198 +330,145 @@ function ConversationDetailModal({
 
   const conversationAudioUrl = detailAudioUrl ?? proxyAudioUrl
   const callDurationSecs = data?.metadata?.call_duration_secs
-  const audioSourceLabel = detailAudioUrl ? 'Directo' : proxyAudioBlob ? 'Proxy' : null
 
   const { mutate: rerunAnalysis, isPending: isReanalyzing } = useMutation({
-    mutationFn: () => runConversationAnalysis(conversationId),
+    mutationFn: () => runConversationAnalysis(safeId),
     onSuccess: () => {
-      toast.success('Analisis relanzado')
-      queryClient.invalidateQueries({ queryKey: ['conversation', conversationId] })
+      toast.success('Análisis en proceso. Los resultados se actualizarán en unos segundos.')
+      queryClient.invalidateQueries({ queryKey: ['conversation', safeId] })
     },
-    onError: (error: Error) => toast.error(error.message),
+    onError: (error: Error) =>
+      toast.error(describeError(error, 'No pudimos volver a analizar la llamada.')),
   })
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
-      <div className="mx-4 flex max-h-[85vh] w-full max-w-5xl flex-col rounded-xl border border-border-default bg-surface shadow-lg">
-        <div className="flex items-center justify-between border-b border-border-default px-5 py-4">
-          <div>
-            <h3 className="text-sm font-medium text-text-primary">
-              Conversacion
-            </h3>
-            <p className="font-mono text-xs text-text-secondary">
-              {conversationId}
+    <Modal
+      open
+      onClose={onClose}
+      size="xl"
+      title="Detalle de la llamada"
+      description={
+        callDurationSecs !== undefined ? (
+          <span className="tabular-nums">Duración {formatDuration(callDurationSecs)}</span>
+        ) : undefined
+      }
+      footer={
+        <>
+          <Button
+            variant="outline"
+            onClick={() => rerunAnalysis()}
+            isLoading={isReanalyzing}
+            leftIcon={<ArrowPathIcon className="h-4 w-4" aria-hidden="true" />}
+          >
+            {isReanalyzing ? 'Analizando…' : 'Volver a analizar'}
+          </Button>
+          <Button variant="ghost" onClick={onClose}>
+            Cerrar
+          </Button>
+        </>
+      }
+    >
+      <div className="grid gap-8 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
+        <div className="space-y-5">
+          {isLoading ? (
+            <p role="status" className="py-8 text-sm text-text-secondary">
+              Cargando la llamada…
             </p>
-          </div>
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => rerunAnalysis()}
-              disabled={isReanalyzing}
-              className="inline-flex items-center gap-2 rounded-lg border border-[#271173]/30 px-3 py-2 text-xs font-medium text-primary-600 transition-colors hover:border-[#271173]/50 hover:bg-primary-50 disabled:opacity-60"
-            >
-              <ArrowPathIcon
-                className={`h-4 w-4 ${isReanalyzing ? 'animate-spin' : ''}`}
-              />
-              {isReanalyzing ? 'Recalculando...' : 'Recalcular analisis'}
-            </button>
-            <button
-              type="button"
-              onClick={onClose}
-              className="text-text-secondary transition-colors hover:text-primary-600"
-            >
-              <XMarkIcon className="h-5 w-5" />
-            </button>
-          </div>
-        </div>
-
-        <div className="grid flex-1 gap-0 overflow-hidden lg:grid-cols-[1.2fr_1fr]">
-          <div className="overflow-y-auto border-b border-border-default p-5 lg:border-b-0 lg:border-r">
-            {isLoading ? (
-              <div className="flex h-32 items-center justify-center text-sm text-text-primary/70">
-                Cargando conversacion...
-              </div>
-            ) : (
-              <div className="space-y-3">
+          ) : (
+            <>
+              <section className="space-y-3">
+                <h3 className={subsectionTitleClass}>Audio</h3>
                 {conversationAudioUrl ? (
-                  <div className="overflow-hidden rounded-2xl border border-[#dcd7f0] bg-surface shadow-sm">
-                    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#ece8f9] bg-linear-to-r from-[#f8f5ff] to-[#f1ecff] px-4 py-3">
-                      <div className="flex items-center gap-3">
-                        <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-primary-600/10 text-primary-600">
-                          <SpeakerWaveIcon className="h-5 w-5" />
-                        </span>
-                        <div>
-                          <p className="text-xs font-semibold uppercase tracking-[0.15em] text-primary-600">
-                            Audio de la llamada
-                          </p>
-                          <p className="text-xs text-text-secondary">
-                            Reproduce y valida esta conversacion sin salir del analisis.
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="inline-flex flex-wrap items-center gap-2">
-                        {callDurationSecs !== undefined && (
-                          <span className="inline-flex items-center gap-1 rounded-full border border-[#d9d3ef] bg-surface px-2.5 py-1 text-[11px] font-medium text-text-primary/70">
-                            <ClockIcon className="h-3.5 w-3.5 text-primary-600" />
-                            {formatDuration(callDurationSecs)}
-                          </span>
-                        )}
-                        {audioSourceLabel && (
-                          <span className="inline-flex items-center rounded-full border border-[#d9d3ef] bg-surface px-2.5 py-1 text-[11px] font-medium text-text-primary/70">
-                            Fuente: {audioSourceLabel}
-                          </span>
-                        )}
-                      </div>
+                  <>
+                    <audio controls preload="none" className="w-full" aria-label="Audio de la llamada">
+                      <source src={conversationAudioUrl} />
+                      Su navegador no puede reproducir este audio.
+                    </audio>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <a
+                        href={conversationAudioUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-medium text-primary-700 hover:bg-primary-50"
+                      >
+                        <ArrowTopRightOnSquareIcon className="h-4 w-4" aria-hidden="true" />
+                        Abrir en otra pestaña
+                      </a>
+                      <a
+                        href={conversationAudioUrl}
+                        download={`llamada-${safeId}.audio`}
+                        className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-medium text-primary-700 hover:bg-primary-50"
+                      >
+                        <ArrowDownTrayIcon className="h-4 w-4" aria-hidden="true" />
+                        Descargar
+                      </a>
                     </div>
-
-                    <div className="space-y-3 p-4">
-                      <audio controls preload="none" className="w-full">
-                        <source src={conversationAudioUrl} />
-                        Tu navegador no soporta audio HTML5.
-                      </audio>
-
-                      <div className="flex flex-wrap items-center gap-2">
-                        <a
-                          href={conversationAudioUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex items-center gap-1.5 rounded-lg border border-[#271173]/30 bg-surface px-3 py-1.5 text-xs font-medium text-primary-600 transition-colors hover:bg-primary-50/60"
-                        >
-                          Abrir en pestana
-                        </a>
-                        <a
-                          href={conversationAudioUrl}
-                          download={`conversation-${conversationId}.audio`}
-                          className="inline-flex items-center gap-1.5 rounded-lg border border-[#271173]/30 bg-surface px-3 py-1.5 text-xs font-medium text-primary-600 transition-colors hover:bg-primary-50/60"
-                        >
-                          <ArrowDownTrayIcon className="h-3.5 w-3.5" />
-                          Descargar
-                        </a>
-                      </div>
-                    </div>
-                  </div>
+                  </>
                 ) : isLoadingProxyAudio ? (
-                  <div className="rounded-2xl border border-[#dcd7f0] bg-[#f8f5ff] p-4">
-                    <div className="animate-pulse space-y-3">
-                      <div className="h-3.5 w-48 rounded-full bg-[#dcd7f0]" />
-                      <div className="h-11 w-full rounded-xl bg-[#e8e3f8]" />
-                      <div className="h-7 w-36 rounded-lg bg-[#e8e3f8]" />
-                    </div>
-                    <p className="mt-3 text-xs text-text-secondary">
-                      Cargando audio de la conversacion...
-                    </p>
-                  </div>
+                  <p role="status" className="text-sm text-text-secondary">
+                    Cargando el audio…
+                  </p>
                 ) : (
-                  <div className="rounded-2xl border border-dashed border-[#dcd7f0] bg-bg-secondary p-4 text-xs text-text-secondary">
-                    <p className="font-medium text-text-primary/70">Audio no disponible</p>
-                    <p className="mt-1">
-                      Esta conversacion no incluye archivo de audio o no fue posible recuperarlo.
-                    </p>
-                  </div>
-                )}
-
-                {data?.transcript?.map((msg, idx) => (
-                  <div
-                    key={idx}
-                    className={`flex gap-3 ${msg.role === 'agent' ? '' : 'flex-row-reverse'}`}
-                  >
-                    <div
-                      className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-medium ${
-                        msg.role === 'agent'
-                          ? 'bg-primary-600 text-white'
-                          : 'bg-gray-100 text-text-primary/70'
-                      }`}
-                    >
-                      {msg.role === 'agent' ? 'A' : 'U'}
-                    </div>
-                    <div
-                      className={`max-w-[78%] rounded-xl px-3.5 py-2.5 text-sm ${
-                        msg.role === 'agent'
-                          ? 'bg-[#f5f3ff] text-text-primary'
-                          : 'border border-gray-200 bg-gray-50 text-text-primary/85'
-                      }`}
-                    >
-                      <div className="mb-1 flex items-center justify-between gap-2">
-                        <span className="text-[11px] font-medium uppercase tracking-wide text-text-muted">
-                          {msg.role === 'agent' ? 'Agente' : 'Usuario'}
-                        </span>
-                        {msg.time_in_call_secs !== undefined && (
-                          <span className="rounded-full border border-border-default bg-surface px-2 py-0.5 text-[11px] font-medium text-text-secondary">
-                            {formatDuration(msg.time_in_call_secs)}
-                          </span>
-                        )}
-                      </div>
-                      <p>{msg.message}</p>
-                    </div>
-                  </div>
-                ))}
-                {!data?.transcript?.length && (
-                  <p className="py-8 text-center text-sm text-text-secondary">
-                    Sin transcripcion disponible.
+                  <p className="text-sm text-text-secondary">
+                    Esta llamada no tiene audio disponible. Revise que la grabación de llamadas
+                    esté activa para este agente.
                   </p>
                 )}
-              </div>
-            )}
-          </div>
+              </section>
 
-          <div className="overflow-y-auto p-5">
-            {isLoading || !data ? (
-              <div className="flex h-32 items-center justify-center text-sm text-text-primary/70">
-                Cargando analisis...
-              </div>
-            ) : (
-              <AnalysisSummary detail={data} />
-            )}
-          </div>
+              <section className="space-y-3">
+                <h3 className={subsectionTitleClass}>Transcripción</h3>
+                {data?.transcript?.length ? (
+                  <ol className="space-y-3">
+                    {data.transcript.map((msg, idx) => {
+                      const isAgent = msg.role === 'agent'
+                      return (
+                        <li key={idx} className={cn('flex', isAgent ? 'justify-start' : 'justify-end')}>
+                          <div
+                            className={cn(
+                              'max-w-[85%] rounded-xl px-3.5 py-2.5 text-sm',
+                              isAgent
+                                ? 'bg-primary-50 text-text-primary'
+                                : 'border border-border-default bg-surface-muted text-text-primary',
+                            )}
+                          >
+                            <div className="mb-1 flex items-center justify-between gap-3 text-xs text-text-tertiary">
+                              <span className="font-medium">{isAgent ? 'Agente' : 'Cliente'}</span>
+                              {msg.time_in_call_secs !== undefined && (
+                                <span className="tabular-nums">{formatDuration(msg.time_in_call_secs)}</span>
+                              )}
+                            </div>
+                            <p className="leading-relaxed">{msg.message}</p>
+                          </div>
+                        </li>
+                      )
+                    })}
+                  </ol>
+                ) : (
+                  <p className="text-sm text-text-secondary">Esta llamada no tiene transcripción.</p>
+                )}
+              </section>
+            </>
+          )}
+        </div>
+
+        <div className="lg:border-l lg:border-border-subtle lg:pl-8">
+          {isLoading || !data ? (
+            <p role="status" className="py-8 text-sm text-text-secondary">
+              Cargando el análisis…
+            </p>
+          ) : (
+            <AnalysisSummary detail={data} />
+          )}
         </div>
       </div>
-    </div>
+    </Modal>
   )
 }
 
 export default function AnalysisTab({ agentId, agent, onUpdate, isClient = false }: Props) {
   const queryClient = useQueryClient()
+  const baseId = useId()
   const [selectedConv, setSelectedConv] = useState<string | null>(null)
   const [conversationCursor, setConversationCursor] = useState<string | null>(null)
   const [conversationCursorHistory, setConversationCursorHistory] = useState<string[]>([])
@@ -566,7 +478,6 @@ export default function AnalysisTab({ agentId, agent, onUpdate, isClient = false
   const [dataCollection, setDataCollection] = useState<EditableDataField[]>([
     createEmptyDataField(),
   ])
-  const [animatingTypeFieldId, setAnimatingTypeFieldId] = useState<string | null>(null)
 
   // Sync agent config to state (setState-during-render pattern)
   const [lastAgent, setLastAgent] = useState(agent)
@@ -589,7 +500,7 @@ export default function AnalysisTab({ agentId, agent, onUpdate, isClient = false
     setConversationCursorHistory([])
   }
 
-  const { data, isLoading, isFetching } = useQuery({
+  const { data, isLoading, isFetching, isError, error, refetch } = useQuery({
     queryKey: ['conversations', agentId, conversationCursor, CONVERSATIONS_PAGE_SIZE],
     queryFn: () =>
       getConversations(agentId, {
@@ -628,11 +539,6 @@ export default function AnalysisTab({ agentId, agent, onUpdate, isClient = false
     (conversation) => getConversationMessageCount(conversation) !== undefined
   )
 
-  const maxCallDurationSecs = Math.max(
-    1,
-    ...conversations.map((conversation) => conversation.call_duration_secs ?? 0)
-  )
-
   const goToNextPage = () => {
     if (!nextCursor || isFetching) return
     setConversationCursorHistory((prev) => [...prev, conversationCursor ?? ''])
@@ -649,18 +555,13 @@ export default function AnalysisTab({ agentId, agent, onUpdate, isClient = false
     setConversationCursor(previousCursor || null)
   }
 
-  const handleDataFieldTypeChange = (fieldId: string, nextType: string) => {
-    setDataCollection((prev) =>
-      prev.map((item) =>
-        item.localId === fieldId ? { ...item, type: nextType } : item
-      )
-    )
+  const updateCriterion = (localId: string, patch: Partial<EditableCriterion>) =>
+    setCriteria((prev) => prev.map((item) => (item.localId === localId ? { ...item, ...patch } : item)))
 
-    setAnimatingTypeFieldId(fieldId)
-    setTimeout(() => {
-      setAnimatingTypeFieldId((current) => (current === fieldId ? null : current))
-    }, 140)
-  }
+  const updateDataField = (localId: string, patch: Partial<EditableDataField>) =>
+    setDataCollection((prev) =>
+      prev.map((item) => (item.localId === localId ? { ...item, ...patch } : item))
+    )
 
   const serializedCriteria = useMemo(
     () =>
@@ -714,102 +615,199 @@ export default function AnalysisTab({ agentId, agent, onUpdate, isClient = false
         },
       }),
     onSuccess: () => {
-      toast.success('Analisis guardado')
+      toast.success('Configuración del análisis guardada')
       queryClient.invalidateQueries({ queryKey: ['agent', agentId] })
       onUpdate()
     },
-    onError: (error: Error) => toast.error(error.message),
+    onError: (err: Error) =>
+      toast.error(describeError(err, 'No pudimos guardar el análisis. Intente de nuevo.')),
   })
 
-  return (
-    <div className="space-y-6">
-      {!isClient && (
-      <div className={`${cardClass} p-5`}>
-        <div className="mb-5 flex flex-col gap-3 border-b border-border-default pb-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <h3 className="text-sm font-medium text-text-primary">
-              Configuracion de analisis
-            </h3>
-            <p className="mt-1 text-xs text-text-secondary">
-              Guarda criterios de evaluacion, campos de extraccion y el idioma
-              de los resumentes post-llamada usando la configuracion actual de
-              la plataforma.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => saveAnalysis()}
-            disabled={isSaving}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary-700 disabled:opacity-60"
-          >
-            {isSaving && (
-              <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
-            )}
-            {isSaving ? 'Guardando...' : 'Guardar analisis'}
-          </button>
-        </div>
+  const segmentClass = (active: boolean) =>
+    cn(
+      'rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
+      active ? 'bg-surface text-primary-700 shadow-sm' : 'text-text-secondary hover:text-text-primary',
+    )
 
-        <div className="space-y-6">
-          <div className="inline-flex rounded-xl border border-border-default bg-[#f5f3ff] p-1">
-            {([
-              { id: 'criteria', label: 'Criterios' },
-              { id: 'data', label: 'Datos' },
-              { id: 'language', label: 'Idioma' },
-            ] as { id: ConfigTab; label: string }[]).map((tab) => (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setActiveConfigTab(tab.id)}
-                className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
-                  activeConfigTab === tab.id
-                    ? 'bg-primary-600 text-white'
-                    : 'text-text-secondary hover:text-primary-600'
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
+  return (
+    <div className="space-y-10">
+      <section aria-labelledby={`${baseId}-history`} className="space-y-4">
+        <SectionHeading
+          id={`${baseId}-history`}
+          title="Historial de llamadas"
+          description="Abra una llamada para escuchar el audio, leer la transcripción y ver su resumen."
+          action={
+            (conversations.length > 0 || hasPreviousPage) && (
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-text-secondary tabular-nums">Página {currentPage}</span>
+                <button
+                  type="button"
+                  onClick={goToPreviousPage}
+                  disabled={!hasPreviousPage || isFetching}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border-default text-text-secondary transition-colors hover:bg-primary-50 hover:text-primary-700 disabled:cursor-not-allowed disabled:opacity-40"
+                  aria-label="Página anterior"
+                >
+                  <ChevronLeftIcon className="h-4 w-4" aria-hidden="true" />
+                </button>
+                <button
+                  type="button"
+                  onClick={goToNextPage}
+                  disabled={!hasNextPage || isFetching}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border-default text-text-secondary transition-colors hover:bg-primary-50 hover:text-primary-700 disabled:cursor-not-allowed disabled:opacity-40"
+                  aria-label="Página siguiente"
+                >
+                  <ChevronRightIcon className="h-4 w-4" aria-hidden="true" />
+                </button>
+              </div>
+            )
+          }
+        />
+
+        <div className="overflow-hidden rounded-xl border border-border-default bg-surface">
+          {isLoading ? (
+            <p role="status" className="flex h-32 items-center justify-center gap-2 text-sm text-text-secondary">
+              <span
+                aria-hidden="true"
+                className="h-4 w-4 animate-spin rounded-full border-2 border-primary-600 border-t-transparent"
+              />
+              Cargando llamadas…
+            </p>
+          ) : isError ? (
+            <div className="flex flex-col items-start gap-3 px-6 py-8">
+              <p className="text-sm font-medium text-text-primary">El historial no está disponible</p>
+              <p className="max-w-[60ch] text-sm text-text-secondary">
+                {describeError(error, 'Intente de nuevo en unos minutos.')}
+              </p>
+              <Button type="button" variant="outline" size="sm" onClick={() => refetch()} isLoading={isFetching}>
+                Reintentar
+              </Button>
+            </div>
+          ) : conversations.length === 0 ? (
+            <div className="px-6 py-10 text-center">
+              <p className="text-sm font-medium text-text-primary">Aún no hay llamadas registradas</p>
+              <p className="mx-auto mt-1 max-w-[50ch] text-sm text-text-secondary">
+                Cuando el agente atienda su primera llamada, la verá aquí con su resumen.
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[560px] text-left">
+                <thead>
+                  <tr className="border-b border-border-default bg-surface-muted text-xs font-medium text-text-tertiary">
+                    <th scope="col" className="px-5 py-3 font-medium">Inicio</th>
+                    <th scope="col" className="px-5 py-3 font-medium">Duración</th>
+                    {hasMessagesColumn && (
+                      <th scope="col" className="px-5 py-3 font-medium">Mensajes</th>
+                    )}
+                    <th scope="col" className="px-5 py-3 font-medium">Estado</th>
+                    <th scope="col" className="px-5 py-3">
+                      <span className="sr-only">Acciones</span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border-subtle">
+                  {conversations.map((conv) => {
+                    const status = describeCallStatus(conv.status)
+                    const startedAt = formatDate(conv.start_time_unix_secs)
+                    return (
+                      <tr
+                        key={conv.conversation_id}
+                        className="cursor-pointer transition-colors hover:bg-primary-50/60"
+                        onClick={() => setSelectedConv(conv.conversation_id)}
+                      >
+                        <td className="px-5 py-3.5 text-sm text-text-primary">{startedAt}</td>
+                        <td className="px-5 py-3.5 text-sm text-text-secondary">
+                          {formatDuration(conv.call_duration_secs)}
+                        </td>
+                        {hasMessagesColumn && (
+                          <td className="px-5 py-3.5 text-sm text-text-secondary">
+                            {getConversationMessageCount(conv) ?? '—'}
+                          </td>
+                        )}
+                        <td className="px-5 py-3.5">
+                          <Badge variant={status.variant} size="sm">
+                            {status.label}
+                          </Badge>
+                        </td>
+                        <td className="px-5 py-3.5 text-right">
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              setSelectedConv(conv.conversation_id)
+                            }}
+                            aria-label={`Ver la llamada del ${startedAt}`}
+                            className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-sm font-medium text-primary-700 hover:bg-primary-50"
+                          >
+                            Ver
+                            <ChevronRightIcon className="h-4 w-4" aria-hidden="true" />
+                          </button>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </section>
+
+      {!isClient && (
+        <AdvancedSection
+          defaultOpen
+          title="Configuración del análisis"
+          description="Qué evalúa la plataforma y qué datos extrae después de cada llamada."
+        >
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div role="group" aria-label="Parte del análisis" className="inline-flex flex-wrap rounded-lg border border-border-default bg-surface-muted p-1">
+              {CONFIG_TABS.map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  aria-pressed={activeConfigTab === tab.id}
+                  onClick={() => setActiveConfigTab(tab.id)}
+                  className={segmentClass(activeConfigTab === tab.id)}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+            <Button type="button" variant="secondary" onClick={() => saveAnalysis()} isLoading={isSaving}>
+              {isSaving ? 'Guardando…' : 'Guardar análisis'}
+            </Button>
           </div>
 
           {activeConfigTab === 'criteria' && (
             <div className="space-y-4">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-sm font-medium text-text-primary">
-                    Criterios de evaluacion
-                  </p>
-                  <p className="mt-1 text-xs text-text-secondary">
-                    Cada criterio se guarda en
-                    <span className="mx-1 rounded bg-[#f0edff] px-1.5 py-0.5 font-mono text-[11px] text-text-primary/70">
-                      platform_settings.evaluation.criteria
-                    </span>
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setCriteria((prev) => [...prev, createEmptyCriterion()])
-                  }
-                  className="inline-flex items-center gap-2 rounded-lg border border-[#271173]/30 px-3 py-2 text-xs font-medium text-primary-600 transition-colors hover:border-[#271173]/50 hover:bg-primary-50"
-                >
-                  <PlusIcon className="h-4 w-4" />
-                  Agregar criterio
-                </button>
-              </div>
+              <SectionHeading
+                as="h3"
+                title="Criterios de evaluación"
+                description="Cada criterio indica si la llamada cumplió un objetivo, por ejemplo «resolvió la consulta»."
+                action={
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCriteria((prev) => [...prev, createEmptyCriterion()])}
+                    leftIcon={<PlusIcon className="h-4 w-4" aria-hidden="true" />}
+                  >
+                    Agregar criterio
+                  </Button>
+                }
+              />
 
-              <div className="space-y-3">
+              <ol className="divide-y divide-border-default rounded-xl border border-border-default bg-surface">
                 {criteria.map((criterion, index) => {
                   const isConversationScope = criterion.scope === 'conversation'
+                  const scopeLabelId = `${baseId}-scope-${criterion.localId}`
 
                   return (
-                    <div key={criterion.localId} className="rounded-xl border border-border-default bg-[#f5f3ff] p-4">
-                      <div className="mb-3 flex items-center justify-between gap-3">
-                        <div className="flex items-center gap-2.5">
-                          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary-600 text-xs font-bold text-white">
-                            {index + 1}
-                          </span>
-                          <p className="text-sm font-medium text-text-primary">Criterio</p>
-                        </div>
+                    <li key={criterion.localId} className="space-y-4 p-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-sm font-semibold text-text-primary tabular-nums">
+                          Criterio {index + 1}
+                        </p>
                         <button
                           type="button"
                           onClick={() =>
@@ -819,412 +817,218 @@ export default function AnalysisTab({ agentId, agent, onUpdate, isClient = false
                                 : prev.filter((item) => item.localId !== criterion.localId)
                             )
                           }
-                          className="rounded-md p-1.5 text-text-secondary transition-colors hover:bg-danger-50 hover:text-danger-600"
+                          aria-label={`Eliminar criterio ${index + 1}`}
+                          className="rounded-lg p-1.5 text-text-tertiary transition-colors hover:bg-danger-50 hover:text-danger-700"
                         >
-                          <TrashIcon className="h-4 w-4" />
+                          <TrashIcon className="h-4 w-4" aria-hidden="true" />
                         </button>
                       </div>
 
-                      <div className="grid gap-3 lg:grid-cols-[1fr_220px]">
-                        <div>
-                          <label className="mb-1.5 block text-xs font-medium text-text-primary/70">
-                            Identificador
-                          </label>
-                          <input
-                            type="text"
-                            value={criterion.identifier}
-                            onChange={(event) =>
-                              setCriteria((prev) =>
-                                prev.map((item) =>
-                                  item.localId === criterion.localId
-                                    ? { ...item, identifier: event.target.value }
-                                    : item
-                                )
-                              )
-                            }
-                            placeholder="resolvio_objetivo"
-                            className={inputClass}
-                          />
-                        </div>
+                      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto]">
+                        <Field label="Nombre del criterio" help="Sin espacios; se usa como identificador.">
+                          {(control) => (
+                            <input
+                              {...control}
+                              type="text"
+                              value={criterion.identifier}
+                              onChange={(event) =>
+                                updateCriterion(criterion.localId, { identifier: event.target.value })
+                              }
+                              placeholder="resolvio_consulta"
+                              className={inputClass}
+                            />
+                          )}
+                        </Field>
 
                         <div>
-                          <label className="mb-1.5 block text-xs font-medium text-text-primary/70">
-                            Scope
-                          </label>
-                          <div className="inline-flex rounded-xl border border-border-default bg-surface p-1">
+                          <p id={scopeLabelId} className="text-sm font-medium text-text-primary">
+                            Alcance
+                          </p>
+                          <p className="mt-0.5 text-xs text-text-tertiary">Qué parte de la llamada se evalúa.</p>
+                          <div
+                            role="group"
+                            aria-labelledby={scopeLabelId}
+                            className="mt-2 inline-flex rounded-lg border border-border-default bg-surface-muted p-1"
+                          >
                             <button
                               type="button"
-                              onClick={() =>
-                                setCriteria((prev) =>
-                                  prev.map((item) =>
-                                    item.localId === criterion.localId
-                                      ? { ...item, scope: 'conversation' }
-                                      : item
-                                  )
-                                )
-                              }
-                              className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
-                                isConversationScope
-                                  ? 'bg-primary-600 text-white'
-                                  : 'text-text-secondary hover:text-primary-600'
-                              }`}
+                              aria-pressed={isConversationScope}
+                              onClick={() => updateCriterion(criterion.localId, { scope: 'conversation' })}
+                              className={segmentClass(isConversationScope)}
                             >
-                              conversation
+                              Toda la conversación
                             </button>
                             <button
                               type="button"
-                              onClick={() =>
-                                setCriteria((prev) =>
-                                  prev.map((item) =>
-                                    item.localId === criterion.localId
-                                      ? { ...item, scope: secondaryScopeValue }
-                                      : item
-                                  )
-                                )
-                              }
-                              className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
-                                !isConversationScope
-                                  ? 'bg-primary-600 text-white'
-                                  : 'text-text-secondary hover:text-primary-600'
-                              }`}
+                              aria-pressed={!isConversationScope}
+                              onClick={() => updateCriterion(criterion.localId, { scope: secondaryScopeValue })}
+                              className={segmentClass(!isConversationScope)}
                             >
-                              turn
+                              Respuestas del agente
                             </button>
                           </div>
                         </div>
                       </div>
 
-                      <div className="mt-3">
-                        <label className="mb-1.5 block text-xs font-medium text-text-primary/70">
-                          Instruccion de evaluacion
-                        </label>
-                        <textarea
-                          rows={3}
-                          value={criterion.prompt}
-                          onChange={(event) =>
-                            setCriteria((prev) =>
-                              prev.map((item) =>
-                                item.localId === criterion.localId
-                                  ? { ...item, prompt: event.target.value }
-                                  : item
-                              )
-                            )
-                          }
-                          placeholder="Define exactamente que debe revisar la plataforma en la conversacion."
-                          className={textareaClass}
-                        />
-                      </div>
+                      <Field label="Qué debe evaluar">
+                        {(control) => (
+                          <textarea
+                            {...control}
+                            rows={3}
+                            value={criterion.prompt}
+                            onChange={(event) =>
+                              updateCriterion(criterion.localId, { prompt: event.target.value })
+                            }
+                            placeholder="Describa con precisión qué se debe revisar en la llamada."
+                            className={textareaClass}
+                          />
+                        )}
+                      </Field>
 
-                      <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-border-default bg-surface px-3 py-2.5">
-                        <p className="text-xs text-text-primary/70">
-                          Usar knowledge base durante esta evaluacion
-                        </p>
-                        <TogglePill
-                          enabled={criterion.useKnowledgeBase}
-                          onToggle={() =>
-                            setCriteria((prev) =>
-                              prev.map((item) =>
-                                item.localId === criterion.localId
-                                  ? {
-                                      ...item,
-                                      useKnowledgeBase: !item.useKnowledgeBase,
-                                    }
-                                  : item
-                              )
-                            )
-                          }
-                        />
-                      </div>
-                    </div>
+                      <SwitchField
+                        label="Usar la base de conocimiento al evaluar"
+                        checked={criterion.useKnowledgeBase}
+                        onChange={(next) => updateCriterion(criterion.localId, { useKnowledgeBase: next })}
+                      />
+                    </li>
                   )
                 })}
-              </div>
+              </ol>
             </div>
           )}
 
           {activeConfigTab === 'data' && (
             <div className="space-y-4">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-sm font-medium text-text-primary">
-                    Recopilacion de datos
-                  </p>
-                  <p className="mt-1 text-xs text-text-secondary">
-                    la plataforma soporta tipos string, boolean, integer y number
-                    para la extraccion estructurada.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setDataCollection((prev) => [...prev, createEmptyDataField()])
-                  }
-                  className="inline-flex items-center gap-2 rounded-lg border border-[#271173]/30 px-3 py-2 text-xs font-medium text-primary-600 transition-colors hover:border-[#271173]/50 hover:bg-primary-50"
-                >
-                  <PlusIcon className="h-4 w-4" />
-                  Agregar campo
-                </button>
-              </div>
+              <SectionHeading
+                as="h3"
+                title="Datos a extraer"
+                description="Información que la plataforma toma de cada llamada, como el correo o el motivo de contacto."
+                action={
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setDataCollection((prev) => [...prev, createEmptyDataField()])}
+                    leftIcon={<PlusIcon className="h-4 w-4" aria-hidden="true" />}
+                  >
+                    Agregar dato
+                  </Button>
+                }
+              />
 
-              <div className="space-y-3">
-                {dataCollection.map((field, index) => (
-                  <div key={field.localId} className="rounded-xl border border-border-default bg-[#f5f3ff] p-4">
-                    <div className="mb-3 flex items-center justify-between gap-3">
-                      <p className="text-sm font-medium text-text-primary">
-                        Campo {index + 1}
-                      </p>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setDataCollection((prev) =>
-                            prev.length === 1
-                              ? [createEmptyDataField()]
-                              : prev.filter((item) => item.localId !== field.localId)
-                          )
-                        }
-                        className="rounded-md p-1.5 text-text-secondary transition-colors hover:bg-danger-50 hover:text-danger-600"
-                      >
-                        <TrashIcon className="h-4 w-4" />
-                      </button>
-                    </div>
-
-                    <div className="grid gap-3 lg:grid-cols-[1fr_260px]">
-                      <div>
-                        <label className="mb-1.5 block text-xs font-medium text-text-primary/70">
-                          Identificador
-                        </label>
-                        <input
-                          type="text"
-                          value={field.identifier}
-                          onChange={(event) =>
+              <ol className="divide-y divide-border-default rounded-xl border border-border-default bg-surface">
+                {dataCollection.map((field, index) => {
+                  const typeLabelId = `${baseId}-type-${field.localId}`
+                  return (
+                    <li key={field.localId} className="space-y-4 p-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-sm font-semibold text-text-primary tabular-nums">Dato {index + 1}</p>
+                        <button
+                          type="button"
+                          onClick={() =>
                             setDataCollection((prev) =>
-                              prev.map((item) =>
-                                item.localId === field.localId
-                                  ? { ...item, identifier: event.target.value }
-                                  : item
-                              )
+                              prev.length === 1
+                                ? [createEmptyDataField()]
+                                : prev.filter((item) => item.localId !== field.localId)
                             )
                           }
-                          placeholder="email_cliente"
-                          className={inputClass}
-                        />
+                          aria-label={`Eliminar dato ${index + 1}`}
+                          className="rounded-lg p-1.5 text-text-tertiary transition-colors hover:bg-danger-50 hover:text-danger-700"
+                        >
+                          <TrashIcon className="h-4 w-4" aria-hidden="true" />
+                        </button>
                       </div>
 
-                      <div>
-                        <label className="mb-1.5 block text-xs font-medium text-text-primary/70">
-                          Tipo
-                        </label>
-                        <div className="inline-flex flex-wrap rounded-xl border border-border-default bg-surface p-1">
-                          {DATA_COLLECTION_TYPES.map((option) => (
-                            <button
-                              key={option.value}
-                              type="button"
-                              onClick={() =>
-                                handleDataFieldTypeChange(field.localId, option.value)
+                      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto]">
+                        <Field label="Nombre del dato" help="Sin espacios; se usa como identificador.">
+                          {(control) => (
+                            <input
+                              {...control}
+                              type="text"
+                              value={field.identifier}
+                              onChange={(event) =>
+                                updateDataField(field.localId, { identifier: event.target.value })
                               }
-                              className={`rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all duration-150 ${
-                                field.type === option.value
-                                  ? 'bg-primary-600 text-white'
-                                  : 'bg-[#f5f3ff] text-text-secondary'
-                              } ${
-                                animatingTypeFieldId === field.localId && field.type === option.value
-                                  ? 'scale-95'
-                                  : 'scale-100'
-                              }`}
-                            >
-                              {option.value}
-                            </button>
-                          ))}
+                              placeholder="correo_cliente"
+                              className={inputClass}
+                            />
+                          )}
+                        </Field>
+
+                        <div>
+                          <p id={typeLabelId} className="text-sm font-medium text-text-primary">
+                            Tipo
+                          </p>
+                          <p className="mt-0.5 text-xs text-text-tertiary">Formato del valor extraído.</p>
+                          <div
+                            role="group"
+                            aria-labelledby={typeLabelId}
+                            className="mt-2 inline-flex flex-wrap rounded-lg border border-border-default bg-surface-muted p-1"
+                          >
+                            {DATA_COLLECTION_TYPES.map((option) => (
+                              <button
+                                key={option.value}
+                                type="button"
+                                aria-pressed={field.type === option.value}
+                                onClick={() => updateDataField(field.localId, { type: option.value })}
+                                className={segmentClass(field.type === option.value)}
+                              >
+                                {DATA_TYPE_LABELS[option.value] ?? option.label}
+                              </button>
+                            ))}
+                          </div>
                         </div>
                       </div>
-                    </div>
 
-                    <div className="mt-3">
-                      <label className="mb-1.5 block text-xs font-medium text-text-primary/70">
-                        Descripcion
-                      </label>
-                      <textarea
-                        rows={3}
-                        value={field.description}
-                        onChange={(event) =>
-                          setDataCollection((prev) =>
-                            prev.map((item) =>
-                              item.localId === field.localId
-                                ? { ...item, description: event.target.value }
-                                : item
-                            )
-                          )
-                        }
-                        placeholder="Indica exactamente que debe extraerse y como debe formatearse."
-                        className={textareaClass}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
+                      <Field label="Descripción">
+                        {(control) => (
+                          <textarea
+                            {...control}
+                            rows={3}
+                            value={field.description}
+                            onChange={(event) =>
+                              updateDataField(field.localId, { description: event.target.value })
+                            }
+                            placeholder="Indique qué se debe extraer y en qué formato."
+                            className={textareaClass}
+                          />
+                        )}
+                      </Field>
+                    </li>
+                  )
+                })}
+              </ol>
             </div>
           )}
 
           {activeConfigTab === 'language' && (
-            <div className="max-w-sm">
-              <label className="mb-1.5 block text-sm font-medium text-text-primary">
-                Idioma del analisis
-              </label>
-              <p className="mb-3 text-xs text-text-secondary">
-                Se guarda en
-                <span className="mx-1 rounded bg-[#f0edff] px-1.5 py-0.5 font-mono text-[11px] text-text-primary/70">
-                  platform_settings.summary_language
-                </span>
-                para definir el idioma del resumen post-conversacion.
-              </p>
-              <select
-                value={analysisLanguage}
-                onChange={(event) => setAnalysisLanguage(event.target.value)}
-                className={inputClass}
-              >
-                {SUPPORTED_LANGUAGES.map((lang) => (
-                  <option key={lang.value} value={lang.value}>
-                    {lang.label}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <Field
+              label="Idioma del resumen"
+              help="Idioma en que se escribe el resumen de cada llamada."
+              className="max-w-sm"
+            >
+              {(control) => (
+                <select
+                  {...control}
+                  value={analysisLanguage}
+                  onChange={(event) => setAnalysisLanguage(event.target.value)}
+                  className={inputClass}
+                >
+                  {SUPPORTED_LANGUAGES.map((lang) => (
+                    <option key={lang.value} value={lang.value}>
+                      {lang.label}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </Field>
           )}
-        </div>
-      </div>
-
+        </AdvancedSection>
       )}
 
-      <div>
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-          <h3 className="text-sm font-medium text-text-primary/85">
-            Historial de llamadas
-          </h3>
-          <div className="inline-flex items-center gap-2">
-            <span className="text-xs text-text-secondary">
-              Pagina {currentPage}
-            </span>
-            <button
-              type="button"
-              onClick={goToPreviousPage}
-              disabled={!hasPreviousPage || isFetching}
-              className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-border-default text-text-secondary transition-colors hover:bg-primary-50/60 hover:text-primary-600 disabled:cursor-not-allowed disabled:opacity-40"
-              aria-label="Pagina anterior"
-            >
-              <ChevronLeftIcon className="h-4 w-4" />
-            </button>
-            <button
-              type="button"
-              onClick={goToNextPage}
-              disabled={!hasNextPage || isFetching}
-              className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-border-default text-text-secondary transition-colors hover:bg-primary-50/60 hover:text-primary-600 disabled:cursor-not-allowed disabled:opacity-40"
-              aria-label="Pagina siguiente"
-            >
-              <ChevronRightIcon className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-        <div className={`${cardClass} overflow-hidden`}>
-          {isLoading ? (
-            <div className="flex h-32 items-center justify-center gap-2 text-sm text-text-primary/70">
-              <div className="h-4 w-4 animate-spin rounded-full border-2 border-[#271173] border-t-transparent" />
-              Cargando llamadas...
-            </div>
-          ) : conversations.length === 0 ? (
-            <div className="flex h-32 flex-col items-center justify-center gap-2">
-              <ChatBubbleLeftRightIcon className="h-7 w-7 text-text-tertiary" />
-              <p className="text-sm text-text-secondary">Sin llamadas registradas</p>
-            </div>
-          ) : (
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-border-default">
-                  <th className="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-text-secondary">
-                    ID
-                  </th>
-                  <th className="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-text-secondary">
-                    Inicio
-                  </th>
-                  <th className="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-text-secondary">
-                    Duracion
-                  </th>
-                  {hasMessagesColumn && (
-                    <th className="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-text-secondary">
-                      Mensajes
-                    </th>
-                  )}
-                  <th className="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-text-secondary">
-                    Estado
-                  </th>
-                  <th className="px-5 py-3" />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#e4e0f5]">
-                {conversations.map((conv) => (
-                  <tr
-                    key={conv.conversation_id}
-                    className="cursor-pointer transition-colors hover:bg-primary-50/60"
-                    onClick={() => setSelectedConv(conv.conversation_id)}
-                  >
-                    <td className="px-5 py-3.5">
-                      <div className="flex items-center gap-2">
-                        <PhoneIcon className="h-3.5 w-3.5 text-text-secondary" />
-                        <span className="font-mono text-xs text-text-primary/70" title={conv.conversation_id}>
-                          {conv.conversation_id.slice(0, 8)}...
-                        </span>
-                      </div>
-                    </td>
-                    <td className="px-5 py-3.5 text-sm text-text-primary/70">
-                      {formatDate(conv.start_time_unix_secs)}
-                    </td>
-                    <td className="px-5 py-3.5">
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-1.5 text-sm text-text-primary/70">
-                          <ClockIcon className="h-3.5 w-3.5" />
-                          {formatDuration(conv.call_duration_secs)}
-                        </div>
-                        <div className="h-0.5 w-full max-w-30 rounded-full bg-primary-600/30">
-                          <div
-                            className="h-full rounded-full bg-primary-600"
-                            style={{
-                              width: `${Math.max(
-                                4,
-                                Math.round(
-                                  (((conv.call_duration_secs ?? 0) / maxCallDurationSecs) * 100)
-                                )
-                              )}%`,
-                            }}
-                          />
-                        </div>
-                      </div>
-                    </td>
-                    {hasMessagesColumn && (
-                      <td className="px-5 py-3.5 text-sm text-text-primary/70">
-                        {getConversationMessageCount(conv) ?? '-'}
-                      </td>
-                    )}
-                    <td className="px-5 py-3.5">
-                      <StatusBadge status={conv.status} />
-                    </td>
-                    <td className="px-5 py-3.5 text-right">
-                      <ChevronRightIcon className="inline h-4 w-4 text-text-secondary" />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </div>
-
       {selectedConv && (
-        <ConversationDetailModal
-          conversationId={selectedConv}
-          onClose={() => setSelectedConv(null)}
-        />
+        <ConversationDetailModal conversationId={selectedConv} onClose={() => setSelectedConv(null)} />
       )}
     </div>
   )
 }
-
-

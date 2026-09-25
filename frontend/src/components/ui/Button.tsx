@@ -12,15 +12,15 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 const variantStyles = {
   primary:
-    'bg-primary-600 text-white hover:bg-primary-700 active:bg-primary-800 shadow-sm',
+    'bg-primary-700 text-text-inverse hover:bg-primary-800 active:bg-primary-900 shadow-xs',
   secondary:
-    'bg-primary-100 text-primary-700 hover:bg-primary-200 active:bg-primary-300',
+    'bg-primary-50 text-primary-800 hover:bg-primary-100 active:bg-primary-200',
   outline:
     'bg-transparent border border-border-strong text-text-primary hover:bg-neutral-50 hover:border-neutral-300 active:bg-neutral-100',
   ghost:
     'bg-transparent text-text-secondary hover:bg-neutral-100 hover:text-text-primary active:bg-neutral-200',
   danger:
-    'bg-danger-600 text-white hover:bg-danger-700 active:bg-danger-800 shadow-sm',
+    'bg-danger-600 text-text-inverse hover:bg-danger-700 active:bg-danger-800 shadow-xs',
 }
 
 const sizeStyles = {
@@ -38,13 +38,15 @@ export default function Button({
   leftIcon,
   rightIcon,
   disabled,
+  // Por defecto no envía formularios; usar type="submit" explícito cuando corresponda.
+  type = 'button',
   ...props
 }: ButtonProps) {
   return (
     <button
+      type={type}
       className={cn(
-        'inline-flex items-center justify-center rounded-lg font-medium transition-all duration-200 ease-out',
-        'focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2',
+        'inline-flex items-center justify-center rounded-lg font-semibold transition-colors duration-150 ease-out',
         'disabled:opacity-50 disabled:cursor-not-allowed disabled:active:transform-none',
         variantStyles[variant],
         sizeStyles[size],
@@ -56,6 +58,7 @@ export default function Button({
       {isLoading && (
         <svg
           className="animate-spin h-4 w-4"
+          aria-hidden="true"
           xmlns="http://www.w3.org/2000/svg"
           fill="none"
           viewBox="0 0 24 24"

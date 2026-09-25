@@ -1,20 +1,12 @@
-﻿import { useMemo, useState } from 'react'
+import { useId, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'react-toastify'
 import {
-  BoltIcon,
-  CheckCircleIcon,
   ChevronDownIcon,
-  CpuChipIcon,
-  ExclamationTriangleIcon,
-  LanguageIcon,
-  LinkIcon,
   MagnifyingGlassIcon,
-  PhoneXMarkIcon,
   PlusIcon,
-  ServerIcon,
   TrashIcon,
-  XMarkIcon,
 } from '@heroicons/react/24/outline'
 import {
   createTool,
@@ -26,6 +18,13 @@ import {
 } from '@/api/VoiceRuntimeAPI'
 import { SYSTEM_TOOLS } from '@/types/agent'
 import type { AgentDetail, AgentListItem, PhoneNumber, WorkspaceTool } from '@/types/agent'
+import Badge from '@/components/ui/Badge'
+import Button from '@/components/ui/Button'
+import { useConfirm } from '@/components/ui/ConfirmDialog'
+import { cn } from '@/lib/utils'
+import CreateToolModal from '../CreateToolModal'
+import { Field, SectionHeading, Switch, SwitchField } from '../fields'
+import { describeError, inputClass, textareaClass } from '../agentUi'
 
 type Props = {
   agent: AgentDetail
@@ -42,86 +41,7 @@ type Props = {
 }
 
 type CreateToolPayload = Parameters<typeof createTool>[0]
-
-type JsonLiteralType = 'boolean' | 'string' | 'integer' | 'number'
-type ParamValueSource = 'llm_prompt' | 'constant' | 'dynamic_variable' | 'system_provided'
-type PreToolSpeechMode = 'auto' | 'forced'
-type ToolCallSoundMode = 'none' | 'default' | 'custom'
-
-type HeaderRow = {
-  id: string
-  key: string
-  value: string
-}
-
-type ToolParamRow = {
-  id: string
-  identifier: string
-  type: JsonLiteralType
-  required: boolean
-  value_source: ParamValueSource
-  description: string
-  constant_value: string
-  dynamic_variable: string
-  enum_values: string
-}
-
-type CreateToolForm = {
-  name: string
-  description: string
-  url: string
-  method: (typeof HTTP_METHODS)[number]
-  response_timeout_secs: string
-  content_type: 'application/json' | 'application/x-www-form-urlencoded'
-  execution_mode: 'immediate' | 'post_tool_speech' | 'async'
-  tool_error_handling_mode: 'auto' | 'summarized' | 'passthrough' | 'hide'
-  tool_call_sound_behavior: 'auto' | 'always'
-  tool_call_sound_mode: ToolCallSoundMode
-  tool_call_sound_custom: string
-  disable_interruptions: boolean
-  pre_tool_speech_mode: PreToolSpeechMode
-  request_body_schema: string
-  auth_connection: string
-  dynamic_variable_placeholders: string
-  assignments: string
-  response_mocks: string
-}
-
-const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
-const CONTENT_TYPES = ['application/json', 'application/x-www-form-urlencoded'] as const
-const EXECUTION_MODES = ['immediate', 'post_tool_speech', 'async'] as const
-const TOOL_ERROR_HANDLING_MODES = ['auto', 'summarized', 'passthrough', 'hide'] as const
-const TOOL_CALL_SOUND_BEHAVIORS = ['auto', 'always'] as const
-const JSON_LITERAL_TYPES: JsonLiteralType[] = ['string', 'number', 'integer', 'boolean']
-const PARAM_VALUE_SOURCES: Array<{
-  value: ParamValueSource
-  label: string
-  description: string
-}> = [
-  {
-    value: 'llm_prompt',
-    label: 'LLM Prompt',
-    description: 'El LLM extrae el valor desde la conversacion.',
-  },
-  {
-    value: 'constant',
-    label: 'Valor fijo',
-    description: 'Usa un valor constante definido manualmente.',
-  },
-  {
-    value: 'dynamic_variable',
-    label: 'Variable dinamica',
-    description: 'Toma el valor desde una variable dinamica.',
-  },
-  {
-    value: 'system_provided',
-    label: 'Provisto por sistema',
-    description: 'El runtime completa este valor automaticamente.',
-  },
-]
-
-const inputClass =
-  'w-full rounded-xl border border-border-default bg-surface px-3.5 py-2.5 text-sm text-text-primary placeholder:text-text-primary/40 focus:border-primary-500 focus:outline-none transition-colors'
+type SuggestedToolKind = 'send_whatsapp_message' | 'schedule_appointment'
 
 const SYSTEM_TOOL_TYPE_BY_NAME: Record<string, string> = {
   end_call: 'end_call',
@@ -132,6 +52,45 @@ const SYSTEM_TOOL_TYPE_BY_NAME: Record<string, string> = {
   dtmf: 'play_keypad_touch_tone',
   voicemail_detection: 'voicemail_detection',
 }
+
+const CLIENT_ALLOWED_SYSTEM_TOOLS = ['end_call', 'transfer_to_number', 'voicemail_detection']
+
+// Textos de negocio para las acciones del sistema.
+const SYSTEM_TOOL_COPY: Record<string, { label: string; description: string }> = {
+  end_call: {
+    label: 'Terminar la llamada',
+    description: 'El agente cuelga cuando la conversación terminó.',
+  },
+  language_detection: {
+    label: 'Detectar el idioma',
+    description: 'El agente cambia al idioma de quien llama.',
+  },
+  skip_turn: {
+    label: 'Esperar en silencio',
+    description: 'El agente guarda silencio cuando le piden un momento.',
+  },
+  transfer_to_agent: {
+    label: 'Transferir a otro agente',
+    description: 'Pasa la llamada a otro agente de voz.',
+  },
+  transfer_to_number: {
+    label: 'Transferir a un número',
+    description: 'Pasa la llamada a una persona del equipo.',
+  },
+  dtmf: {
+    label: 'Marcar tonos del teclado',
+    description: 'Elige opciones en menús telefónicos automáticos.',
+  },
+  voicemail_detection: {
+    label: 'Detectar buzón de voz',
+    description: 'Reconoce cuando contesta un buzón y puede dejar un mensaje.',
+  },
+}
+
+const SUGGESTED_TOOLS: Array<{ kind: SuggestedToolKind; label: string }> = [
+  { kind: 'send_whatsapp_message', label: 'Enviar mensaje por WhatsApp' },
+  { kind: 'schedule_appointment', label: 'Agendar citas' },
+]
 
 function resolvePublicWebhookBaseUrl(): string {
   const explicit = String(import.meta.env.VITE_PUBLIC_WEBHOOK_BASE_URL ?? '').trim()
@@ -149,7 +108,7 @@ function resolvePublicWebhookBaseUrl(): string {
   return absoluteApiUrl.replace(/\/api\/?$/, '').replace(/\/$/, '')
 }
 
-function buildSuggestedToolPayload(kind: 'send_whatsapp_message' | 'schedule_appointment'): CreateToolPayload {
+function buildSuggestedToolPayload(kind: SuggestedToolKind): CreateToolPayload {
   const baseUrl = resolvePublicWebhookBaseUrl()
   // El backend inyecta X-Voice-Tool-Token al guardar la herramienta: el secreto
   // nunca debe viajar en el bundle público.
@@ -160,7 +119,7 @@ function buildSuggestedToolPayload(kind: 'send_whatsapp_message' | 'schedule_app
       tool_config: {
         type: 'webhook',
         name: 'send_whatsapp_message',
-        description: 'Escala la conversacion a humano por WhatsApp usando la configuracion global.',
+        description: 'Pasa la conversación a una persona del equipo por WhatsApp usando la configuración global.',
         api_schema: {
           url: `${baseUrl}/api/webhooks/voice/tools/send-whatsapp-message`,
           method: 'POST',
@@ -174,7 +133,7 @@ function buildSuggestedToolPayload(kind: 'send_whatsapp_message' | 'schedule_app
               },
               phone_number: {
                 type: 'string',
-                description: 'Numero destino en formato E.164.',
+                description: 'Número de destino en formato E.164.',
               },
               message: {
                 type: 'string',
@@ -182,11 +141,11 @@ function buildSuggestedToolPayload(kind: 'send_whatsapp_message' | 'schedule_app
               },
               summary: {
                 type: 'string',
-                description: 'Resumen de la conversacion para contexto.',
+                description: 'Resumen de la conversación para dar contexto.',
               },
               conversation_id: {
                 type: 'string',
-                description: 'ID de conversacion opcional.',
+                description: 'ID de conversación (opcional).',
               },
             },
             required: ['agent_id', 'phone_number'],
@@ -231,7 +190,7 @@ function buildSuggestedToolPayload(kind: 'send_whatsapp_message' | 'schedule_app
             },
             contact_phone: {
               type: 'string',
-              description: 'Telefono en formato E.164.',
+              description: 'Teléfono en formato E.164.',
             },
             contact_email: {
               type: 'string',
@@ -252,55 +211,6 @@ function buildSuggestedToolPayload(kind: 'send_whatsapp_message' | 'schedule_app
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function createRowId(prefix: string): string {
-  return `${prefix}_${Math.random().toString(36).slice(2, 10)}`
-}
-
-function extractPathParamNames(url: string): string[] {
-  const names: string[] = []
-  const seen = new Set<string>()
-
-  for (const match of url.matchAll(/\{([a-zA-Z0-9_]+)\}/g)) {
-    const name = (match[1] ?? '').trim()
-    if (!name || seen.has(name)) continue
-    seen.add(name)
-    names.push(name)
-  }
-
-  return names
-}
-
-function createHeaderRow(): HeaderRow {
-  return {
-    id: createRowId('header'),
-    key: '',
-    value: '',
-  }
-}
-
-function createToolParamRow(identifier = ''): ToolParamRow {
-  return {
-    id: createRowId('param'),
-    identifier,
-    type: 'string',
-    required: false,
-    value_source: 'llm_prompt',
-    description: '',
-    constant_value: '',
-    dynamic_variable: '',
-    enum_values: '',
-  }
-}
-
-function parseEnumValues(raw: string): string[] {
-  const values = raw
-    .split(/\r?\n|,/)
-    .map((value) => value.trim())
-    .filter(Boolean)
-
-  return [...new Set(values)]
 }
 
 function normalizeSystemToolParams(
@@ -339,1176 +249,111 @@ function normalizeSystemToolParams(
 
   return params
 }
-function ToolToggle({
-  active,
+
+type TransferRowsEditorProps = {
+  baseId: string
+  rows: Array<Record<string, unknown>>
+  field: 'agent_id' | 'phone_number'
+  targetLabel: string
+  targetPlaceholder: string
+  listId: string
+  canAdd: boolean
+  onChange: (rows: Array<Record<string, unknown>>) => void
+}
+
+function TransferRowsEditor({
+  baseId,
+  rows,
+  field,
+  targetLabel,
+  targetPlaceholder,
+  listId,
+  canAdd,
   onChange,
-}: {
-  active: boolean
-  onChange: (value: boolean) => void
-}) {
+}: TransferRowsEditorProps) {
+  const emptyRow = { [field]: '', condition: '' }
+
   return (
-    <button
-      type="button"
-      onClick={() => onChange(!active)}
-      className={`relative h-5 w-10 cursor-pointer rounded-full transition-colors duration-200 ${
-        active ? 'bg-primary-600' : 'bg-black/20'
-      }`}
-      aria-pressed={active}
-    >
-      <span
-        className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-surface shadow transition-transform duration-200 ${
-          active ? 'translate-x-5' : 'translate-x-0'
-        }`}
-      />
-    </button>
-  )
-}
-
-function getSystemToolIcon(toolName: string) {
-  if (toolName === 'end_call') return PhoneXMarkIcon
-  if (toolName === 'language_detection') return LanguageIcon
-  return BoltIcon
-}
-
-function EmptyState({ message }: { message: string }) {
-  return (
-    <div className="py-8 text-center">
-      <p className="text-sm text-text-tertiary">{message}</p>
-    </div>
-  )
-}
-
-function CreateToolModal({
-  onClose,
-  onCreated,
-}: {
-  onClose: () => void
-  onCreated: () => void
-}) {
-  const [form, setForm] = useState<CreateToolForm>({
-    name: '',
-    description: '',
-    url: '',
-    method: 'POST',
-    response_timeout_secs: '20',
-    content_type: 'application/json',
-    execution_mode: 'immediate',
-    tool_error_handling_mode: 'auto',
-    tool_call_sound_behavior: 'auto',
-    tool_call_sound_mode: 'none',
-    tool_call_sound_custom: '',
-    disable_interruptions: false,
-    pre_tool_speech_mode: 'auto',
-    request_body_schema: '',
-    auth_connection: '',
-    dynamic_variable_placeholders: '{}',
-    assignments: '[]',
-    response_mocks: '[]',
-  })
-  const [headers, setHeaders] = useState<HeaderRow[]>([createHeaderRow()])
-  const [pathParams, setPathParams] = useState<ToolParamRow[]>([])
-  const [queryParams, setQueryParams] = useState<ToolParamRow[]>([])
-  const [errors, setErrors] = useState<Record<string, string>>({})
-
-  // Sync path params to URL changes (setState-during-render pattern)
-  const [lastUrl, setLastUrl] = useState(form.url)
-  if (form.url !== lastUrl) {
-    setLastUrl(form.url)
-    const names = extractPathParamNames(form.url)
-    const prevNames = pathParams.map((row) => row.identifier)
-    const sameNames =
-      prevNames.length === names.length && prevNames.every((name, index) => name === names[index])
-    if (!sameNames) {
-      const map = new Map(pathParams.map((row) => [row.identifier, row]))
-      setPathParams(names.map((name) => {
-        const existing = map.get(name)
-        if (existing) return existing
-        return { ...createToolParamRow(name), required: true }
-      }))
-    }
-  }
-
-  const { mutate, isPending } = useMutation({
-    mutationFn: (payload: CreateToolPayload) => createTool(payload),
-    onSuccess: () => {
-      toast.success('Herramienta creada')
-      onCreated()
-      onClose()
-    },
-    onError: (error: Error) => toast.error(error.message),
-  })
-
-  const set = <K extends keyof CreateToolForm>(key: K, value: CreateToolForm[K]) =>
-    setForm((prev) => ({ ...prev, [key]: value }))
-
-  const updateHeaderRow = (rowId: string, patch: Partial<HeaderRow>) =>
-    setHeaders((prev) => prev.map((row) => (row.id === rowId ? { ...row, ...patch } : row)))
-
-  const removeHeaderRow = (rowId: string) =>
-    setHeaders((prev) => {
-      const next = prev.filter((row) => row.id !== rowId)
-      return next.length > 0 ? next : [createHeaderRow()]
-    })
-
-  const updatePathParamRow = (rowId: string, patch: Partial<ToolParamRow>) =>
-    setPathParams((prev) => prev.map((row) => (row.id === rowId ? { ...row, ...patch } : row)))
-
-  const updateQueryParamRow = (rowId: string, patch: Partial<ToolParamRow>) =>
-    setQueryParams((prev) => prev.map((row) => (row.id === rowId ? { ...row, ...patch } : row)))
-
-  const removeQueryParamRow = (rowId: string) =>
-    setQueryParams((prev) => prev.filter((row) => row.id !== rowId))
-
-  const buildPayload = (): CreateToolPayload | null => {
-    const nextErrors: Record<string, string> = {}
-    const addError = (key: string, message: string) => {
-      if (!nextErrors[key]) nextErrors[key] = message
-    }
-
-    if (!form.name.trim()) addError('name', 'El nombre es requerido')
-    if (!form.description.trim()) addError('description', 'La descripcion es requerida')
-    if (!form.url.trim()) addError('url', 'La URL es requerida')
-
-    if (form.url.trim()) {
-      try {
-        new URL(form.url.trim()) // throws if invalid, intentionally unassigned
-      } catch {
-        addError('url', 'La URL debe ser valida (ej: https://api.example.com/v1/recurso)')
-      }
-    }
-
-    const timeout = Number(form.response_timeout_secs)
-    if (!Number.isFinite(timeout) || timeout <= 0) {
-      addError('response_timeout_secs', 'El timeout debe ser un numero mayor a 0')
-    }
-
-    const parseObjectField = (
-      key: string,
-      label: string,
-      raw: string,
-      options: { allowNull?: boolean; emptyAsNull?: boolean } = {}
-    ): Record<string, unknown> | null | undefined => {
-      const trimmed = raw.trim()
-
-      if (!trimmed) {
-        return options.emptyAsNull ? null : {}
-      }
-
-      if (trimmed.toLowerCase() === 'null' && options.allowNull) {
-        return null
-      }
-
-      try {
-        const parsed = JSON.parse(trimmed)
-
-        if (parsed === null && options.allowNull) {
-          return null
-        }
-
-        if (!isRecord(parsed)) {
-          addError(key, `${label} debe ser un objeto JSON.`)
-          return undefined
-        }
-
-        return parsed
-      } catch {
-        addError(key, `${label} no es JSON valido.`)
-        return undefined
-      }
-    }
-
-    const parseObjectArrayField = (
-      key: string,
-      label: string,
-      raw: string
-    ): Array<Record<string, unknown>> | undefined => {
-      const trimmed = raw.trim()
-
-      if (!trimmed) return []
-
-      try {
-        const parsed = JSON.parse(trimmed)
-        if (!Array.isArray(parsed)) {
-          addError(key, `${label} debe ser un arreglo JSON.`)
-          return undefined
-        }
-
-        if (!parsed.every((item) => isRecord(item))) {
-          addError(key, `${label} debe ser un arreglo de objetos JSON.`)
-          return undefined
-        }
-
-        return parsed.map((item) => ({ ...(item as Record<string, unknown>) }))
-      } catch {
-        addError(key, `${label} no es JSON valido.`)
-        return undefined
-      }
-    }
-
-    const buildLiteralSchemaProperty = (
-      row: ToolParamRow,
-      errorPrefix: string
-    ): Record<string, unknown> | null => {
-      const literal: Record<string, unknown> = {
-        type: row.type,
-      }
-
-      const enumValues = parseEnumValues(row.enum_values)
-      if (enumValues.length > 0) {
-        if (row.type !== 'string') {
-          addError(`${errorPrefix}.enum_values`, 'Enum values solo aplica para tipo string.')
-        } else {
-          literal.enum = enumValues
-        }
-      }
-
-      if (row.value_source === 'llm_prompt') {
-        const description = row.description.trim()
-        if (!description) {
-          addError(
-            `${errorPrefix}.description`,
-            'La descripcion es requerida cuando el valor viene del LLM.'
-          )
-          return null
-        }
-        literal.description = description
-        return literal
-      }
-
-      if (row.value_source === 'dynamic_variable') {
-        const dynamicVariable = row.dynamic_variable.trim()
-        if (!dynamicVariable) {
-          addError(`${errorPrefix}.dynamic_variable`, 'El nombre de variable dinamica es requerido.')
-          return null
-        }
-        literal.dynamic_variable = dynamicVariable
-        return literal
-      }
-
-      if (row.value_source === 'system_provided') {
-        literal.is_system_provided = true
-        return literal
-      }
-
-      const rawConstant = row.constant_value.trim()
-      if (!rawConstant) {
-        addError(
-          `${errorPrefix}.constant_value`,
-          'El valor fijo es requerido cuando el tipo de valor es constante.'
-        )
-        return null
-      }
-
-      if (row.type === 'string') {
-        literal.constant_value = rawConstant
-        return literal
-      }
-
-      if (row.type === 'boolean') {
-        const normalized = rawConstant.toLowerCase()
-        if (normalized !== 'true' && normalized !== 'false') {
-          addError(`${errorPrefix}.constant_value`, 'Para boolean usa true o false.')
-          return null
-        }
-        literal.constant_value = normalized === 'true'
-        return literal
-      }
-
-      const asNumber = Number(rawConstant)
-      if (!Number.isFinite(asNumber)) {
-        addError(`${errorPrefix}.constant_value`, 'El valor fijo debe ser numerico para este tipo.')
-        return null
-      }
-
-      if (row.type === 'integer' && !Number.isInteger(asNumber)) {
-        addError(`${errorPrefix}.constant_value`, 'El valor fijo debe ser entero para tipo integer.')
-        return null
-      }
-
-      literal.constant_value = asNumber
-      return literal
-    }
-
-    const requestHeaders: Record<string, unknown> = {}
-    for (const row of headers) {
-      const key = row.key.trim()
-      const value = row.value.trim()
-
-      if (!key && !value) continue
-
-      if (!key) {
-        addError(`headers.${row.id}.key`, 'El nombre del encabezado es requerido.')
-        continue
-      }
-
-      if (Object.prototype.hasOwnProperty.call(requestHeaders, key)) {
-        addError(`headers.${row.id}.key`, 'Ese encabezado esta repetido.')
-        continue
-      }
-
-      requestHeaders[key] = value
-    }
-
-    const pathParamsSchema: Record<string, unknown> = {}
-    for (const row of pathParams) {
-      const identifier = row.identifier.trim()
-      if (!identifier) {
-        addError(`path.${row.id}.identifier`, 'El identificador del parametro de ruta es requerido.')
-        continue
-      }
-
-      const literal = buildLiteralSchemaProperty(row, `path.${row.id}`)
-      if (!literal) continue
-      pathParamsSchema[identifier] = literal
-    }
-
-    const queryProperties: Record<string, unknown> = {}
-    const queryRequired: string[] = []
-
-    for (const row of queryParams) {
-      const hasAnyValue =
-        row.identifier.trim().length > 0 ||
-        row.description.trim().length > 0 ||
-        row.constant_value.trim().length > 0 ||
-        row.dynamic_variable.trim().length > 0 ||
-        row.enum_values.trim().length > 0
-
-      if (!hasAnyValue) continue
-
-      const identifier = row.identifier.trim()
-      if (!identifier) {
-        addError(`query.${row.id}.identifier`, 'El identificador del parametro es requerido.')
-        continue
-      }
-
-      if (Object.prototype.hasOwnProperty.call(queryProperties, identifier)) {
-        addError(`query.${row.id}.identifier`, 'Ese parametro ya existe.')
-        continue
-      }
-
-      const literal = buildLiteralSchemaProperty(row, `query.${row.id}`)
-      if (!literal) continue
-
-      queryProperties[identifier] = literal
-      if (row.required) {
-        queryRequired.push(identifier)
-      }
-    }
-
-    const queryParamsSchema =
-      Object.keys(queryProperties).length > 0
-        ? {
-            properties: queryProperties,
-            ...(queryRequired.length > 0 ? { required: queryRequired } : {}),
-          }
-        : null
-
-    const requestBodySchema = parseObjectField(
-      'request_body_schema',
-      'Request body schema',
-      form.request_body_schema,
-      { allowNull: true, emptyAsNull: true }
-    )
-    const authConnection = parseObjectField(
-      'auth_connection',
-      'Auth connection',
-      form.auth_connection,
-      { allowNull: true, emptyAsNull: true }
-    )
-    const dynamicPlaceholders = parseObjectField(
-      'dynamic_variable_placeholders',
-      'Dynamic variable placeholders',
-      form.dynamic_variable_placeholders
-    )
-    const assignments = parseObjectArrayField('assignments', 'Assignments', form.assignments)
-    const responseMocks = parseObjectArrayField('response_mocks', 'Response mocks', form.response_mocks)
-
-    let toolCallSound: string | null = null
-    if (form.tool_call_sound_mode === 'default') {
-      toolCallSound = 'default'
-    } else if (form.tool_call_sound_mode === 'custom') {
-      const customSound = form.tool_call_sound_custom.trim()
-      if (!customSound) {
-        addError('tool_call_sound_custom', 'Debes indicar el nombre del sonido personalizado.')
-      } else {
-        toolCallSound = customSound
-      }
-    }
-
-    if (
-      requestBodySchema === undefined ||
-      authConnection === undefined ||
-      dynamicPlaceholders === undefined ||
-      assignments === undefined ||
-      responseMocks === undefined
-    ) {
-      setErrors(nextErrors)
-      return null
-    }
-
-    if (Object.keys(nextErrors).length > 0) {
-      setErrors(nextErrors)
-      return null
-    }
-
-    setErrors({})
-
-    return {
-      tool_config: {
-        type: 'webhook',
-        name: form.name.trim(),
-        description: form.description.trim(),
-        api_schema: {
-          url: form.url.trim(),
-          method: form.method,
-          request_headers: requestHeaders,
-          path_params_schema: pathParamsSchema,
-          query_params_schema: queryParamsSchema,
-          request_body_schema: requestBodySchema,
-          content_type: form.content_type,
-          auth_connection: authConnection,
-        },
-        response_timeout_secs: timeout,
-        disable_interruptions: form.disable_interruptions,
-        force_pre_tool_speech: form.pre_tool_speech_mode === 'forced',
-        execution_mode: form.execution_mode,
-        tool_call_sound: toolCallSound,
-        tool_call_sound_behavior: form.tool_call_sound_behavior,
-        tool_error_handling_mode: form.tool_error_handling_mode,
-        dynamic_variables: {
-          dynamic_variable_placeholders: dynamicPlaceholders ?? {},
-        },
-        assignments,
-      },
-      response_mocks: responseMocks,
-    }
-  }
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    const payload = buildPayload()
-    if (payload) mutate(payload)
-  }
-
-  const renderParamRow = (
-    row: ToolParamRow,
-    options: {
-      section: 'path' | 'query'
-      identifierReadOnly?: boolean
-      showRequired?: boolean
-      onChange: (rowId: string, patch: Partial<ToolParamRow>) => void
-      onRemove?: (rowId: string) => void
-    }
-  ) => {
-    const prefix = `${options.section}.${row.id}`
-
-    return (
-      <div key={row.id} className="space-y-3 rounded-xl border border-border-default bg-surface p-3">
-        <div className="grid gap-2 lg:grid-cols-4">
-          <div>
-            <label className="mb-1 block text-[11px] font-medium uppercase tracking-[0.08em] text-text-tertiary">
-              Tipo de datos
-            </label>
-            <select
-              value={row.type}
-              onChange={(event) =>
-                options.onChange(row.id, { type: event.target.value as ToolParamRow['type'] })
-              }
-              className={inputClass}
-            >
-              {JSON_LITERAL_TYPES.map((dataType) => (
-                <option key={dataType} value={dataType}>
-                  {dataType}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="lg:col-span-2">
-            <label className="mb-1 block text-[11px] font-medium uppercase tracking-[0.08em] text-text-tertiary">
-              Identificador
-            </label>
-            <input
-              type="text"
-              value={row.identifier}
-              readOnly={Boolean(options.identifierReadOnly)}
-              onChange={(event) => options.onChange(row.id, { identifier: event.target.value })}
-              placeholder="customer_id"
-              className={`${inputClass} ${options.identifierReadOnly ? 'bg-[#f5f3ff]' : ''}`}
-            />
-            {errors[`${prefix}.identifier`] && (
-              <p className="mt-1 text-xs text-red-500">{errors[`${prefix}.identifier`]}</p>
-            )}
-          </div>
-
-          <div className="flex items-end gap-2">
-            {options.showRequired ? (
-              <label className="inline-flex flex-1 items-center gap-2 rounded-xl border border-border-default bg-[#f5f3ff] px-3 py-2.5 text-xs text-text-primary/70">
-                <input
-                  type="checkbox"
-                  checked={row.required}
-                  onChange={(event) =>
-                    options.onChange(row.id, { required: event.target.checked })
-                  }
-                  className="h-3.5 w-3.5 rounded border-[#c7c3e0] text-primary-600 focus:ring-[#271173]"
-                />
-                Requerido
-              </label>
-            ) : (
-              <div className="inline-flex flex-1 items-center rounded-xl border border-border-default bg-[#f5f3ff] px-3 py-2.5 text-xs text-text-primary/70">
-                Requerido por URL
-              </div>
-            )}
-
-            {options.onRemove && (
-              <button
-                type="button"
-                onClick={() => options.onRemove?.(row.id)}
-                className="rounded-xl border border-border-default p-2 text-text-tertiary transition-colors hover:bg-danger-50 hover:text-danger-600"
-                title="Eliminar parametro"
-              >
-                <TrashIcon className="h-4 w-4" />
-              </button>
-            )}
-          </div>
-        </div>
-
-        <div className="space-y-2">
-          <label className="mb-1 block text-[11px] font-medium uppercase tracking-[0.08em] text-text-tertiary">
-            Tipo de valor
-          </label>
-          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-            {PARAM_VALUE_SOURCES.map((source) => {
-              const isActive = row.value_source === source.value
-
-              return (
-                <button
-                  key={source.value}
-                  type="button"
-                  onClick={() =>
-                    options.onChange(row.id, {
-                      value_source: source.value,
-                    })
-                  }
-                  className={`rounded-xl border px-3 py-2 text-left transition-colors ${
-                    isActive
-                      ? 'border-[#271173] bg-[#f5f3ff] shadow-[0_0_0_1px_rgba(39,17,115,0.08)]'
-                      : 'border-border-default bg-surface hover:bg-bg-secondary'
-                  }`}
-                >
-                  <p className={`text-xs font-semibold ${isActive ? 'text-primary-600' : 'text-text-primary'}`}>
-                    {source.label}
-                  </p>
-                  <p className="mt-1 text-[11px] leading-4 text-text-secondary">{source.description}</p>
-                </button>
-              )
-            })}
-          </div>
-
-          {row.type === 'string' && (
-            <div className="pt-1">
-              <label className="mb-1 block text-[11px] font-medium uppercase tracking-[0.08em] text-text-tertiary">
-                Enum values (opcional)
-              </label>
-              <input
-                type="text"
-                value={row.enum_values}
-                onChange={(event) => options.onChange(row.id, { enum_values: event.target.value })}
-                placeholder="vip, standard, basic"
-                className={inputClass}
-              />
-              {errors[`${prefix}.enum_values`] && (
-                <p className="mt-1 text-xs text-red-500">{errors[`${prefix}.enum_values`]}</p>
-              )}
-            </div>
-          )}
-        </div>
-
-        {row.value_source === 'llm_prompt' && (
-          <div>
-            <label className="mb-1 block text-[11px] font-medium uppercase tracking-[0.08em] text-text-tertiary">
-              Descripcion
-            </label>
-            <textarea
-              rows={3}
-              value={row.description}
-              onChange={(event) => options.onChange(row.id, { description: event.target.value })}
-              className={`${inputClass} resize-y`}
-              placeholder="Describe detalladamente como extraer este dato de la conversacion."
-            />
-            {errors[`${prefix}.description`] && (
-              <p className="mt-1 text-xs text-red-500">{errors[`${prefix}.description`]}</p>
-            )}
-          </div>
-        )}
-
-        {row.value_source === 'constant' && (
-          <div>
-            <label className="mb-1 block text-[11px] font-medium uppercase tracking-[0.08em] text-text-tertiary">
-              Valor fijo
-            </label>
-            <input
-              type="text"
-              value={row.constant_value}
-              onChange={(event) =>
-                options.onChange(row.id, { constant_value: event.target.value })
-              }
-              className={inputClass}
-              placeholder={row.type === 'boolean' ? 'true' : 'Valor'}
-            />
-            {errors[`${prefix}.constant_value`] && (
-              <p className="mt-1 text-xs text-red-500">{errors[`${prefix}.constant_value`]}</p>
-            )}
-          </div>
-        )}
-
-        {row.value_source === 'dynamic_variable' && (
-          <div>
-            <label className="mb-1 block text-[11px] font-medium uppercase tracking-[0.08em] text-text-tertiary">
-              Variable dinamica
-            </label>
-            <input
-              type="text"
-              value={row.dynamic_variable}
-              onChange={(event) =>
-                options.onChange(row.id, { dynamic_variable: event.target.value })
-              }
-              className={inputClass}
-              placeholder="customer_id"
-            />
-            {errors[`${prefix}.dynamic_variable`] && (
-              <p className="mt-1 text-xs text-red-500">{errors[`${prefix}.dynamic_variable`]}</p>
-            )}
-          </div>
-        )}
+    <div className="space-y-3">
+      <div aria-hidden="true" className="hidden gap-2 text-xs font-medium text-text-tertiary sm:grid sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+        <span>{targetLabel}</span>
+        <span>Cuándo transferir (opcional)</span>
+        <span className="w-16" />
       </div>
-    )
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/40 backdrop-blur-sm">
-      <div className="flex min-h-full items-start justify-center p-4 sm:p-6">
-        <div className="w-full max-w-6xl overflow-hidden rounded-2xl border border-border-default bg-bg-secondary shadow-2xl">
-          <form onSubmit={handleSubmit} className="flex max-h-[92vh] flex-col">
-            <div className="flex items-start justify-between border-b border-border-default bg-surface px-4 py-4 sm:px-6">
+      <ul className="space-y-2">
+        {rows.map((transfer, index) => {
+          const targetId = `${baseId}-${field}-${index}`
+          const conditionId = `${baseId}-condition-${index}`
+          return (
+            <li key={`${field}-${index}`} className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
               <div>
-                <h2 className="text-base font-semibold text-text-primary">Anadir herramienta webhook</h2>
-                <p className="mt-1 text-xs text-text-secondary">
-                  Configura como y cuando el agente debe usar esta herramienta.
-                </p>
+                <label htmlFor={targetId} className="mb-1 block text-xs font-medium text-text-tertiary sm:sr-only">
+                  {targetLabel}
+                  <span className="sr-only"> {index + 1}</span>
+                </label>
+                <input
+                  id={targetId}
+                  type="text"
+                  list={listId}
+                  value={typeof transfer[field] === 'string' ? (transfer[field] as string) : ''}
+                  onChange={(event) =>
+                    onChange(
+                      rows.map((item, itemIndex) =>
+                        itemIndex === index ? { ...item, [field]: event.target.value } : item
+                      )
+                    )
+                  }
+                  className={cn(inputClass, field === 'phone_number' && 'tabular-nums')}
+                  placeholder={targetPlaceholder}
+                />
               </div>
-              <button
-                type="button"
-                onClick={onClose}
-                className="rounded-lg p-1.5 text-text-tertiary transition-colors hover:bg-primary-50/60 hover:text-text-primary"
-              >
-                <XMarkIcon className="h-5 w-5" />
-              </button>
-            </div>
-
-            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4 sm:px-6">
-              <section className="rounded-xl border border-border-default bg-surface p-4 sm:p-5">
-                <div className="mb-4">
-                  <h3 className="text-sm font-semibold text-text-primary">Configuracion</h3>
-                  <p className="mt-1 text-xs text-text-secondary">
-                    Describe al LLM como y cuando usar la herramienta.
-                  </p>
-                </div>
-
-                <div className="space-y-3">
-                  <div>
-                    <label className="mb-1.5 block text-xs font-medium text-text-secondary">Tipo</label>
-                    <div className="rounded-xl border border-[#271173]/20 bg-[#f5f3ff] px-3.5 py-2.5 text-sm font-medium text-primary-600">
-                      Webhook HTTP
-                    </div>
-                  </div>
-
-                  <div className="grid gap-3 lg:grid-cols-2">
-                    <div>
-                      <label className="mb-1.5 block text-xs font-medium text-text-secondary">Nombre</label>
-                      <input
-                        type="text"
-                        value={form.name}
-                        onChange={(event) => set('name', event.target.value)}
-                        placeholder="consultar_disponibilidad"
-                        className={inputClass}
-                      />
-                      {errors.name && <p className="mt-1 text-xs text-red-500">{errors.name}</p>}
-                    </div>
-
-                    <div>
-                      <label className="mb-1.5 block text-xs font-medium text-text-secondary">Metodo</label>
-                      <select
-                        value={form.method}
-                        onChange={(event) =>
-                          set('method', event.target.value as CreateToolForm['method'])
-                        }
-                        className={inputClass}
-                      >
-                        {HTTP_METHODS.map((method) => (
-                          <option key={method} value={method}>
-                            {method}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="mb-1.5 block text-xs font-medium text-text-secondary">Descripcion</label>
-                    <textarea
-                      rows={3}
-                      value={form.description}
-                      onChange={(event) => set('description', event.target.value)}
-                      placeholder="Explica con claridad cuando debe ejecutar este webhook."
-                      className={`${inputClass} resize-y`}
-                    />
-                    {errors.description && (
-                      <p className="mt-1 text-xs text-red-500">{errors.description}</p>
-                    )}
-                  </div>
-
-                  <div>
-                    <label className="mb-1.5 block text-xs font-medium text-text-secondary">URL</label>
-                    <input
-                      type="url"
-                      value={form.url}
-                      onChange={(event) => set('url', event.target.value)}
-                      placeholder="https://api.example.com/v1/orders/{order_id}"
-                      className={inputClass}
-                    />
-                    <p className="mt-1 text-[11px] text-text-muted">
-                      Escribe {'{{'} para usar una variable de entorno.
-                    </p>
-                    {errors.url && <p className="mt-1 text-xs text-red-500">{errors.url}</p>}
-                  </div>
-                </div>
-              </section>
-
-              <section className="rounded-xl border border-border-default bg-surface p-4 sm:p-5">
-                <div className="mb-4">
-                  <h3 className="text-sm font-semibold text-text-primary">Runtime</h3>
-                  <p className="mt-1 text-xs text-text-secondary">
-                    Define como se ejecuta la herramienta durante la conversacion.
-                  </p>
-                </div>
-
-                <div className="grid gap-3 lg:grid-cols-2">
-                  <div>
-                    <label className="mb-1.5 block text-xs font-medium text-text-secondary">
-                      Tiempo de espera de respuesta (segundos)
-                    </label>
-                    <input
-                      type="number"
-                      min={1}
-                      step={1}
-                      value={form.response_timeout_secs}
-                      onChange={(event) => set('response_timeout_secs', event.target.value)}
-                      className={inputClass}
-                    />
-                    <p className="mt-1 text-[11px] text-text-muted">
-                      El valor predeterminado recomendado es 20 segundos.
-                    </p>
-                    {errors.response_timeout_secs && (
-                      <p className="mt-1 text-xs text-red-500">{errors.response_timeout_secs}</p>
-                    )}
-                  </div>
-
-                  <div>
-                    <label className="mb-1.5 block text-xs font-medium text-text-secondary">
-                      Pre-tool speech
-                    </label>
-                    <select
-                      value={form.pre_tool_speech_mode}
-                      onChange={(event) =>
-                        set(
-                          'pre_tool_speech_mode',
-                          event.target.value as CreateToolForm['pre_tool_speech_mode']
-                        )
-                      }
-                      className={inputClass}
-                    >
-                      <option value="auto">Auto</option>
-                      <option value="forced">Forzado</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="mt-3 grid gap-3 lg:grid-cols-2">
-                  <div>
-                    <label className="mb-1.5 block text-xs font-medium text-text-secondary">
-                      Modo de ejecucion
-                    </label>
-                    <select
-                      value={form.execution_mode}
-                      onChange={(event) =>
-                        set('execution_mode', event.target.value as CreateToolForm['execution_mode'])
-                      }
-                      className={inputClass}
-                    >
-                      {EXECUTION_MODES.map((mode) => (
-                        <option key={mode} value={mode}>
-                          {mode}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="mb-1.5 block text-xs font-medium text-text-secondary">
-                      Manejo de errores
-                    </label>
-                    <select
-                      value={form.tool_error_handling_mode}
-                      onChange={(event) =>
-                        set(
-                          'tool_error_handling_mode',
-                          event.target.value as CreateToolForm['tool_error_handling_mode']
-                        )
-                      }
-                      className={inputClass}
-                    >
-                      {TOOL_ERROR_HANDLING_MODES.map((mode) => (
-                        <option key={mode} value={mode}>
-                          {mode}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div className="mt-3 grid gap-3 lg:grid-cols-3">
-                  <div>
-                    <label className="mb-1.5 block text-xs font-medium text-text-secondary">
-                      Sonido de llamada de la herramienta
-                    </label>
-                    <select
-                      value={form.tool_call_sound_mode}
-                      onChange={(event) =>
-                        set(
-                          'tool_call_sound_mode',
-                          event.target.value as CreateToolForm['tool_call_sound_mode']
-                        )
-                      }
-                      className={inputClass}
-                    >
-                      <option value="none">None</option>
-                      <option value="default">Default</option>
-                      <option value="custom">Custom</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="mb-1.5 block text-xs font-medium text-text-secondary">
-                      Comportamiento del sonido
-                    </label>
-                    <select
-                      value={form.tool_call_sound_behavior}
-                      onChange={(event) =>
-                        set(
-                          'tool_call_sound_behavior',
-                          event.target.value as CreateToolForm['tool_call_sound_behavior']
-                        )
-                      }
-                      className={inputClass}
-                    >
-                      {TOOL_CALL_SOUND_BEHAVIORS.map((mode) => (
-                        <option key={mode} value={mode}>
-                          {mode}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="mb-1.5 block text-xs font-medium text-text-secondary">
-                      Sonido personalizado
-                    </label>
-                    <input
-                      type="text"
-                      value={form.tool_call_sound_custom}
-                      onChange={(event) => set('tool_call_sound_custom', event.target.value)}
-                      disabled={form.tool_call_sound_mode !== 'custom'}
-                      placeholder="custom_sound_name"
-                      className={`${inputClass} ${
-                        form.tool_call_sound_mode !== 'custom' ? 'bg-[#f5f3ff]' : ''
-                      }`}
-                    />
-                    {errors.tool_call_sound_custom && (
-                      <p className="mt-1 text-xs text-red-500">{errors.tool_call_sound_custom}</p>
-                    )}
-                  </div>
-                </div>
-
-                <div className="mt-3 grid gap-3 lg:grid-cols-2">
-                  <div className="rounded-xl border border-border-default bg-[#f5f3ff] px-3.5 py-2.5">
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <p className="text-xs font-medium text-text-primary/70">Disable interruptions</p>
-                        <p className="text-[11px] text-text-tertiary">
-                          Deshabilita interrupciones mientras la herramienta se ejecuta.
-                        </p>
-                      </div>
-                      <ToolToggle
-                        active={form.disable_interruptions}
-                        onChange={(value) => set('disable_interruptions', value)}
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="mb-1.5 block text-xs font-medium text-text-secondary">
-                      Content-Type
-                    </label>
-                    <select
-                      value={form.content_type}
-                      onChange={(event) =>
-                        set('content_type', event.target.value as CreateToolForm['content_type'])
-                      }
-                      className={inputClass}
-                    >
-                      {CONTENT_TYPES.map((contentType) => (
-                        <option key={contentType} value={contentType}>
-                          {contentType}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              </section>
-
-              <section className="rounded-xl border border-border-default bg-surface p-4 sm:p-5">
-                <div className="mb-4 flex items-center justify-between gap-3">
-                  <div>
-                    <h3 className="text-sm font-semibold text-text-primary">Encabezados</h3>
-                    <p className="mt-1 text-xs text-text-secondary">
-                      Define los encabezados que se enviaran con la solicitud.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setHeaders((prev) => [...prev, createHeaderRow()])}
-                    className="rounded-lg border border-[#271173]/25 px-3 py-1.5 text-xs font-medium text-primary-600 transition-colors hover:bg-primary-50/60"
-                  >
-                    Anadir encabezado
-                  </button>
-                </div>
-
-                <div className="space-y-2">
-                  {headers.map((header) => (
-                    <div key={header.id} className="grid gap-2 lg:grid-cols-[1fr_1fr_auto]">
-                      <div>
-                        <input
-                          type="text"
-                          value={header.key}
-                          onChange={(event) => updateHeaderRow(header.id, { key: event.target.value })}
-                          placeholder="Authorization"
-                          className={inputClass}
-                        />
-                        {errors[`headers.${header.id}.key`] && (
-                          <p className="mt-1 text-xs text-red-500">{errors[`headers.${header.id}.key`]}</p>
-                        )}
-                      </div>
-                      <input
-                        type="text"
-                        value={header.value}
-                        onChange={(event) => updateHeaderRow(header.id, { value: event.target.value })}
-                        placeholder="Bearer {{api_key}}"
-                        className={inputClass}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => removeHeaderRow(header.id)}
-                        className="rounded-xl border border-border-default p-2 text-text-tertiary transition-colors hover:bg-danger-50 hover:text-danger-600"
-                        title="Eliminar encabezado"
-                      >
-                        <TrashIcon className="h-4 w-4" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </section>
-
-              <section className="rounded-xl border border-border-default bg-surface p-4 sm:p-5">
-                <div className="mb-4">
-                  <h3 className="text-sm font-semibold text-text-primary">Parametros de ruta</h3>
-                  <p className="mt-1 text-xs text-text-secondary">
-                    Anade la ruta entre llaves en la URL para configurarlos aqui.
-                  </p>
-                </div>
-
-                {pathParams.length > 0 ? (
-                  <div className="space-y-2">
-                    {pathParams.map((row) =>
-                      renderParamRow(row, {
-                        section: 'path',
-                        identifierReadOnly: true,
-                        showRequired: false,
-                        onChange: updatePathParamRow,
-                      })
-                    )}
-                  </div>
-                ) : (
-                  <div className="rounded-xl border border-dashed border-border-default bg-bg-secondary px-3.5 py-3 text-xs text-text-secondary">
-                    No se detectaron parametros de ruta. Usa llaves en la URL, por ejemplo {'{order_id}'}.
-                  </div>
-                )}
-              </section>
-
-              <section className="rounded-xl border border-border-default bg-surface p-4 sm:p-5">
-                <div className="mb-4 flex items-center justify-between gap-3">
-                  <div>
-                    <h3 className="text-sm font-semibold text-text-primary">Parametros de consulta</h3>
-                    <p className="mt-1 text-xs text-text-secondary">
-                      Define los parametros que seran recopilados por el LLM y enviados como query.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setQueryParams((prev) => [...prev, createToolParamRow()])}
-                    className="rounded-lg border border-[#271173]/25 px-3 py-1.5 text-xs font-medium text-primary-600 transition-colors hover:bg-primary-50/60"
-                  >
-                    Anadir parametro
-                  </button>
-                </div>
-
-                {queryParams.length > 0 ? (
-                  <div className="space-y-2">
-                    {queryParams.map((row) =>
-                      renderParamRow(row, {
-                        section: 'query',
-                        showRequired: true,
-                        onChange: updateQueryParamRow,
-                        onRemove: removeQueryParamRow,
-                      })
-                    )}
-                  </div>
-                ) : (
-                  <div className="rounded-xl border border-dashed border-border-default bg-bg-secondary px-3.5 py-3 text-xs text-text-secondary">
-                    No hay parametros de consulta definidos.
-                  </div>
-                )}
-              </section>
-
-              <section className="rounded-xl border border-border-default bg-surface p-4 sm:p-5">
-                <div className="mb-3">
-                  <h3 className="text-sm font-semibold text-text-primary">Autenticacion</h3>
-                  <p className="mt-1 text-xs text-text-secondary">
-                    El workspace no tiene conexiones de autenticacion listadas desde este panel.
-                    Si tienes una conexion, puedes referenciarla en JSON.
-                  </p>
-                </div>
-                <textarea
-                  rows={2}
-                  value={form.auth_connection}
-                  onChange={(event) => set('auth_connection', event.target.value)}
-                  className={`${inputClass} resize-y font-mono text-xs`}
-                  placeholder='{"type":"auth_connection_id","auth_connection_id":"auth_xxx"}'
+              <div>
+                <label htmlFor={conditionId} className="mb-1 block text-xs font-medium text-text-tertiary sm:sr-only">
+                  Cuándo transferir (opcional)
+                  <span className="sr-only">, destino {index + 1}</span>
+                </label>
+                <input
+                  id={conditionId}
+                  type="text"
+                  value={typeof transfer.condition === 'string' ? transfer.condition : ''}
+                  onChange={(event) =>
+                    onChange(
+                      rows.map((item, itemIndex) =>
+                        itemIndex === index ? { ...item, condition: event.target.value } : item
+                      )
+                    )
+                  }
+                  className={inputClass}
+                  placeholder="Si el cliente pide hablar con un asesor"
                 />
-                {errors.auth_connection && (
-                  <p className="mt-1 text-xs text-red-500">{errors.auth_connection}</p>
-                )}
-              </section>
-
-              <section className="rounded-xl border border-border-default bg-surface p-4 sm:p-5">
-                <div className="mb-3">
-                  <h3 className="text-sm font-semibold text-text-primary">Request body schema</h3>
-                  <p className="mt-1 text-xs text-text-secondary">
-                    Para POST/PUT/PATCH define el cuerpo en formato JSON schema. Dejalo vacio para null.
-                  </p>
-                </div>
-                <textarea
-                  rows={4}
-                  value={form.request_body_schema}
-                  onChange={(event) => set('request_body_schema', event.target.value)}
-                  className={`${inputClass} resize-y font-mono text-xs`}
-                  placeholder='{"type":"object","properties":{"customer_id":{"type":"string"}},"required":["customer_id"]}'
-                />
-                {errors.request_body_schema && (
-                  <p className="mt-1 text-xs text-red-500">{errors.request_body_schema}</p>
-                )}
-              </section>
-
-              <section className="grid gap-4 lg:grid-cols-3">
-                <div className="rounded-xl border border-border-default bg-surface p-4 sm:p-5">
-                  <h3 className="text-sm font-semibold text-text-primary">Variables dinamicas</h3>
-                  <p className="mt-1 text-xs text-text-secondary">
-                    Placeholders reemplazados al iniciar la conversacion.
-                  </p>
-                  <textarea
-                    rows={5}
-                    value={form.dynamic_variable_placeholders}
-                    onChange={(event) =>
-                      set('dynamic_variable_placeholders', event.target.value)
-                    }
-                    className={`${inputClass} mt-3 resize-y font-mono text-xs`}
-                    placeholder='{"customer_id":{"type":"string"}}'
-                  />
-                  {errors.dynamic_variable_placeholders && (
-                    <p className="mt-1 text-xs text-red-500">
-                      {errors.dynamic_variable_placeholders}
-                    </p>
-                  )}
-                </div>
-
-                <div className="rounded-xl border border-border-default bg-surface p-4 sm:p-5">
-                  <h3 className="text-sm font-semibold text-text-primary">Asignaciones de variables</h3>
-                  <p className="mt-1 text-xs text-text-secondary">
-                    Configura que variables se actualizan desde la respuesta del webhook.
-                  </p>
-                  <textarea
-                    rows={5}
-                    value={form.assignments}
-                    onChange={(event) => set('assignments', event.target.value)}
-                    className={`${inputClass} mt-3 resize-y font-mono text-xs`}
-                    placeholder='[{"type":"dynamic_variable","output_key":"result.id","dynamic_variable":"order_id"}]'
-                  />
-                  {errors.assignments && (
-                    <p className="mt-1 text-xs text-red-500">{errors.assignments}</p>
-                  )}
-                </div>
-
-                <div className="rounded-xl border border-border-default bg-surface p-4 sm:p-5">
-                  <h3 className="text-sm font-semibold text-text-primary">Simulaciones de respuesta</h3>
-                  <p className="mt-1 text-xs text-text-secondary">
-                    Respuestas mock para pruebas sin usar sistemas de produccion.
-                  </p>
-                  <textarea
-                    rows={5}
-                    value={form.response_mocks}
-                    onChange={(event) => set('response_mocks', event.target.value)}
-                    className={`${inputClass} mt-3 resize-y font-mono text-xs`}
-                    placeholder='[{"name":"default","response":{"status":"ok"}}]'
-                  />
-                  {errors.response_mocks && (
-                    <p className="mt-1 text-xs text-red-500">{errors.response_mocks}</p>
-                  )}
-                </div>
-              </section>
-            </div>
-
-            <div className="flex gap-3 border-t border-border-default bg-surface px-4 py-4 sm:px-6">
-              <button
+              </div>
+              <Button
                 type="button"
-                onClick={onClose}
-                className="flex-1 rounded-xl bg-[#f5f3ff] px-4 py-2.5 text-sm font-medium text-text-primary transition-colors hover:bg-primary-50"
+                variant="ghost"
+                size="sm"
+                className="h-10.5 w-16 justify-self-start hover:bg-danger-50 hover:text-danger-700"
+                aria-label={`Quitar el destino ${index + 1}`}
+                onClick={() =>
+                  onChange(rows.length === 1 ? [emptyRow] : rows.filter((_, itemIndex) => itemIndex !== index))
+                }
               >
-                Cancelar
-              </button>
-              <button
-                type="submit"
-                disabled={isPending}
-                className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary-700 disabled:opacity-60"
-              >
-                {isPending && (
-                  <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
-                )}
-                {isPending ? 'Creando...' : 'Crear herramienta'}
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
+                Quitar
+              </Button>
+            </li>
+          )
+        })}
+      </ul>
+      {canAdd && (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => onChange([...rows, emptyRow])}
+          leftIcon={<PlusIcon className="h-4 w-4" aria-hidden="true" />}
+        >
+          Agregar destino
+        </Button>
+      )}
     </div>
   )
 }
@@ -1524,10 +369,11 @@ export default function ToolsTab({
   isClient = false,
 }: Props) {
   const queryClient = useQueryClient()
+  const baseId = useId()
+  const [confirm, confirmDialog] = useConfirm()
   const [search, setSearch] = useState('')
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [expandedWorkspaceId, setExpandedWorkspaceId] = useState<string | null>(null)
-  const [togglingWorkspaceId, setTogglingWorkspaceId] = useState<string | null>(null)
   const [expandedEmbeddedId, setExpandedEmbeddedId] = useState<string | null>(null)
   const [deletingToolId, setDeletingToolId] = useState<string | null>(null)
 
@@ -1561,50 +407,57 @@ export default function ToolsTab({
       setDeletingToolId(null)
     },
     onError: (error: Error) => {
-      toast.error(error.message)
+      toast.error(describeError(error, 'No pudimos eliminar la herramienta. Intente de nuevo.'))
       setDeletingToolId(null)
     },
   })
 
   const { mutate: createSuggestedTool, isPending: isCreatingSuggestedTool } = useMutation({
-    mutationFn: (kind: 'send_whatsapp_message' | 'schedule_appointment') =>
-      createTool(buildSuggestedToolPayload(kind)),
+    mutationFn: (kind: SuggestedToolKind) => createTool(buildSuggestedToolPayload(kind)),
     onSuccess: (tool) => {
       onWorkspaceToolToggle(tool.id, true)
-      toast.success(`Herramienta ${tool.tool_config.name} creada y activada`)
+      toast.success(`Herramienta «${tool.tool_config.name}» creada y activada`)
       queryClient.invalidateQueries({ queryKey: ['workspace-tools'] })
     },
-    onError: (error: Error) => toast.error(error.message),
+    onError: (error: Error) =>
+      toast.error(describeError(error, 'No pudimos crear la herramienta. Intente de nuevo.')),
   })
 
-  const handleDeleteTool = (toolId: string, e: React.MouseEvent) => {
-    e.stopPropagation()
-    if (!confirm('¿Eliminar esta herramienta del workspace?')) return
-    setDeletingToolId(toolId)
-    removeTool(toolId)
+  const handleDeleteTool = async (tool: WorkspaceTool) => {
+    const accepted = await confirm({
+      title: `¿Eliminar la herramienta «${tool.tool_config.name}»?`,
+      description:
+        'Se eliminará de su cuenta y dejará de estar disponible para todos los agentes que la usan. Esta acción no se puede deshacer.',
+      confirmLabel: 'Eliminar herramienta',
+      tone: 'danger',
+    })
+    if (!accepted) return
+    setDeletingToolId(tool.id)
+    removeTool(tool.id)
   }
 
-  const handleCreateSuggestedTool = (kind: 'send_whatsapp_message' | 'schedule_appointment') => {
-    const toolName = kind
+  const workspaceTools: WorkspaceTool[] = data?.tools ?? []
 
+  const handleCreateSuggestedTool = (kind: SuggestedToolKind, label: string) => {
     const existing = workspaceTools.some(
-      (tool) => (tool.tool_config.name || '').trim().toLowerCase() === toolName
+      (tool) => (tool.tool_config.name || '').trim().toLowerCase() === kind
     )
     if (existing) {
-      toast.info(`La herramienta ${toolName} ya existe en el workspace`)
+      toast.info(`La herramienta «${label}» ya está creada en su cuenta.`)
       return
     }
 
     const baseUrl = resolvePublicWebhookBaseUrl()
     if (!baseUrl) {
-      toast.error('Configura VITE_PUBLIC_WEBHOOK_BASE_URL o VITE_API_URL para crear herramientas sugeridas')
+      toast.error(
+        'Falta configurar la dirección pública del servidor (VITE_PUBLIC_WEBHOOK_BASE_URL o VITE_API_URL).'
+      )
       return
     }
 
     createSuggestedTool(kind)
   }
 
-  const workspaceTools: WorkspaceTool[] = data?.tools ?? []
   const ownedWebhookTools = useMemo(
     () =>
       (data?.tools ?? []).filter((tool) => {
@@ -1627,9 +480,10 @@ export default function ToolsTab({
     [agent]
   )
 
+  const query = search.trim().toLowerCase()
+
   const filteredWorkspaceTools = ownedWebhookTools.filter((tool) => {
-    if (!search) return true
-    const query = search.toLowerCase()
+    if (!query) return true
     return (
       tool.tool_config.name.toLowerCase().includes(query) ||
       (tool.tool_config.description ?? '').toLowerCase().includes(query) ||
@@ -1637,15 +491,12 @@ export default function ToolsTab({
     )
   })
 
-  const CLIENT_ALLOWED_SYSTEM_TOOLS = ['end_call', 'transfer_to_number', 'voicemail_detection']
   const filteredSystemTools = SYSTEM_TOOLS.filter((tool) => {
     if (isClient && !CLIENT_ALLOWED_SYSTEM_TOOLS.includes(tool.name)) return false
-    if (!search) return true
-    const query = search.toLowerCase()
-    return (
-      tool.name.toLowerCase().includes(query) ||
-      tool.label.toLowerCase().includes(query) ||
-      tool.description.toLowerCase().includes(query)
+    if (!query) return true
+    const copy = SYSTEM_TOOL_COPY[tool.name]
+    return [tool.name, tool.label, tool.description, copy?.label ?? '', copy?.description ?? ''].some(
+      (text) => text.toLowerCase().includes(query)
     )
   })
 
@@ -1694,84 +545,51 @@ export default function ToolsTab({
     }))
   }
 
-  const handleWorkspaceToggle = (toolId: string, enabled: boolean) => {
-    setTogglingWorkspaceId(toolId)
-    onWorkspaceToolToggle(toolId, enabled)
-
-    setTimeout(() => {
-      setTogglingWorkspaceId((current) => (current === toolId ? null : current))
-    }, 700)
-  }
+  const agentListId = `${baseId}-agent-options`
+  const numberListId = `${baseId}-number-options`
 
   return (
-    <div className="space-y-5">
-      {/* Search */}
-      <div className="rounded-xl border border-border-default bg-surface p-4">
+    <div className="space-y-10">
+      <div className="max-w-md">
+        <label htmlFor={`${baseId}-search`} className="sr-only">
+          Buscar herramientas
+        </label>
         <div className="relative">
-          <MagnifyingGlassIcon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-primary/40" />
+          <MagnifyingGlassIcon
+            aria-hidden="true"
+            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-tertiary"
+          />
           <input
-            type="text"
+            id={`${baseId}-search`}
+            type="search"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Buscar herramientas por nombre, tipo o descripcion..."
-            className="w-full rounded-xl border border-border-default bg-[#f5f3ff] py-2.5 pl-9 pr-3 text-sm text-text-primary placeholder:text-text-primary/40 transition-colors focus:border-primary-500 focus:outline-none"
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') event.preventDefault()
+            }}
+            placeholder="Buscar por nombre o descripción"
+            className={cn(inputClass, 'pl-9')}
           />
         </div>
       </div>
 
-      <div className="rounded-xl border border-border-default bg-surface p-4">
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div>
-            <p className="text-sm font-medium text-text-primary">Herramientas sugeridas de Voice</p>
-            <p className="mt-1 text-xs text-text-secondary">
-              Crea rapidamente send_whatsapp_message y schedule_appointment para invocarlas desde el agente.
-            </p>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => handleCreateSuggestedTool('send_whatsapp_message')}
-              disabled={isCreatingSuggestedTool || isClient}
-              className="rounded-xl border border-[#271173]/25 bg-[#f5f3ff] px-3 py-2 text-xs font-semibold text-primary-600 transition-colors hover:bg-primary-50 disabled:opacity-50"
-            >
-              Crear send_whatsapp_message
-            </button>
-            <button
-              type="button"
-              onClick={() => handleCreateSuggestedTool('schedule_appointment')}
-              disabled={isCreatingSuggestedTool || isClient}
-              className="rounded-xl border border-[#271173]/25 bg-[#f5f3ff] px-3 py-2 text-xs font-semibold text-primary-600 transition-colors hover:bg-primary-50 disabled:opacity-50"
-            >
-              Crear schedule_appointment
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* System tools */}
-      <div className="overflow-hidden rounded-xl border border-border-default bg-surface">
-        <div className="flex items-center justify-between border-b border-border-default bg-linear-to-r from-[#f5f3ff] to-white px-5 py-4">
-          <div className="flex items-center gap-2.5">
-            <CpuChipIcon className="h-4 w-4 text-primary-600" />
-            <div>
-              <p className="text-sm font-medium text-text-primary">Herramientas del sistema</p>
-              <p className="text-xs text-text-tertiary">Acciones nativas del runtime de la plataforma.</p>
-            </div>
-          </div>
-          <div className="inline-flex items-center gap-2 rounded-full border border-border-default bg-surface px-2 py-1">
-            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary-600 text-xs font-bold text-white">
-              {enabledSystemTools.length}
+      <section aria-labelledby={`${baseId}-system`} className="space-y-4">
+        <SectionHeading
+          id={`${baseId}-system`}
+          title="Acciones durante la llamada"
+          description="Lo que el agente puede hacer por sí mismo mientras atiende."
+          action={
+            <span className="text-sm text-text-secondary tabular-nums">
+              {enabledSystemTools.length} {enabledSystemTools.length === 1 ? 'activa' : 'activas'}
             </span>
-            <span className="text-xs font-medium text-text-secondary">activas</span>
-          </div>
-        </div>
+          }
+        />
 
-        <div className="divide-y divide-[#e4e0f5]">
-          {filteredSystemTools.length > 0 ? (
-            filteredSystemTools.map((tool) => {
+        {filteredSystemTools.length > 0 ? (
+          <ul className="divide-y divide-border-subtle rounded-xl border border-border-default bg-surface">
+            {filteredSystemTools.map((tool) => {
               const isEnabled = enabledSystemTools.includes(tool.name)
-              const SystemIcon = getSystemToolIcon(tool.name)
+              const copy = SYSTEM_TOOL_COPY[tool.name] ?? { label: tool.label, description: tool.description }
               const params = getSystemToolParams(tool.name)
               const systemToolType =
                 typeof params.system_tool_type === 'string'
@@ -1792,540 +610,360 @@ export default function ToolsTab({
                 phone_number: '',
                 condition: '',
               })
+              const toolBaseId = `${baseId}-${tool.name}`
 
               return (
-                <div
-                  key={tool.name}
-                  className="px-5 py-3.5 transition-colors hover:bg-primary-50/60"
-                >
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex min-w-0 items-start gap-2.5">
-                      <div className="mt-0.5 rounded-lg border border-border-default bg-surface p-1.5">
-                        <SystemIcon className="h-4 w-4 text-primary-600" />
-                      </div>
-                      <div>
-                        <p className="text-sm text-text-primary">{tool.label}</p>
-                        <p className="text-xs text-text-tertiary">{tool.description}</p>
-                        {isEnabled && needsConfig && (
-                          <p className="mt-1 text-[11px] text-primary-600">
-                            Requiere configuracion adicional para guardar correctamente.
-                          </p>
-                        )}
-                      </div>
-                    </div>
-
-                    <ToolToggle
-                      active={isEnabled}
-                      onChange={(value) => onSystemToolToggle(tool.name, value)}
-                    />
-                  </div>
+                <li key={tool.name} className="p-4">
+                  <SwitchField
+                    label={copy.label}
+                    description={copy.description}
+                    checked={isEnabled}
+                    onChange={(value) => onSystemToolToggle(tool.name, value)}
+                  />
 
                   {isEnabled && needsConfig && (
-                    <div className="mt-3 space-y-3 rounded-xl border border-border-default bg-surface p-3">
+                    <div className="mt-4 space-y-4 rounded-lg bg-surface-muted p-4">
                       {systemToolType === 'transfer_to_agent' && (
-                        <div className="space-y-2.5">
-                          <div className="flex items-center justify-between gap-3">
-                            <p className="text-xs font-medium text-text-primary/70">
-                              Destinos de transferencia a agente
-                            </p>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setTransferRows(tool.name, [
-                                  ...agentTransfers,
-                                  { agent_id: '', condition: '' },
-                                ])
-                              }
-                              className="rounded-lg border border-[#271173]/25 px-2.5 py-1 text-[11px] font-medium text-primary-600 hover:bg-primary-50/60"
-                            >
-                              + Agregar
-                            </button>
-                          </div>
-
-                          {agentTransfers.map((transfer, index) => (
-                            <div key={`${tool.name}-agent-${index}`} className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
-                              <div>
-                                <input
-                                  type="text"
-                                  list="agent-transfer-options"
-                                  value={typeof transfer.agent_id === 'string' ? transfer.agent_id : ''}
-                                  onChange={(event) =>
-                                    setTransferRows(
-                                      tool.name,
-                                      agentTransfers.map((item, itemIndex) =>
-                                        itemIndex === index
-                                          ? { ...item, agent_id: event.target.value }
-                                          : item
-                                      )
-                                    )
-                                  }
-                                  className={inputClass}
-                                  placeholder="agent_..."
-                                />
-                              </div>
-                              <div>
-                                <input
-                                  type="text"
-                                  value={typeof transfer.condition === 'string' ? transfer.condition : ''}
-                                  onChange={(event) =>
-                                    setTransferRows(
-                                      tool.name,
-                                      agentTransfers.map((item, itemIndex) =>
-                                        itemIndex === index
-                                          ? { ...item, condition: event.target.value }
-                                          : item
-                                      )
-                                    )
-                                  }
-                                  className={inputClass}
-                                  placeholder="Condicion opcional"
-                                />
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setTransferRows(
-                                    tool.name,
-                                    agentTransfers.length === 1
-                                      ? [{ agent_id: '', condition: '' }]
-                                      : agentTransfers.filter((_, itemIndex) => itemIndex !== index)
-                                  )
-                                }
-                                className="rounded-lg border border-border-default px-2 text-xs text-text-secondary hover:bg-danger-50 hover:text-danger-600"
-                              >
-                                Quitar
-                              </button>
-                            </div>
-                          ))}
-
-                          <datalist id="agent-transfer-options">
+                        <>
+                          <p className="text-sm font-medium text-text-primary">Agentes de destino</p>
+                          <TransferRowsEditor
+                            baseId={toolBaseId}
+                            rows={agentTransfers}
+                            field="agent_id"
+                            targetLabel="Agente de destino"
+                            targetPlaceholder="Elija o pegue el identificador del agente"
+                            listId={agentListId}
+                            canAdd
+                            onChange={(rows) => setTransferRows(tool.name, rows)}
+                          />
+                          <datalist id={agentListId}>
                             {transferAgentOptions.map((option) => (
                               <option key={option.agent_id} value={option.agent_id}>
                                 {option.name}
                               </option>
                             ))}
                           </datalist>
-
-                          <div className="flex items-center justify-between rounded-lg border border-border-default bg-[#f5f3ff] px-3 py-2">
-                            <p className="text-[11px] text-text-secondary">Mensaje al cliente durante transferencia</p>
-                            <ToolToggle
-                              active={Boolean(params.enable_client_message)}
-                              onChange={(value) =>
-                                updateSystemToolParams(tool.name, (current) => ({
-                                  ...current,
-                                  enable_client_message: value,
-                                }))
-                              }
-                            />
-                          </div>
-                        </div>
+                          <SwitchField
+                            label="Avisar al cliente durante la transferencia"
+                            checked={Boolean(params.enable_client_message)}
+                            onChange={(value) =>
+                              updateSystemToolParams(tool.name, (current) => ({
+                                ...current,
+                                enable_client_message: value,
+                              }))
+                            }
+                          />
+                        </>
                       )}
 
                       {systemToolType === 'transfer_to_number' && (
-                        <div className="space-y-2.5">
+                        <>
                           {isClient && (
-                            <div className="rounded-xl border border-blue-200 bg-blue-50 p-3">
-                              <p className="text-xs font-medium text-blue-800">
-                                📇 Destinos sincronizados desde el Directorio
-                              </p>
-                              <p className="mt-0.5 text-[11px] text-blue-700">
-                                Los números y condiciones de transferencia se gestionan automáticamente desde <strong>/directorio</strong>. Edita tus contactos allí para actualizar los destinos.
-                              </p>
-                            </div>
-                          )}
-                          <div className="flex items-center justify-between gap-3">
-                            <p className="text-xs font-medium text-text-primary/70">
-                              Destinos de transferencia (E.164)
+                            <p className="rounded-lg border border-info-200 bg-info-50 px-3 py-2.5 text-sm leading-relaxed text-info-700">
+                              Los destinos se sincronizan desde el{' '}
+                              <Link to="/directorio" className="font-medium underline underline-offset-2">
+                                Directorio de asesores
+                              </Link>
+                              . Para cambiarlos, actualice allí sus contactos.
                             </p>
-                            {!isClient && (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setTransferRows(tool.name, [
-                                    ...numberTransfers,
-                                    { phone_number: '', condition: '' },
-                                  ])
-                                }
-                                className="rounded-lg border border-[#271173]/25 px-2.5 py-1 text-[11px] font-medium text-primary-600 hover:bg-primary-50/60"
-                              >
-                                + Agregar
-                              </button>
-                            )}
+                          )}
+                          <div>
+                            <p className="text-sm font-medium text-text-primary">Destinos de transferencia</p>
+                            <p className="mt-0.5 text-xs text-text-tertiary">
+                              Con el indicativo del país, por ejemplo +573001234567.
+                            </p>
                           </div>
-
-                          {numberTransfers.map((transfer, index) => (
-                            <div key={`${tool.name}-number-${index}`} className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
-                              <div>
-                                <input
-                                  type="text"
-                                  list="number-transfer-options"
-                                  value={
-                                    typeof transfer.phone_number === 'string'
-                                      ? transfer.phone_number
-                                      : ''
-                                  }
-                                  onChange={(event) =>
-                                    setTransferRows(
-                                      tool.name,
-                                      numberTransfers.map((item, itemIndex) =>
-                                        itemIndex === index
-                                          ? { ...item, phone_number: event.target.value }
-                                          : item
-                                      )
-                                    )
-                                  }
-                                  className={inputClass}
-                                  placeholder="+573001234567"
-                                />
-                              </div>
-                              <div>
-                                <input
-                                  type="text"
-                                  value={typeof transfer.condition === 'string' ? transfer.condition : ''}
-                                  onChange={(event) =>
-                                    setTransferRows(
-                                      tool.name,
-                                      numberTransfers.map((item, itemIndex) =>
-                                        itemIndex === index
-                                          ? { ...item, condition: event.target.value }
-                                          : item
-                                      )
-                                    )
-                                  }
-                                  className={inputClass}
-                                  placeholder="Condicion opcional"
-                                />
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setTransferRows(
-                                    tool.name,
-                                    numberTransfers.length === 1
-                                      ? [{ phone_number: '', condition: '' }]
-                                      : numberTransfers.filter((_, itemIndex) => itemIndex !== index)
-                                  )
-                                }
-                                className="rounded-lg border border-border-default px-2 text-xs text-text-secondary hover:bg-danger-50 hover:text-danger-600"
-                              >
-                                Quitar
-                              </button>
-                            </div>
-                          ))}
-
-                          <datalist id="number-transfer-options">
+                          <TransferRowsEditor
+                            baseId={toolBaseId}
+                            rows={numberTransfers}
+                            field="phone_number"
+                            targetLabel="Número de destino"
+                            targetPlaceholder="+573001234567"
+                            listId={numberListId}
+                            canAdd={!isClient}
+                            onChange={(rows) => setTransferRows(tool.name, rows)}
+                          />
+                          <datalist id={numberListId}>
                             {transferNumberOptions.map((option) => (
                               <option key={option.phone_number_id} value={option.phone_number}>
                                 {option.label}
                               </option>
                             ))}
                           </datalist>
-
-                          <div className="flex items-center justify-between rounded-lg border border-border-default bg-[#f5f3ff] px-3 py-2">
-                            <p className="text-[11px] text-text-secondary">Mensaje al cliente durante transferencia</p>
-                            <ToolToggle
-                              active={Boolean(params.enable_client_message)}
-                              onChange={(value) =>
-                                updateSystemToolParams(tool.name, (current) => ({
-                                  ...current,
-                                  enable_client_message: value,
-                                }))
-                              }
-                            />
-                          </div>
-                        </div>
+                          <SwitchField
+                            label="Avisar al cliente durante la transferencia"
+                            checked={Boolean(params.enable_client_message)}
+                            onChange={(value) =>
+                              updateSystemToolParams(tool.name, (current) => ({
+                                ...current,
+                                enable_client_message: value,
+                              }))
+                            }
+                          />
+                        </>
                       )}
 
                       {systemToolType === 'play_keypad_touch_tone' && (
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between rounded-lg border border-border-default bg-[#f5f3ff] px-3 py-2">
-                            <p className="text-[11px] text-text-secondary">Enviar DTMF out-of-band (RFC4733)</p>
-                            <ToolToggle
-                              active={Boolean(params.use_out_of_band_dtmf)}
-                              onChange={(value) =>
-                                updateSystemToolParams(tool.name, (current) => ({
-                                  ...current,
-                                  use_out_of_band_dtmf: value,
-                                }))
-                              }
-                            />
-                          </div>
-                          <div className="flex items-center justify-between rounded-lg border border-border-default bg-[#f5f3ff] px-3 py-2">
-                            <p className="text-[11px] text-text-secondary">Suprimir turno de voz despues del DTMF</p>
-                            <ToolToggle
-                              active={Boolean(params.suppress_turn_after_dtmf)}
-                              onChange={(value) =>
-                                updateSystemToolParams(tool.name, (current) => ({
-                                  ...current,
-                                  suppress_turn_after_dtmf: value,
-                                }))
-                              }
-                            />
-                          </div>
-                        </div>
+                        <>
+                          <SwitchField
+                            label="Enviar los tonos por fuera del audio"
+                            description="Método RFC 4733, compatible con la mayoría de centrales telefónicas."
+                            checked={Boolean(params.use_out_of_band_dtmf)}
+                            onChange={(value) =>
+                              updateSystemToolParams(tool.name, (current) => ({
+                                ...current,
+                                use_out_of_band_dtmf: value,
+                              }))
+                            }
+                          />
+                          <SwitchField
+                            label="No hablar después de marcar"
+                            checked={Boolean(params.suppress_turn_after_dtmf)}
+                            onChange={(value) =>
+                              updateSystemToolParams(tool.name, (current) => ({
+                                ...current,
+                                suppress_turn_after_dtmf: value,
+                              }))
+                            }
+                          />
+                        </>
                       )}
 
                       {systemToolType === 'voicemail_detection' && (
-                        <div>
-                          <label className="mb-1.5 block text-xs font-medium text-text-primary/70">
-                            Mensaje opcional para dejar en buzon de voz
-                          </label>
-                          <textarea
-                            rows={3}
-                            value={typeof params.voicemail_message === 'string' ? params.voicemail_message : ''}
-                            onChange={(event) =>
-                              updateSystemToolParams(tool.name, (current) => ({
-                                ...current,
-                                voicemail_message: event.target.value,
-                              }))
-                            }
-                            className={`${inputClass} resize-none`}
-                            placeholder="Hola, intentamos comunicarnos contigo. Puedes devolver la llamada cuando te sea posible."
-                          />
-                        </div>
+                        <Field label="Mensaje para dejar en el buzón (opcional)">
+                          {(control) => (
+                            <textarea
+                              {...control}
+                              rows={3}
+                              value={typeof params.voicemail_message === 'string' ? params.voicemail_message : ''}
+                              onChange={(event) =>
+                                updateSystemToolParams(tool.name, (current) => ({
+                                  ...current,
+                                  voicemail_message: event.target.value,
+                                }))
+                              }
+                              className={textareaClass}
+                              placeholder="Hola, intentamos comunicarnos con usted. Puede devolvernos la llamada cuando le sea posible."
+                            />
+                          )}
+                        </Field>
                       )}
                     </div>
                   )}
-                </div>
+                </li>
               )
-            })
-          ) : (
-            <EmptyState message="No hay herramientas del sistema que coincidan con la busqueda." />
-          )}
-        </div>
-      </div>
+            })}
+          </ul>
+        ) : (
+          <p className="text-sm text-text-secondary">Ninguna acción coincide con la búsqueda.</p>
+        )}
+      </section>
 
-      {/* Workspace tools */}
       {!isClient && (
-      <div className="overflow-hidden rounded-xl border border-border-default bg-surface">
-        <div className="flex items-center justify-between border-b border-border-default bg-linear-to-r from-[#f5f3ff] to-white px-5 py-4">
-          <div className="flex items-center gap-2.5">
-            <ServerIcon className="h-4 w-4 text-primary-600" />
-            <div>
-              <p className="text-sm font-medium text-text-primary">Webhooks del workspace</p>
-              <p className="text-xs text-text-tertiary">
-                Solo se listan herramientas webhook HTTP creadas por ti. Se adjuntan via{' '}
-                <span className="rounded bg-[#f0edff] px-1.5 py-0.5 font-mono text-[11px] text-text-primary/70">
-                  tool_ids
-                </span>{' '}
-                y quedan persistentes al guardar.
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <div className="inline-flex items-center gap-2 rounded-full border border-border-default bg-surface px-2 py-1">
-              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary-600 text-xs font-bold text-white">
-                {attachedOwnedWebhookCount}
-              </span>
-              <span className="text-xs font-medium text-text-secondary">adjuntas</span>
-            </div>
-            {!isClient && (
-              <button
-                type="button"
-                onClick={() => setShowCreateModal(true)}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-[#271173]/20 bg-[#f5f3ff] px-3 py-1.5 text-xs font-medium text-primary-600 transition-colors hover:bg-primary-50"
-              >
-                <PlusIcon className="h-3.5 w-3.5" />
-                Nueva
-              </button>
-            )}
-          </div>
-        </div>
-
-        <div className="space-y-2 px-3 py-3">
-          {isLoading ? (
-            <div className="flex h-28 items-center justify-center gap-2.5 text-sm text-text-secondary">
-              <div className="h-4 w-4 animate-spin rounded-full border-2 border-[#271173] border-t-transparent" />
-              Cargando herramientas...
-            </div>
-          ) : filteredWorkspaceTools.length > 0 ? (
-            filteredWorkspaceTools.map((tool) => {
-              const isAttached = selectedToolIds.includes(tool.id)
-              const isExpanded = expandedWorkspaceId === tool.id
-              const hasApiSchema = !!tool.tool_config.api_schema
-              const apiSchemaText = hasApiSchema
-                ? JSON.stringify(tool.tool_config.api_schema, null, 2)
-                : ''
-
-              return (
-                <div
-                  key={tool.id}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() =>
-                    setExpandedWorkspaceId((current) =>
-                      current === tool.id ? null : tool.id
-                    )
-                  }
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault()
-                      setExpandedWorkspaceId((current) =>
-                        current === tool.id ? null : tool.id
-                      )
-                    }
-                  }}
-                  className="cursor-pointer rounded-xl border border-border-default bg-surface p-4 transition-colors hover:bg-primary-50/60"
+        <section aria-labelledby={`${baseId}-connected`} className="space-y-4 border-t border-border-default pt-8">
+          <SectionHeading
+            id={`${baseId}-connected`}
+            title="Herramientas conectadas"
+            description="Conexiones con sistemas externos que el agente puede usar, como agendar citas o enviar mensajes. Los cambios se aplican al guardar."
+            action={
+              <>
+                <span className="text-sm text-text-secondary tabular-nums">
+                  {attachedOwnedWebhookCount} en uso
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowCreateModal(true)}
+                  leftIcon={<PlusIcon className="h-4 w-4" aria-hidden="true" />}
                 >
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0 flex-1">
-                      <div className="mb-1 flex flex-wrap items-center gap-2">
-                        <LinkIcon className="h-3.5 w-3.5 shrink-0 text-text-tertiary" />
-                        <p className="text-sm font-medium text-text-primary">
-                          {tool.tool_config.name}
-                        </p>
-                        {isAttached && (
-                          <span
-                            className={`inline-flex items-center gap-1 rounded-full bg-primary-50 px-2 py-0.5 text-[11px] font-medium text-primary-600 ${
-                              togglingWorkspaceId === tool.id ? 'animate-pulse' : ''
-                            }`}
-                          >
-                            <CheckCircleIcon className="h-3.5 w-3.5" />
-                            Adjunta
-                          </span>
-                        )}
-                      </div>
+                  Nueva herramienta
+                </Button>
+              </>
+            }
+          />
 
-                      <div className="space-y-1 text-xs text-text-tertiary">
-                        <p>{tool.tool_config.description ?? 'Sin descripcion'}</p>
-                        <p className="font-mono">Tipo: {tool.tool_config.type ?? 'unknown'}</p>
-                        {tool.tool_config.api_schema?.url && (
-                          <p className="truncate font-mono">
-                            {tool.tool_config.api_schema.method ?? 'GET'}{' '}
-                            {tool.tool_config.api_schema.url}
+          <div className="flex flex-col gap-3 rounded-lg bg-surface-muted px-4 py-3 md:flex-row md:items-center md:justify-between">
+            <p className="text-sm text-text-secondary">
+              Cree y active en un paso las conexiones que ya ofrece la plataforma.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {SUGGESTED_TOOLS.map((suggestion) => (
+                <Button
+                  key={suggestion.kind}
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={isCreatingSuggestedTool}
+                  onClick={() => handleCreateSuggestedTool(suggestion.kind, suggestion.label)}
+                >
+                  {suggestion.label}
+                </Button>
+              ))}
+            </div>
+          </div>
+
+          {isLoading ? (
+            <p role="status" className="flex items-center gap-2.5 py-6 text-sm text-text-secondary">
+              <span
+                aria-hidden="true"
+                className="h-4 w-4 animate-spin rounded-full border-2 border-primary-600 border-t-transparent"
+              />
+              Cargando herramientas…
+            </p>
+          ) : filteredWorkspaceTools.length > 0 ? (
+            <ul className="divide-y divide-border-subtle rounded-xl border border-border-default bg-surface">
+              {filteredWorkspaceTools.map((tool) => {
+                const isAttached = selectedToolIds.includes(tool.id)
+                const isExpanded = expandedWorkspaceId === tool.id
+                const hasApiSchema = !!tool.tool_config.api_schema
+                const detailsId = `${baseId}-details-${tool.id}`
+                const toolName = tool.tool_config.name
+
+                return (
+                  <li key={tool.id} className="p-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="break-all font-mono text-sm font-medium text-text-primary">{toolName}</p>
+                          {isAttached && (
+                            <Badge variant="success" size="sm">
+                              En uso
+                            </Badge>
+                          )}
+                        </div>
+                        <p className="mt-1 text-sm text-text-secondary">
+                          {tool.tool_config.description || 'Sin descripción'}
+                        </p>
+                        {tool.access_info?.creator_email && (
+                          <p className="mt-0.5 text-xs text-text-tertiary">
+                            Creada por {tool.access_info.creator_email}
                           </p>
                         )}
-                        {tool.access_info?.creator_email && (
-                          <p>Owner: {tool.access_info.creator_email}</p>
-                        )}
                       </div>
-                    </div>
 
-                    <div className="flex items-center gap-2">
-                      <div onClick={(e) => e.stopPropagation()}>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <Switch
+                          checked={isAttached}
+                          onChange={(value) => onWorkspaceToolToggle(tool.id, value)}
+                          label={`Usar ${toolName} en este agente`}
+                        />
                         <button
                           type="button"
                           disabled={deletingToolId === tool.id}
-                          onClick={(e) => handleDeleteTool(tool.id, e)}
-                          className="rounded-lg p-1.5 text-text-primary/40 transition-colors hover:bg-danger-50 hover:text-danger-600 disabled:opacity-50"
-                          title="Eliminar herramienta"
+                          onClick={() => handleDeleteTool(tool)}
+                          aria-label={`Eliminar ${toolName}`}
+                          className="ml-1 rounded-lg p-2 text-text-tertiary transition-colors hover:bg-danger-50 hover:text-danger-700 disabled:opacity-50"
                         >
-                          <TrashIcon className="h-4 w-4" />
+                          <TrashIcon className="h-4 w-4" aria-hidden="true" />
                         </button>
                       </div>
-                      <div onClick={(event) => event.stopPropagation()}>
-                        <ToolToggle
-                          active={isAttached}
-                          onChange={(value) => handleWorkspaceToggle(tool.id, value)}
-                        />
-                      </div>
-                      <ChevronDownIcon
-                        className={`h-4 w-4 text-text-tertiary transition-transform ${
-                          isExpanded ? 'rotate-180' : ''
-                        }`}
-                      />
                     </div>
-                  </div>
 
-                  {isExpanded && hasApiSchema && (
-                    <div className="mt-3 border-t border-border-default pt-3">
-                      <p className="mb-2 text-[11px] font-medium uppercase tracking-[0.16em] text-text-muted">
-                        api_schema
-                      </p>
-                      <pre className="overflow-x-auto rounded-xl bg-[#1a1a2e] p-3 font-mono text-xs text-green-400">
-                        {apiSchemaText}
-                      </pre>
-                    </div>
-                  )}
-                </div>
-              )
-            })
+                    {hasApiSchema && (
+                      <div className="mt-2">
+                        <button
+                          type="button"
+                          aria-expanded={isExpanded}
+                          aria-controls={detailsId}
+                          onClick={() =>
+                            setExpandedWorkspaceId((current) => (current === tool.id ? null : tool.id))
+                          }
+                          className="inline-flex items-center gap-1 rounded-md py-1 text-xs font-medium text-primary-700 hover:underline"
+                        >
+                          Detalles técnicos
+                          <ChevronDownIcon
+                            aria-hidden="true"
+                            className={cn('h-3.5 w-3.5 transition-transform', isExpanded && 'rotate-180')}
+                          />
+                        </button>
+                        {isExpanded && (
+                          <div id={detailsId} className="mt-2 space-y-2">
+                            {tool.tool_config.api_schema?.url && (
+                              <p className="break-all font-mono text-xs text-text-secondary">
+                                {tool.tool_config.api_schema.method ?? 'GET'} {tool.tool_config.api_schema.url}
+                              </p>
+                            )}
+                            <pre className="max-h-72 overflow-auto rounded-lg border border-border-default bg-surface-muted p-3 font-mono text-xs text-text-secondary">
+                              {JSON.stringify(tool.tool_config.api_schema, null, 2)}
+                            </pre>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </li>
+                )
+              })}
+            </ul>
           ) : (
-            <EmptyState message="No hay webhooks creados por ti. Crea el primero con el boton Nueva." />
+            <p className="rounded-xl border border-dashed border-border-strong px-6 py-8 text-center text-sm text-text-secondary">
+              {query
+                ? 'Ninguna herramienta coincide con la búsqueda.'
+                : 'Aún no hay herramientas conectadas. Use «Nueva herramienta» o uno de los atajos de arriba.'}
+            </p>
           )}
-        </div>
-      </div>
+        </section>
       )}
 
-      {/* Embedded tools */}
-      <div className="rounded-xl border border-border-default bg-surface p-5">
-        <div className="mb-3 flex items-center gap-2.5">
-          <LinkIcon className="h-4 w-4 text-primary-600" />
-          <p className="text-sm font-medium text-text-primary">Herramientas embebidas ya presentes</p>
-        </div>
+      {(!isClient || embeddedTools.length > 0) && (
+        <section aria-labelledby={`${baseId}-embedded`} className="space-y-4 border-t border-border-default pt-8">
+          <SectionHeading
+            id={`${baseId}-embedded`}
+            title="Herramientas incluidas en el agente"
+            description="Vienen dentro de la configuración del agente. Se conservan al guardar, pero no se editan desde aquí."
+          />
 
-        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-          <div className="flex items-start gap-2.5">
-            <ExclamationTriangleIcon className="mt-0.5 h-4 w-4 text-amber-600" />
-            <p className="text-xs leading-5 text-amber-900">
-              Estas herramientas estan directamente en el prompt del agente. Se preservan al
-              guardar pero no se pueden editar desde aqui.
-            </p>
-          </div>
-        </div>
-
-        <div className="space-y-3">
           {embeddedTools.length > 0 ? (
-            embeddedTools.map((tool: Record<string, unknown>, index) => {
-              const embeddedId = `${String(tool.name ?? 'embedded')}-${index}`
-              const isExpanded = expandedEmbeddedId === embeddedId
+            <ul className="divide-y divide-border-subtle rounded-xl border border-border-default bg-surface">
+              {embeddedTools.map((tool: Record<string, unknown>, index) => {
+                const embeddedId = `${String(tool.name ?? 'embedded')}-${index}`
+                const isExpanded = expandedEmbeddedId === embeddedId
+                const detailsId = `${baseId}-embedded-${index}`
 
-              return (
-                <div
-                  key={embeddedId}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() =>
-                    setExpandedEmbeddedId((current) =>
-                      current === embeddedId ? null : embeddedId
-                    )
-                  }
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault()
-                      setExpandedEmbeddedId((current) =>
-                        current === embeddedId ? null : embeddedId
-                      )
-                    }
-                  }}
-                  className="cursor-pointer rounded-xl border border-border-default bg-[#f5f3ff] p-4"
-                >
-                  <div className="mb-1 flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <CheckCircleIcon className="h-4 w-4 text-primary-600" />
-                      <p className="text-sm font-medium text-text-primary">
-                        {String(tool.name ?? `tool_${index + 1}`)}
-                      </p>
-                    </div>
-                    <ChevronDownIcon
-                      className={`h-4 w-4 text-text-tertiary transition-transform ${
-                        isExpanded ? 'rotate-180' : ''
-                      }`}
-                    />
-                  </div>
-                  <p className="text-xs text-text-secondary">Tipo: {String(tool.type ?? 'custom')}</p>
-                  {'description' in tool && typeof tool.description === 'string' && (
-                    <p className="mt-1 text-xs text-text-tertiary">{tool.description}</p>
-                  )}
-
-                  {isExpanded && (
-                    <div className="mt-3 border-t border-border-default pt-3">
-                      <p className="mb-2 text-[11px] font-medium uppercase tracking-[0.16em] text-text-muted">
-                        tool json
-                      </p>
-                      <pre className="overflow-x-auto rounded-xl bg-[#1a1a2e] p-3 font-mono text-xs text-green-400">
-                        {JSON.stringify(tool, null, 2)}
-                      </pre>
-                    </div>
-                  )}
-                </div>
-              )
-            })
+                return (
+                  <li key={embeddedId} className="p-4">
+                    <p className="break-all font-mono text-sm font-medium text-text-primary">
+                      {String(tool.name ?? `herramienta_${index + 1}`)}
+                    </p>
+                    {'description' in tool && typeof tool.description === 'string' && tool.description && (
+                      <p className="mt-1 text-sm text-text-secondary">{tool.description}</p>
+                    )}
+                    {!isClient && (
+                      <div className="mt-2">
+                        <button
+                          type="button"
+                          aria-expanded={isExpanded}
+                          aria-controls={detailsId}
+                          onClick={() =>
+                            setExpandedEmbeddedId((current) => (current === embeddedId ? null : embeddedId))
+                          }
+                          className="inline-flex items-center gap-1 rounded-md py-1 text-xs font-medium text-primary-700 hover:underline"
+                        >
+                          Ver configuración
+                          <ChevronDownIcon
+                            aria-hidden="true"
+                            className={cn('h-3.5 w-3.5 transition-transform', isExpanded && 'rotate-180')}
+                          />
+                        </button>
+                        {isExpanded && (
+                          <pre
+                            id={detailsId}
+                            className="mt-2 max-h-72 overflow-auto rounded-lg border border-border-default bg-surface-muted p-3 font-mono text-xs text-text-secondary"
+                          >
+                            {JSON.stringify(tool, null, 2)}
+                          </pre>
+                        )}
+                      </div>
+                    )}
+                  </li>
+                )
+              })}
+            </ul>
           ) : (
-            <EmptyState message="Este agente no tiene herramientas embebidas adicionales." />
+            <p className="text-sm text-text-secondary">Este agente no trae herramientas incluidas.</p>
           )}
-        </div>
-      </div>
+        </section>
+      )}
 
       {showCreateModal && !isClient && (
         <CreateToolModal
@@ -2333,11 +971,9 @@ export default function ToolsTab({
           onCreated={() => queryClient.invalidateQueries({ queryKey: ['workspace-tools'] })}
         />
       )}
+
+      {confirmDialog}
     </div>
   )
 }
-
-
-
-
 

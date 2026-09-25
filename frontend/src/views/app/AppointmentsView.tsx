@@ -1,33 +1,17 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import {
   CalendarDaysIcon,
+  CheckCircleIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
-  ClockIcon,
   PlusIcon,
-  TrashIcon,
-  XMarkIcon,
-  LinkIcon,
-  CheckCircleIcon,
 } from '@heroicons/react/24/outline'
-import {
-  createTextAgentAppointment,
-  deleteTextAgentAppointment,
-  getTextAgentAppointments,
-  getTextAgents,
-  updateTextAgentAppointment,
-} from '@/api/TextAgentsAPI'
-import {
-  createVoiceAgentAppointment,
-  deleteVoiceAgentAppointment,
-  getAgents,
-  getVoiceAgentAppointments,
-  updateVoiceAgentAppointment,
-} from '@/api/VoiceRuntimeAPI'
-import type { TextAppointment, TextAppointmentStatus } from '@/types/textAgent'
+import { getTextAgentAppointments, getTextAgents } from '@/api/TextAgentsAPI'
+import { getAgents, getVoiceAgentAppointments } from '@/api/VoiceRuntimeAPI'
+import type { TextAppointmentStatus } from '@/types/textAgent'
 import {
   getCalendarConnections,
   getGoogleAuthUrl,
@@ -35,216 +19,67 @@ import {
   getGoogleCalendarEvents,
 } from '@/api/CalendarsAPI'
 import type { GoogleCalendarEvent } from '@/api/CalendarsAPI'
+import Button from '@/components/ui/Button'
+import PageHeader from '@/components/ui/PageHeader'
+import { useConfirm } from '@/components/ui/ConfirmDialog'
+import AppointmentFormModal from '@/components/app/appointments/AppointmentFormModal'
+import DayAgenda from '@/components/app/appointments/DayAgenda'
+import MonthCalendar from '@/components/app/appointments/MonthCalendar'
+import {
+  CHANNEL_LABELS,
+  CHANNEL_ORDER,
+  STATUS_OPTIONS,
+  appointmentChannel,
+  buildMonthCells,
+  formatMonthTitle,
+  isSameMonth,
+  normalizeAgents,
+  parseDateKey,
+  toDateKey,
+  toMonthStart,
+  type AgentOption,
+  type CalendarAppointment,
+  type CalendarCell,
+  type ChannelKey,
+} from '@/components/app/appointments/calendar'
+import { pluralize } from '@/lib/format'
 
-type Channel = 'text' | 'voice'
-type ChannelFilter = 'all' | Channel
+type ChannelFilter = 'all' | ChannelKey
 type StatusFilter = 'all' | TextAppointmentStatus
-type ModalMode = 'create' | 'edit'
-
-type AgentOption = {
-  id: string
-  name: string
-  channel: Channel
-}
-
-type CalendarAppointment = TextAppointment & {
-  channel: Channel
-  agent_id: string
-  agent_name: string
-}
 
 type CalendarData = {
-  textAgents: AgentOption[]
-  voiceAgents: AgentOption[]
+  agents: AgentOption[]
   appointments: CalendarAppointment[]
 }
 
-type ModalFormState = {
-  channel: Channel
-  agentId: string
-  appointmentDate: string
-  timezone: string
-  contactName: string
-  contactPhone: string
-  contactEmail: string
-  status: TextAppointmentStatus
-  notes: string
-}
+type ModalState = { appointment: CalendarAppointment | null; date: Date } | null
 
-type CalendarCell = {
-  key: string
-  date: Date
-  inCurrentMonth: boolean
-  isToday: boolean
-}
+const selectClass =
+  'h-9 w-full min-w-0 rounded-lg sm:w-auto border border-border-default bg-surface pl-3 pr-8 text-sm text-text-primary transition-colors focus:border-primary-500'
 
-const WEEKDAY_LABELS = ['Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab', 'Dom']
+const navButtonClass =
+  'inline-flex size-9 items-center justify-center rounded-lg text-text-secondary transition-colors hover:bg-neutral-100 hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500'
 
-const STATUS_OPTIONS: Array<{ value: TextAppointmentStatus; label: string }> = [
-  { value: 'scheduled', label: 'Programada' },
-  { value: 'confirmed', label: 'Confirmada' },
-  { value: 'completed', label: 'Completada' },
-  { value: 'cancelled', label: 'Cancelada' },
-  { value: 'no_show', label: 'No asistio' },
-]
-
-const STATUS_BADGE: Record<TextAppointmentStatus, string> = {
-  scheduled: 'bg-amber-50 text-amber-700 ring-amber-200',
-  confirmed: 'bg-blue-50 text-blue-700 ring-blue-200',
-  completed: 'bg-accent-50 text-accent-700 ring-accent-200',
-  cancelled: 'bg-danger-50 text-danger-700 ring-rose-200',
-  no_show: 'bg-slate-100 text-slate-600 ring-slate-200',
-}
-
-function toInputDateValue(date: Date): string {
-  const adjusted = new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
-  return adjusted.toISOString().slice(0, 16)
-}
-
-function toDateKey(date: Date): string {
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-
-function parseDateKey(key: string): Date {
-  const [yearRaw, monthRaw, dayRaw] = key.split('-')
-  const year = Number.parseInt(yearRaw || '', 10)
-  const month = Number.parseInt(monthRaw || '', 10)
-  const day = Number.parseInt(dayRaw || '', 10)
-
-  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
-    return new Date()
+function groupByDay<T>(items: T[], getUnix: (item: T) => number): Map<string, T[]> {
+  const grouped = new Map<string, T[]>()
+  for (const item of items) {
+    const key = toDateKey(new Date(getUnix(item) * 1000))
+    const current = grouped.get(key)
+    if (current) current.push(item)
+    else grouped.set(key, [item])
   }
-
-  return new Date(year, month - 1, day)
-}
-
-function toMonthStart(date: Date): Date {
-  return new Date(date.getFullYear(), date.getMonth(), 1)
-}
-
-function buildMonthCells(monthStart: Date): CalendarCell[] {
-  const firstDayIndex = monthStart.getDay()
-  const leadingDays = firstDayIndex === 0 ? 6 : firstDayIndex - 1
-  const firstCellDate = new Date(monthStart)
-  firstCellDate.setDate(monthStart.getDate() - leadingDays)
-
-  const todayKey = toDateKey(new Date())
-  const cells: CalendarCell[] = []
-
-  for (let index = 0; index < 42; index += 1) {
-    const date = new Date(firstCellDate)
-    date.setDate(firstCellDate.getDate() + index)
-
-    const key = toDateKey(date)
-    cells.push({
-      key,
-      date,
-      inCurrentMonth: date.getMonth() === monthStart.getMonth(),
-      isToday: key === todayKey,
-    })
+  for (const values of grouped.values()) {
+    values.sort((left, right) => getUnix(left) - getUnix(right))
   }
-
-  return cells
-}
-
-function statusLabel(status: TextAppointmentStatus): string {
-  return STATUS_OPTIONS.find((option) => option.value === status)?.label ?? status
-}
-
-function channelLabel(channel: Channel): string {
-  return channel === 'voice' ? 'Voz' : 'Texto'
-}
-
-function formatDateTime(unix: number): string {
-  return new Date(unix * 1000).toLocaleString('es-CO', {
-    year: 'numeric',
-    month: 'short',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
-
-function normalizeVoiceAgents(raw: unknown): AgentOption[] {
-  if (!raw || typeof raw !== 'object' || !Array.isArray((raw as { agents?: unknown[] }).agents)) {
-    return []
-  }
-
-  const normalized: AgentOption[] = []
-  for (const agent of (raw as { agents: Array<Record<string, unknown>> }).agents) {
-    const id = String(agent.agent_id ?? '').trim()
-    if (!id) continue
-    const name = String(agent.name ?? id).trim() || id
-    normalized.push({ id, name, channel: 'voice' })
-  }
-
-  return normalized
-}
-
-function normalizeTextAgents(raw: unknown): AgentOption[] {
-  if (!raw || typeof raw !== 'object' || !Array.isArray((raw as { agents?: unknown[] }).agents)) {
-    return []
-  }
-
-  const normalized: AgentOption[] = []
-  for (const agent of (raw as { agents: Array<Record<string, unknown>> }).agents) {
-    const id = String(agent.agent_id ?? '').trim()
-    if (!id) continue
-    const name = String(agent.name ?? id).trim() || id
-    normalized.push({ id, name, channel: 'text' })
-  }
-
-  return normalized
-}
-
-function buildDefaultModalForm(
-  allAgents: AgentOption[],
-  preferredDate: Date,
-  preferredChannel?: Channel
-): ModalFormState {
-  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Bogota'
-
-  const withTime = new Date(preferredDate)
-  withTime.setHours(10, 0, 0, 0)
-
-  const availableChannel: Channel =
-    preferredChannel && allAgents.some((agent) => agent.channel === preferredChannel)
-      ? preferredChannel
-      : allAgents.some((agent) => agent.channel === 'text')
-      ? 'text'
-      : 'voice'
-
-  const firstAgent = allAgents.find((agent) => agent.channel === availableChannel)
-
-  return {
-    channel: availableChannel,
-    agentId: firstAgent?.id ?? '',
-    appointmentDate: toInputDateValue(withTime),
-    timezone,
-    contactName: '',
-    contactPhone: '',
-    contactEmail: '',
-    status: 'scheduled',
-    notes: '',
-  }
-}
-
-function isFormContactValid(form: ModalFormState): boolean {
-  return Boolean(form.contactName.trim() || form.contactPhone.trim() || form.contactEmail.trim())
-}
-
-function channelChipClass(channel: Channel): string {
-  return channel === 'voice'
-    ? 'bg-sky-50 text-sky-700 ring-sky-200'
-    : 'bg-violet-50 text-violet-700 ring-violet-200'
+  return grouped
 }
 
 export default function AppointmentsView() {
   const queryClient = useQueryClient()
   const [searchParams, setSearchParams] = useSearchParams()
+  const [confirm, confirmDialog] = useConfirm()
+  const fieldId = useId()
+  const agendaRef = useRef<HTMLDivElement>(null)
 
   // Resultado del flujo OAuth de Google Calendar (el backend redirige con estos params).
   useEffect(() => {
@@ -255,7 +90,7 @@ export default function AppointmentsView() {
       toast.success('Google Calendar conectado')
       queryClient.invalidateQueries({ queryKey: ['calendar-connections'] })
     } else {
-      toast.error('No se pudo conectar Google Calendar. Intenta de nuevo.')
+      toast.error('No se pudo conectar Google Calendar. Intente de nuevo.')
     }
     const next = new URLSearchParams(searchParams)
     next.delete('calendar_connected')
@@ -267,27 +102,22 @@ export default function AppointmentsView() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [currentMonth, setCurrentMonth] = useState<Date>(() => toMonthStart(new Date()))
   const [selectedDayKey, setSelectedDayKey] = useState<string>(() => toDateKey(new Date()))
-
-  const [isModalOpen, setIsModalOpen] = useState(false)
-  const [modalMode, setModalMode] = useState<ModalMode>('create')
-  const [editingAppointment, setEditingAppointment] = useState<CalendarAppointment | null>(null)
-  const [modalForm, setModalForm] = useState<ModalFormState>(() =>
-    buildDefaultModalForm([], new Date(), 'text')
-  )
+  const [modal, setModal] = useState<ModalState>(null)
 
   const { data: calendarConnectionsData } = useQuery({
     queryKey: ['calendar-connections'],
     queryFn: getCalendarConnections,
   })
-  const hasGoogleCalendar = (calendarConnectionsData?.connections ?? []).some(
-    (c) => c.provider === 'google' && c.active
+  const googleConnection = (calendarConnectionsData?.connections ?? []).find(
+    (connection) => connection.provider === 'google' && connection.active,
   )
+  const hasGoogleCalendar = Boolean(googleConnection)
 
   const connectCalendarMutation = useMutation({
     mutationFn: getGoogleAuthUrl,
-    onSuccess: (data) => {
-      if (data.auth_url) {
-        window.location.href = data.auth_url
+    onSuccess: (result) => {
+      if (result.auth_url) {
+        window.location.href = result.auth_url
       }
     },
     onError: (err: Error) => toast.error(err.message),
@@ -296,99 +126,89 @@ export default function AppointmentsView() {
   const disconnectMutation = useMutation({
     mutationFn: disconnectCalendar,
     onSuccess: () => {
-      toast.success('Calendario desconectado')
+      toast.success('Google Calendar desconectado')
       queryClient.invalidateQueries({ queryKey: ['calendar-connections'] })
     },
     onError: (err: Error) => toast.error(err.message),
   })
 
-  const { data, isLoading, isError, error } = useQuery<CalendarData>({
+  const { data, isLoading, isError, refetch } = useQuery<CalendarData>({
     queryKey: ['appointments-dashboard'],
     queryFn: async () => {
-      const [textAgentsRaw, voiceAgentsRaw] = await Promise.all([getTextAgents(), getAgents()])
+      // Sin telefonía configurada, la lista de agentes de voz puede fallar: la agenda de chat sigue disponible.
+      const [textAgentsRaw, voiceAgentsRaw] = await Promise.all([
+        getTextAgents(),
+        getAgents().catch(() => ({ agents: [] })),
+      ])
 
-      const textAgents = normalizeTextAgents(textAgentsRaw)
-      const voiceAgents = normalizeVoiceAgents(voiceAgentsRaw)
+      const textAgents = normalizeAgents(textAgentsRaw, 'text')
+      const voiceAgents = normalizeAgents(voiceAgentsRaw, 'voice')
 
-      const textAppointmentResults = await Promise.all(
-        textAgents.map(async (agent) => {
-          const result = await getTextAgentAppointments(agent.id, { limit: 200 })
-          return result.appointments.map((appointment) => ({
-            ...appointment,
-            channel: 'text' as const,
-            agent_id: agent.id,
-            agent_name: agent.name,
-          }))
-        })
-      )
+      const [textAppointments, voiceAppointments] = await Promise.all([
+        Promise.all(
+          textAgents.map(async (agent) => {
+            const result = await getTextAgentAppointments(agent.id, { limit: 200 })
+            return result.appointments.map((appointment) => ({
+              ...appointment,
+              agentKind: 'text' as const,
+              agent_id: agent.id,
+              agent_name: agent.name,
+            }))
+          }),
+        ),
+        Promise.all(
+          voiceAgents.map(async (agent) => {
+            const result = await getVoiceAgentAppointments(agent.id, { limit: 200 })
+            return result.appointments.map((appointment) => ({
+              ...appointment,
+              agentKind: 'voice' as const,
+              agent_id: agent.id,
+              agent_name: agent.name,
+            }))
+          }),
+        ),
+      ])
 
-      const voiceAppointmentResults = await Promise.all(
-        voiceAgents.map(async (agent) => {
-          const result = await getVoiceAgentAppointments(agent.id, { limit: 200 })
-          return result.appointments.map((appointment) => ({
-            ...appointment,
-            channel: 'voice' as const,
-            agent_id: agent.id,
-            agent_name: agent.name,
-          }))
-        })
-      )
-
-      const appointments = [...textAppointmentResults.flat(), ...voiceAppointmentResults.flat()]
+      const appointments = [...textAppointments.flat(), ...voiceAppointments.flat()]
       appointments.sort((left, right) => left.appointment_date_unix_secs - right.appointment_date_unix_secs)
 
-      return {
-        textAgents,
-        voiceAgents,
-        appointments,
-      }
+      return { agents: [...textAgents, ...voiceAgents], appointments }
     },
   })
 
-  const allAgents = useMemo(
-    () => [...(data?.textAgents ?? []), ...(data?.voiceAgents ?? [])],
-    [data?.textAgents, data?.voiceAgents]
+  const agents = useMemo(() => data?.agents ?? [], [data?.agents])
+  const allAppointments = useMemo(() => data?.appointments ?? [], [data?.appointments])
+  const filtersActive = channelFilter !== 'all' || statusFilter !== 'all'
+
+  const channelOptions = useMemo(() => {
+    const present = new Set<ChannelKey>(allAppointments.map(appointmentChannel))
+    if (channelFilter !== 'all') present.add(channelFilter)
+    return CHANNEL_ORDER.filter((key) => present.has(key))
+  }, [allAppointments, channelFilter])
+
+  const filteredAppointments = useMemo(
+    () =>
+      allAppointments.filter(
+        (appointment) =>
+          (channelFilter === 'all' || appointmentChannel(appointment) === channelFilter) &&
+          (statusFilter === 'all' || appointment.status === statusFilter),
+      ),
+    [allAppointments, channelFilter, statusFilter],
   )
 
-  const filteredAppointments = useMemo(() => {
-    const source = data?.appointments ?? []
-    return source.filter((appointment) => {
-      const channelMatch = channelFilter === 'all' || appointment.channel === channelFilter
-      const statusMatch = statusFilter === 'all' || appointment.status === statusFilter
-      return channelMatch && statusMatch
-    })
-  }, [channelFilter, data?.appointments, statusFilter])
-
-  const appointmentsByDay = useMemo(() => {
-    const grouped = new Map<string, CalendarAppointment[]>()
-
-    for (const appointment of filteredAppointments) {
-      const key = toDateKey(new Date(appointment.appointment_date_unix_secs * 1000))
-      const current = grouped.get(key)
-      if (current) {
-        current.push(appointment)
-      } else {
-        grouped.set(key, [appointment])
-      }
-    }
-
-    for (const values of grouped.values()) {
-      values.sort((left, right) => left.appointment_date_unix_secs - right.appointment_date_unix_secs)
-    }
-
-    return grouped
-  }, [filteredAppointments])
+  const appointmentsByDay = useMemo(
+    () => groupByDay(filteredAppointments, (appointment) => appointment.appointment_date_unix_secs),
+    [filteredAppointments],
+  )
 
   const monthCells = useMemo(() => buildMonthCells(currentMonth), [currentMonth])
 
   const monthRange = useMemo(() => {
     const first = monthCells[0]?.date ?? currentMonth
     const last = monthCells[monthCells.length - 1]?.date ?? currentMonth
-    const fromUnix = Math.floor(
-      new Date(first.getFullYear(), first.getMonth(), first.getDate(), 0, 0, 0).getTime() / 1000
-    )
+    const fromUnix = Math.floor(new Date(first.getFullYear(), first.getMonth(), first.getDate()).getTime() / 1000)
     const toUnix = Math.floor(
-      new Date(last.getFullYear(), last.getMonth(), last.getDate(), 23, 59, 59).getTime() / 1000
+      new Date(last.getFullYear(), last.getMonth(), last.getDate(), 23, 59, 59).getTime() / 1000,
     )
     return { fromUnix, toUnix }
   }, [monthCells, currentMonth])
@@ -399,814 +219,269 @@ export default function AppointmentsView() {
     enabled: hasGoogleCalendar,
   })
 
-  const googleEventsByDay = useMemo(() => {
-    const grouped = new Map<string, GoogleCalendarEvent[]>()
-    for (const event of googleEventsData?.events ?? []) {
-      const key = toDateKey(new Date(event.start_unix * 1000))
-      const current = grouped.get(key)
-      if (current) {
-        current.push(event)
-      } else {
-        grouped.set(key, [event])
-      }
-    }
-    for (const values of grouped.values()) {
-      values.sort((left, right) => left.start_unix - right.start_unix)
-    }
-    return grouped
-  }, [googleEventsData])
+  const googleEventsByDay = useMemo(
+    () => groupByDay<GoogleCalendarEvent>(googleEventsData?.events ?? [], (event) => event.start_unix),
+    [googleEventsData],
+  )
+
+  const monthAppointmentCount = useMemo(
+    () =>
+      filteredAppointments.filter((appointment) =>
+        isSameMonth(new Date(appointment.appointment_date_unix_secs * 1000), currentMonth),
+      ).length,
+    [filteredAppointments, currentMonth],
+  )
 
   const selectedDayDate = useMemo(() => parseDateKey(selectedDayKey), [selectedDayKey])
+  const selectedDayAppointments = appointmentsByDay.get(selectedDayKey) ?? []
+  const hiddenByFilters =
+    allAppointments.filter(
+      (appointment) => toDateKey(new Date(appointment.appointment_date_unix_secs * 1000)) === selectedDayKey,
+    ).length - selectedDayAppointments.length
 
-  const selectedDayAppointments = useMemo(
-    () => appointmentsByDay.get(selectedDayKey) ?? [],
-    [appointmentsByDay, selectedDayKey]
-  )
-
-  const selectedDayGoogleEvents = useMemo(
-    () => googleEventsByDay.get(selectedDayKey) ?? [],
-    [googleEventsByDay, selectedDayKey]
-  )
-
-  const monthTitle = useMemo(
-    () =>
-      currentMonth.toLocaleDateString('es-CO', {
-        month: 'long',
-        year: 'numeric',
-      }),
-    [currentMonth]
-  )
-
-  const selectedDayTitle = useMemo(
-    () =>
-      selectedDayDate.toLocaleDateString('es-CO', {
-        weekday: 'long',
-        day: 'numeric',
-        month: 'long',
-      }),
-    [selectedDayDate]
-  )
-
-  const createModeAgents = useMemo(
-    () => allAgents.filter((agent) => agent.channel === modalForm.channel),
-    [allAgents, modalForm.channel]
-  )
-
-  /* eslint-disable react-hooks/set-state-in-effect */
-  useEffect(() => {
-    const inCurrentMonth =
-      selectedDayDate.getFullYear() === currentMonth.getFullYear() &&
-      selectedDayDate.getMonth() === currentMonth.getMonth()
-
-    if (inCurrentMonth) {
-      return
-    }
-
+  const goToMonth = (date: Date) => {
+    const monthStart = toMonthStart(date)
     const today = new Date()
-    const todayInMonth =
-      today.getFullYear() === currentMonth.getFullYear() && today.getMonth() === currentMonth.getMonth()
+    setCurrentMonth(monthStart)
+    setSelectedDayKey(toDateKey(isSameMonth(today, monthStart) ? today : monthStart))
+  }
 
-    if (todayInMonth) {
-      setSelectedDayKey(toDateKey(today))
+  // Con la agenda debajo del mes (pantallas medianas), la trae a la vista al elegir un día.
+  // Se espera a que React pinte la nueva agenda: un cambio de contenido cancela el desplazamiento suave.
+  const revealAgenda = () => {
+    window.setTimeout(() => {
+      const agenda = agendaRef.current
+      if (!agenda || agenda.getBoundingClientRect().top <= window.innerHeight - 96) return
+      const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      agenda.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'nearest' })
+    }, 0)
+  }
+
+  const selectDay = (cell: CalendarCell) => {
+    setSelectedDayKey(cell.key)
+    if (!cell.inCurrentMonth) setCurrentMonth(toMonthStart(cell.date))
+    revealAgenda()
+  }
+
+  const clearFilters = () => {
+    setChannelFilter('all')
+    setStatusFilter('all')
+  }
+
+  const openCreate = (date: Date) => {
+    if (agents.length === 0) {
+      toast.info('Para agendar citas, primero cree un agente de chat o de voz.')
       return
     }
+    setModal({ appointment: null, date })
+  }
 
-    setSelectedDayKey(toDateKey(new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1)))
-  }, [currentMonth, selectedDayDate])
+  const openEdit = (appointment: CalendarAppointment) => {
+    const date = new Date(appointment.appointment_date_unix_secs * 1000)
+    setSelectedDayKey(toDateKey(date))
+    setModal({ appointment, date })
+  }
 
-  useEffect(() => {
-    if (!isModalOpen || modalMode !== 'create') {
-      return
-    }
-
-    if (createModeAgents.length === 0) {
-      if (modalForm.agentId) {
-        setModalForm((prev) => ({ ...prev, agentId: '' }))
-      }
-      return
-    }
-
-    const exists = createModeAgents.some((agent) => agent.id === modalForm.agentId)
-    if (!exists) {
-      setModalForm((prev) => ({ ...prev, agentId: createModeAgents[0].id }))
-    }
-  }, [createModeAgents, isModalOpen, modalForm.agentId, modalMode])
-  /* eslint-enable react-hooks/set-state-in-effect */
-
-  const refresh = () => {
+  const closeModal = useCallback(() => setModal(null), [])
+  const refreshAppointments = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ['appointments-dashboard'] })
-  }
+  }, [queryClient])
 
-  const closeModal = () => {
-    setIsModalOpen(false)
-    setEditingAppointment(null)
-  }
-
-  const openCreateModal = (forDate?: Date) => {
-    if (allAgents.length === 0) {
-      toast.info('Crea al menos un agente para poder registrar citas')
-      return
-    }
-
-    const targetDate = forDate ?? selectedDayDate
-    setModalMode('create')
-    setEditingAppointment(null)
-    setModalForm(buildDefaultModalForm(allAgents, targetDate, channelFilter === 'all' ? undefined : channelFilter))
-    setIsModalOpen(true)
-  }
-
-  const openEditModal = (appointment: CalendarAppointment) => {
-    setModalMode('edit')
-    setEditingAppointment(appointment)
-    setModalForm({
-      channel: appointment.channel,
-      agentId: appointment.agent_id,
-      appointmentDate: toInputDateValue(new Date(appointment.appointment_date_unix_secs * 1000)),
-      timezone: appointment.timezone || 'America/Bogota',
-      contactName: appointment.contact_name || '',
-      contactPhone: appointment.contact_phone || '',
-      contactEmail: appointment.contact_email || '',
-      status: appointment.status,
-      notes: appointment.notes || '',
+  const requestDisconnect = async () => {
+    if (!googleConnection) return
+    const accepted = await confirm({
+      title: 'Desconectar Google Calendar',
+      description:
+        'Las citas nuevas dejarán de copiarse a su Google Calendar y los asistentes ya no tendrán en cuenta sus horarios ocupados.',
+      confirmLabel: 'Desconectar',
     })
-    setIsModalOpen(true)
+    if (accepted) disconnectMutation.mutate(googleConnection.id)
   }
 
-  const { mutate: createAppointment, isPending: isCreating } = useMutation({
-    mutationFn: async () => {
-      if (!modalForm.agentId) {
-        throw new Error('Seleccione un agente para crear la cita')
-      }
-
-      if (!isFormContactValid(modalForm)) {
-        throw new Error('Debes incluir al menos nombre, telefono o email del contacto')
-      }
-
-      const appointmentDate = new Date(modalForm.appointmentDate)
-      if (Number.isNaN(appointmentDate.getTime())) {
-        throw new Error('Fecha y hora invalida para la cita')
-      }
-
-      const payload = {
-        appointment_date: appointmentDate.toISOString(),
-        contact_name: modalForm.contactName.trim(),
-        contact_phone: modalForm.contactPhone.trim(),
-        contact_email: modalForm.contactEmail.trim(),
-        timezone: modalForm.timezone.trim() || 'America/Bogota',
-        status: modalForm.status,
-        notes: modalForm.notes.trim(),
-        source: modalForm.channel === 'voice' ? ('voice' as const) : ('manual' as const),
-      }
-
-      if (modalForm.channel === 'voice') {
-        return createVoiceAgentAppointment(modalForm.agentId, payload)
-      }
-
-      return createTextAgentAppointment(modalForm.agentId, payload)
-    },
-    onSuccess: () => {
-      toast.success('Cita creada correctamente')
-      closeModal()
-      refresh()
-    },
-    onError: (mutationError: Error) => toast.error(mutationError.message),
-  })
-
-  const { mutate: updateAppointment, isPending: isUpdating } = useMutation({
-    mutationFn: async () => {
-      if (!editingAppointment) {
-        throw new Error('No hay cita seleccionada para actualizar')
-      }
-
-      if (!isFormContactValid(modalForm)) {
-        throw new Error('Debes incluir al menos nombre, telefono o email del contacto')
-      }
-
-      const appointmentDate = new Date(modalForm.appointmentDate)
-      if (Number.isNaN(appointmentDate.getTime())) {
-        throw new Error('Fecha y hora invalida para la cita')
-      }
-
-      const payload = {
-        appointment_date: appointmentDate.toISOString(),
-        contact_name: modalForm.contactName.trim(),
-        contact_phone: modalForm.contactPhone.trim(),
-        contact_email: modalForm.contactEmail.trim(),
-        timezone: modalForm.timezone.trim() || 'America/Bogota',
-        status: modalForm.status,
-        notes: modalForm.notes.trim(),
-      }
-
-      if (editingAppointment.channel === 'voice') {
-        return updateVoiceAgentAppointment(editingAppointment.agent_id, editingAppointment.id, payload)
-      }
-
-      return updateTextAgentAppointment(editingAppointment.agent_id, editingAppointment.id, payload)
-    },
-    onSuccess: () => {
-      toast.success('Cita actualizada')
-      closeModal()
-      refresh()
-    },
-    onError: (mutationError: Error) => toast.error(mutationError.message),
-  })
-
-  const { mutate: deleteAppointment, isPending: isDeleting } = useMutation({
-    mutationFn: async () => {
-      if (!editingAppointment) {
-        throw new Error('No hay cita seleccionada para eliminar')
-      }
-
-      if (editingAppointment.channel === 'voice') {
-        return deleteVoiceAgentAppointment(editingAppointment.agent_id, editingAppointment.id)
-      }
-
-      return deleteTextAgentAppointment(editingAppointment.agent_id, editingAppointment.id)
-    },
-    onSuccess: () => {
-      toast.success('Cita eliminada')
-      closeModal()
-      refresh()
-    },
-    onError: (mutationError: Error) => toast.error(mutationError.message),
-  })
-
-  const canSubmit =
-    modalForm.appointmentDate.trim() &&
-    isFormContactValid(modalForm) &&
-    (modalMode === 'edit' || modalForm.agentId.length > 0)
-
-  const isSaving = isCreating || isUpdating
+  const linkButtonClass =
+    'font-medium text-text-link underline-offset-2 hover:text-text-link-hover hover:underline disabled:opacity-60'
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="w-full p-8">
-        <section className="section-enter mb-6 overflow-hidden rounded-3xl border border-border-default bg-surface px-6 py-6 shadow-sm">
-          <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-primary-600">Agenda</p>
-              <h1 className="mt-2 text-3xl font-bold text-text-primary">Citas</h1>
-              <p className="mt-2 max-w-2xl text-sm text-text-secondary">
-                Vista mensual para planear, crear y actualizar citas de agentes de texto y voz.
-              </p>
-            </div>
+      <div className="@container mx-auto w-full max-w-7xl px-4 py-6 sm:px-8 sm:py-8">
+        <PageHeader
+          title="Citas"
+          description="Las citas que agendan sus asistentes y su equipo. Abra una cita para cambiar su estado o sus datos."
+          actions={
+            <Button
+              onClick={() => openCreate(selectedDayDate)}
+              leftIcon={<PlusIcon className="h-4 w-4" aria-hidden="true" />}
+            >
+              Nueva cita
+            </Button>
+          }
+        />
 
-            <div className="flex flex-wrap items-center gap-3">
-              {hasGoogleCalendar ? (
-                <div className="inline-flex items-center gap-2 rounded-xl bg-accent-50 px-3 py-2 text-sm font-medium text-accent-700">
-                  <CheckCircleIcon className="h-4 w-4" />
-                  Google Calendar conectado
-                  <button
-                    onClick={() => {
-                      const conn = calendarConnectionsData?.connections.find((c) => c.provider === 'google')
-                      if (conn) disconnectMutation.mutate(conn.id)
-                    }}
-                    className="ml-1 text-xs text-accent-600 underline hover:text-emerald-800"
-                  >
-                    Desconectar
-                  </button>
-                </div>
-              ) : (
-                <button
-                  onClick={() => connectCalendarMutation.mutate('/citas')}
-                  disabled={connectCalendarMutation.isPending}
-                  className="inline-flex items-center gap-2 rounded-xl bg-primary-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-[#3a1d9e] disabled:opacity-50 transition-colors"
-                >
-                  <LinkIcon className="h-4 w-4" />
-                  Conectar Google Calendar
-                </button>
-              )}
-            </div>
-
-            <div className="flex flex-wrap items-end gap-2">
-              <div>
-                <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-text-muted">
-                  Canal
-                </label>
-                <select
-                  value={channelFilter}
-                  onChange={(event) => setChannelFilter(event.target.value as ChannelFilter)}
-                  className="rounded-xl border border-border-default bg-surface px-3 py-2 text-sm text-text-primary focus:border-primary-500 focus:outline-none"
-                >
-                  <option value="all">Todos</option>
-                  <option value="text">Texto</option>
-                  <option value="voice">Voz</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-text-muted">
-                  Estado
-                </label>
-                <select
-                  value={statusFilter}
-                  onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}
-                  className="rounded-xl border border-border-default bg-surface px-3 py-2 text-sm text-text-primary focus:border-primary-500 focus:outline-none"
-                >
-                  <option value="all">Todos</option>
-                  {STATUS_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
+        <p className="-mt-2 mb-6 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-text-secondary">
+          {hasGoogleCalendar ? (
+            <>
+              <CheckCircleIcon className="h-4 w-4 shrink-0 text-primary-600" aria-hidden="true" />
+              <span>Conectado con Google Calendar: las citas se copian a su calendario.</span>
               <button
                 type="button"
-                onClick={() => openCreateModal(selectedDayDate)}
-                className="inline-flex items-center gap-2 rounded-xl bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary-700"
+                onClick={requestDisconnect}
+                disabled={disconnectMutation.isPending}
+                className={linkButtonClass}
               >
-                <PlusIcon className="h-4 w-4" />
-                Nueva cita
+                Desconectar
               </button>
-            </div>
-          </div>
-
-          {!isLoading && allAgents.length === 0 && (
-            <div className="mt-4 rounded-2xl border border-dashed border-[#d4cfee] bg-bg-secondary px-4 py-3 text-sm text-text-secondary">
-              No hay agentes disponibles todavia. Crea al menos un agente de texto o voz para registrar citas.
-            </div>
+            </>
+          ) : (
+            <>
+              <CalendarDaysIcon className="h-4 w-4 shrink-0 text-text-tertiary" aria-hidden="true" />
+              <span>Google Calendar no está conectado.</span>
+              <button
+                type="button"
+                onClick={() => connectCalendarMutation.mutate('/citas')}
+                disabled={connectCalendarMutation.isPending}
+                className={linkButtonClass}
+              >
+                {connectCalendarMutation.isPending ? 'Abriendo Google…' : 'Conectar'}
+              </button>
+            </>
           )}
-        </section>
+        </p>
 
-        {isLoading && (
-          <div className="rounded-3xl border border-border-default bg-surface p-6 text-sm text-text-secondary shadow-sm">
-            Cargando calendario de citas...
-          </div>
+        {!isLoading && !isError && agents.length === 0 && (
+          <p className="mb-6 rounded-xl border border-border-default bg-surface-muted px-4 py-3 text-sm text-text-secondary">
+            Aún no hay agentes. Cree un agente de chat o de voz para empezar a registrar citas.
+          </p>
         )}
 
-        {isError && (
-          <div className="rounded-3xl border border-danger-200 bg-danger-50 p-6 text-sm text-danger-700 shadow-sm">
-            No se pudo cargar la agenda.
-            {error instanceof Error ? ` ${error.message}` : ''}
+        {isLoading ? (
+          <p className="rounded-xl border border-border-default bg-surface px-6 py-12 text-center text-sm text-text-tertiary">
+            Cargando la agenda…
+          </p>
+        ) : isError ? (
+          <div className="rounded-xl border border-border-default bg-surface px-6 py-10 text-center">
+            <p className="text-sm font-medium text-text-primary">No pudimos cargar la agenda.</p>
+            <p className="mt-1 text-sm text-text-tertiary">Revise su conexión e intente de nuevo.</p>
+            <Button variant="outline" size="sm" className="mt-4" onClick={() => refetch()}>
+              Reintentar
+            </Button>
           </div>
-        )}
-
-        {!isLoading && !isError && (
-          <section className="grid gap-4 xl:grid-cols-[1.7fr,1fr]">
-            <article className="rounded-3xl border border-border-default bg-surface p-4 shadow-sm">
-              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#f5f3ff] text-primary-600">
-                    <CalendarDaysIcon className="h-4.5 w-4.5" />
-                  </div>
-                  <h2 className="text-lg font-semibold text-text-primary">{monthTitle}</h2>
-                </div>
-
-                <div className="flex items-center gap-2">
+        ) : (
+          <div className="grid gap-6 @5xl:grid-cols-[minmax(0,1fr)_20rem] @5xl:items-start">
+            <section aria-labelledby={`${fieldId}-month`} className="min-w-0">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
+                <div className="flex min-w-0 items-center gap-1">
+                  <Button variant="outline" size="sm" onClick={() => goToMonth(new Date())} className="mr-1">
+                    Hoy
+                  </Button>
                   <button
                     type="button"
-                    onClick={() =>
-                      setCurrentMonth((previous) =>
-                        toMonthStart(new Date(previous.getFullYear(), previous.getMonth() - 1, 1))
-                      )
-                    }
-                    className="rounded-lg border border-border-default bg-surface p-1.5 text-text-secondary transition-colors hover:border-[#d4cfee] hover:bg-bg-secondary hover:text-primary-600"
+                    onClick={() => goToMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1))}
+                    className={navButtonClass}
                     aria-label="Mes anterior"
                   >
-                    <ChevronLeftIcon className="h-4 w-4" />
+                    <ChevronLeftIcon className="h-4 w-4" aria-hidden="true" />
                   </button>
                   <button
                     type="button"
-                    onClick={() => setCurrentMonth(toMonthStart(new Date()))}
-                    className="rounded-lg border border-border-default bg-surface px-3 py-1.5 text-xs font-semibold text-black/70 transition-colors hover:border-[#d4cfee] hover:bg-bg-secondary"
-                  >
-                    Hoy
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setCurrentMonth((previous) =>
-                        toMonthStart(new Date(previous.getFullYear(), previous.getMonth() + 1, 1))
-                      )
-                    }
-                    className="rounded-lg border border-border-default bg-surface p-1.5 text-text-secondary transition-colors hover:border-[#d4cfee] hover:bg-bg-secondary hover:text-primary-600"
+                    onClick={() => goToMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1))}
+                    className={navButtonClass}
                     aria-label="Mes siguiente"
                   >
-                    <ChevronRightIcon className="h-4 w-4" />
+                    <ChevronRightIcon className="h-4 w-4" aria-hidden="true" />
                   </button>
-                </div>
-              </div>
-
-              <div className="overflow-x-auto no-visible-scrollbar">
-                <div className="min-w-190">
-                  <div className="grid grid-cols-7 gap-2">
-                    {WEEKDAY_LABELS.map((dayLabel) => (
-                      <div key={dayLabel} className="px-2 pb-1 text-center text-xs font-semibold uppercase tracking-wide text-text-muted">
-                        {dayLabel}
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="mt-1 grid grid-cols-7 gap-2">
-                    {monthCells.map((cell) => {
-                      const dayAppointments = appointmentsByDay.get(cell.key) ?? []
-                      const hiddenAppointments = Math.max(0, dayAppointments.length - 2)
-                      const dayGoogleEvents = googleEventsByDay.get(cell.key) ?? []
-                      const hiddenGoogleEvents = Math.max(0, dayGoogleEvents.length - 2)
-                      const isSelected = cell.key === selectedDayKey
-
-                      return (
-                        <div
-                          key={cell.key}
-                          role="button"
-                          tabIndex={0}
-                          onClick={() => setSelectedDayKey(cell.key)}
-                          onKeyDown={(event) => {
-                            if (event.key === 'Enter' || event.key === ' ') {
-                              event.preventDefault()
-                              setSelectedDayKey(cell.key)
-                            }
-                          }}
-                          className={`min-h-32 rounded-xl border p-2 transition-colors ${
-                            isSelected
-                              ? 'border-[#271173] bg-[#f8f5ff]'
-                              : cell.inCurrentMonth
-                              ? 'border-[#ece8fb] bg-surface hover:bg-bg-secondary'
-                              : 'border-[#f1eefc] bg-bg-secondary text-text-muted'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <span className={`text-sm font-semibold ${cell.isToday ? 'text-primary-600' : 'text-black/75'}`}>
-                              {cell.date.getDate()}
-                            </span>
-                            {dayAppointments.length > 0 && (
-                              <span className="rounded-full bg-primary-50 px-1.5 py-0.5 text-[10px] font-semibold text-primary-600">
-                                {dayAppointments.length}
-                              </span>
-                            )}
-                          </div>
-
-                          <div className="mt-2 space-y-1">
-                            {dayAppointments.slice(0, 2).map((appointment) => (
-                              <button
-                                key={`${appointment.channel}-${appointment.id}`}
-                                type="button"
-                                onClick={(event) => {
-                                  event.stopPropagation()
-                                  openEditModal(appointment)
-                                }}
-                                className={`w-full truncate rounded-md px-1.5 py-1 text-left text-[10px] font-semibold ring-1 ${channelChipClass(
-                                  appointment.channel
-                                )}`}
-                                title={`${appointment.agent_name} · ${formatDateTime(
-                                  appointment.appointment_date_unix_secs
-                                )}`}
-                              >
-                                {new Date(appointment.appointment_date_unix_secs * 1000).toLocaleTimeString('es-CO', {
-                                  hour: '2-digit',
-                                  minute: '2-digit',
-                                })}{' '}
-                                · {appointment.contact_name || appointment.contact_phone || 'Sin contacto'}
-                              </button>
-                            ))}
-
-                            {hiddenAppointments > 0 && (
-                              <p className="px-1 text-[10px] font-semibold text-text-muted">+{hiddenAppointments} mas</p>
-                            )}
-
-                            {dayGoogleEvents.slice(0, 2).map((event) => (
-                              <div
-                                key={`g-${event.id}`}
-                                className="flex w-full items-center gap-1 truncate rounded-md bg-slate-100 px-1.5 py-1 text-left text-[10px] font-medium text-slate-600 ring-1 ring-slate-200"
-                                title={`Google Calendar · ${event.summary}`}
-                              >
-                                <CalendarDaysIcon className="h-2.5 w-2.5 shrink-0 text-slate-400" />
-                                <span className="truncate">
-                                  {event.all_day
-                                    ? 'Todo el dia'
-                                    : new Date(event.start_unix * 1000).toLocaleTimeString('es-CO', {
-                                        hour: '2-digit',
-                                        minute: '2-digit',
-                                      })}{' '}
-                                  · {event.summary}
-                                </span>
-                              </div>
-                            ))}
-
-                            {hiddenGoogleEvents > 0 && (
-                              <p className="px-1 text-[10px] font-medium text-slate-400">+{hiddenGoogleEvents} de Google</p>
-                            )}
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              </div>
-            </article>
-
-            <article className="rounded-3xl border border-border-default bg-surface p-4 shadow-sm">
-              <div className="mb-3 flex items-center justify-between gap-2">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-text-muted">Dia seleccionado</p>
-                  <h3 className="mt-1 text-base font-semibold text-text-primary">{selectedDayTitle}</h3>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => openCreateModal(selectedDayDate)}
-                  className="inline-flex items-center gap-1 rounded-lg bg-[#f5f3ff] px-2.5 py-1.5 text-xs font-semibold text-primary-600 transition-colors hover:bg-primary-50"
-                >
-                  <PlusIcon className="h-3.5 w-3.5" />
-                  Crear
-                </button>
-              </div>
-
-              <div className="space-y-2">
-                {selectedDayAppointments.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-[#d4cfee] bg-bg-secondary p-4 text-sm text-text-secondary">
-                    No hay citas registradas para este dia con los filtros actuales.
-                  </div>
-                ) : (
-                  selectedDayAppointments.map((appointment) => (
-                    <article
-                      key={`${appointment.channel}-${appointment.id}`}
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => openEditModal(appointment)}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter' || event.key === ' ') {
-                          event.preventDefault()
-                          openEditModal(appointment)
-                        }
-                      }}
-                      className="rounded-xl border border-[#ece8fb] bg-bg-secondary p-3 transition-colors hover:border-[#d9d2f5] hover:bg-surface"
-                    >
-                      <div className="flex flex-wrap items-start justify-between gap-2">
-                        <div>
-                          <p className="text-sm font-semibold text-text-primary">
-                            {appointment.contact_name || appointment.contact_phone || appointment.contact_email || 'Contacto sin nombre'}
-                          </p>
-                          <p className="mt-1 inline-flex items-center gap-1 text-xs text-text-secondary">
-                            <ClockIcon className="h-3.5 w-3.5" />
-                            {formatDateTime(appointment.appointment_date_unix_secs)}
-                          </p>
-                          <p className="mt-1 text-xs text-text-secondary">Agente: {appointment.agent_name}</p>
-                        </div>
-
-                        <div className="flex items-center gap-1.5">
-                          <span
-                            className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ${STATUS_BADGE[appointment.status]}`}
-                          >
-                            {statusLabel(appointment.status)}
-                          </span>
-                          <span
-                            className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ${channelChipClass(
-                              appointment.channel
-                            )}`}
-                          >
-                            {channelLabel(appointment.channel)}
-                          </span>
-                        </div>
-                      </div>
-
-                      {appointment.notes && (
-                        <p className="mt-2 line-clamp-2 text-xs leading-5 text-text-secondary">{appointment.notes}</p>
-                      )}
-                    </article>
-                  ))
-                )}
-              </div>
-
-              {selectedDayGoogleEvents.length > 0 && (
-                <div className="mt-4 border-t border-[#ece8fb] pt-3">
-                  <p className="mb-2 inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                    <CalendarDaysIcon className="h-3.5 w-3.5" />
-                    Ocupado en tu Google Calendar
-                  </p>
-                  <div className="space-y-1.5">
-                    {selectedDayGoogleEvents.map((event) => (
-                      <div
-                        key={`g-day-${event.id}`}
-                        className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2"
-                      >
-                        <span className="truncate text-sm text-slate-700">{event.summary}</span>
-                        <span className="shrink-0 text-xs font-medium text-slate-500">
-                          {event.all_day
-                            ? 'Todo el dia'
-                            : new Date(event.start_unix * 1000).toLocaleTimeString('es-CO', {
-                                hour: '2-digit',
-                                minute: '2-digit',
-                              })}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                  <p className="mt-2 text-[11px] leading-4 text-slate-400">
-                    Los agentes no agendaran citas sobre estos horarios.
-                  </p>
-                </div>
-              )}
-
-              <div className="mt-4 border-t border-[#ece8fb] pt-3 text-xs text-text-tertiary">
-                {filteredAppointments.length} cita(s) visibles en la agenda.
-              </div>
-            </article>
-          </section>
-        )}
-
-        {isModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 backdrop-blur-sm">
-            <div className="modal-content w-full max-w-2xl rounded-2xl border border-border-default bg-surface p-6 shadow-xl">
-              <div className="mb-5 flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-text-muted">
-                    {modalMode === 'create' ? 'Nueva cita' : 'Actualizar cita'}
-                  </p>
-                  <h2 className="mt-1 text-lg font-semibold text-text-primary">
-                    {modalMode === 'create' ? 'Crear cita en calendario' : 'Editar cita seleccionada'}
+                  <h2
+                    id={`${fieldId}-month`}
+                    className="ml-1 text-lg font-semibold text-text-primary"
+                    aria-live="polite"
+                  >
+                    {formatMonthTitle(currentMonth)}
                   </h2>
+                  <span className="ml-2 hidden text-sm tabular-nums text-text-tertiary @md:inline">
+                    {pluralize(monthAppointmentCount, 'cita', 'citas')}
+                  </span>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={closeModal}
-                  className="rounded-lg p-1.5 text-text-tertiary transition-colors hover:bg-primary-50/60 hover:text-text-primary"
-                  aria-label="Cerrar modal"
-                >
-                  <XMarkIcon className="h-5 w-5" />
-                </button>
+                <div className="grid w-full grid-cols-2 items-center gap-2 sm:flex sm:w-auto sm:flex-wrap">
+                  <label htmlFor={`${fieldId}-channel`} className="sr-only">
+                    Canal
+                  </label>
+                  <select
+                    id={`${fieldId}-channel`}
+                    value={channelFilter}
+                    onChange={(event) => setChannelFilter(event.target.value as ChannelFilter)}
+                    className={selectClass}
+                  >
+                    <option value="all">Canal: todos</option>
+                    {channelOptions.map((key) => (
+                      <option key={key} value={key}>
+                        {CHANNEL_LABELS[key]}
+                      </option>
+                    ))}
+                  </select>
+
+                  <label htmlFor={`${fieldId}-status`} className="sr-only">
+                    Estado
+                  </label>
+                  <select
+                    id={`${fieldId}-status`}
+                    value={statusFilter}
+                    onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}
+                    className={selectClass}
+                  >
+                    <option value="all">Estado: todos</option>
+                    {STATUS_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+
+                  {filtersActive && (
+                    <Button variant="ghost" size="sm" onClick={clearFilters} className="col-span-2 justify-self-start">
+                      Quitar filtros
+                    </Button>
+                  )}
+                </div>
               </div>
 
-              <form
-                onSubmit={(event) => {
-                  event.preventDefault()
-                  if (modalMode === 'create') {
-                    createAppointment()
-                  } else {
-                    updateAppointment()
-                  }
-                }}
-                className="space-y-4"
-              >
-                <div className="grid gap-3 md:grid-cols-2">
-                  <div>
-                    <label className="mb-1.5 block text-sm font-medium text-text-primary">Canal</label>
-                    <select
-                      value={modalForm.channel}
-                      disabled={modalMode === 'edit'}
-                      onChange={(event) =>
-                        setModalForm((prev) => ({
-                          ...prev,
-                          channel: event.target.value as Channel,
-                          agentId: '',
-                        }))
-                      }
-                      className="w-full rounded-xl border border-border-default bg-surface px-3 py-2.5 text-sm text-text-primary transition-colors focus:border-primary-500 focus:outline-none disabled:cursor-not-allowed disabled:bg-[#fafafa]"
-                    >
-                      <option value="text">Agente de texto</option>
-                      <option value="voice">Agente de voz</option>
-                    </select>
-                  </div>
+              <MonthCalendar
+                cells={monthCells}
+                appointmentsByDay={appointmentsByDay}
+                googleEventsByDay={googleEventsByDay}
+                selectedDayKey={selectedDayKey}
+                onSelectDay={selectDay}
+                onOpenAppointment={openEdit}
+              />
+            </section>
 
-                  <div>
-                    <label className="mb-1.5 block text-sm font-medium text-text-primary">Agente</label>
-                    <select
-                      value={modalForm.agentId}
-                      disabled={modalMode === 'edit'}
-                      onChange={(event) => setModalForm((prev) => ({ ...prev, agentId: event.target.value }))}
-                      className="w-full rounded-xl border border-border-default bg-surface px-3 py-2.5 text-sm text-text-primary transition-colors focus:border-primary-500 focus:outline-none disabled:cursor-not-allowed disabled:bg-[#fafafa]"
-                    >
-                      {createModeAgents.length === 0 ? (
-                        <option value="">Sin agentes disponibles</option>
-                      ) : (
-                        createModeAgents.map((agent) => (
-                          <option key={`${agent.channel}-${agent.id}`} value={agent.id}>
-                            {agent.name}
-                          </option>
-                        ))
-                      )}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="mb-1.5 block text-sm font-medium text-text-primary">Fecha y hora</label>
-                    <input
-                      type="datetime-local"
-                      value={modalForm.appointmentDate}
-                      onChange={(event) => setModalForm((prev) => ({ ...prev, appointmentDate: event.target.value }))}
-                      className="w-full rounded-xl border border-border-default bg-surface px-3 py-2.5 text-sm text-text-primary transition-colors focus:border-primary-500 focus:outline-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="mb-1.5 block text-sm font-medium text-text-primary">Zona horaria</label>
-                    <input
-                      type="text"
-                      value={modalForm.timezone}
-                      onChange={(event) => setModalForm((prev) => ({ ...prev, timezone: event.target.value }))}
-                      className="w-full rounded-xl border border-border-default bg-surface px-3 py-2.5 text-sm text-text-primary transition-colors focus:border-primary-500 focus:outline-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="mb-1.5 block text-sm font-medium text-text-primary">Nombre contacto</label>
-                    <input
-                      type="text"
-                      value={modalForm.contactName}
-                      onChange={(event) => setModalForm((prev) => ({ ...prev, contactName: event.target.value }))}
-                      className="w-full rounded-xl border border-border-default bg-surface px-3 py-2.5 text-sm text-text-primary transition-colors focus:border-primary-500 focus:outline-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="mb-1.5 block text-sm font-medium text-text-primary">Telefono</label>
-                    <input
-                      type="text"
-                      value={modalForm.contactPhone}
-                      onChange={(event) => setModalForm((prev) => ({ ...prev, contactPhone: event.target.value }))}
-                      className="w-full rounded-xl border border-border-default bg-surface px-3 py-2.5 text-sm text-text-primary transition-colors focus:border-primary-500 focus:outline-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="mb-1.5 block text-sm font-medium text-text-primary">Email</label>
-                    <input
-                      type="email"
-                      value={modalForm.contactEmail}
-                      onChange={(event) => setModalForm((prev) => ({ ...prev, contactEmail: event.target.value }))}
-                      className="w-full rounded-xl border border-border-default bg-surface px-3 py-2.5 text-sm text-text-primary transition-colors focus:border-primary-500 focus:outline-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="mb-1.5 block text-sm font-medium text-text-primary">Estado</label>
-                    <select
-                      value={modalForm.status}
-                      onChange={(event) =>
-                        setModalForm((prev) => ({
-                          ...prev,
-                          status: event.target.value as TextAppointmentStatus,
-                        }))
-                      }
-                      className="w-full rounded-xl border border-border-default bg-surface px-3 py-2.5 text-sm text-text-primary transition-colors focus:border-primary-500 focus:outline-none"
-                    >
-                      {STATUS_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="md:col-span-2">
-                    <label className="mb-1.5 block text-sm font-medium text-text-primary">Nota</label>
-                    <textarea
-                      value={modalForm.notes}
-                      onChange={(event) => setModalForm((prev) => ({ ...prev, notes: event.target.value }))}
-                      rows={3}
-                      className="w-full rounded-xl border border-border-default bg-surface px-3 py-2.5 text-sm text-text-primary transition-colors focus:border-primary-500 focus:outline-none"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#ece8fb] pt-4">
-                  {modalMode === 'edit' ? (
-                    <button
-                      type="button"
-                      disabled={isSaving || isDeleting}
-                      onClick={() => deleteAppointment()}
-                      className="inline-flex items-center gap-1.5 rounded-xl bg-danger-50 px-3 py-2 text-sm font-semibold text-danger-700 transition-colors hover:bg-rose-100 disabled:opacity-60"
-                    >
-                      <TrashIcon className="h-4 w-4" />
-                      Eliminar cita
-                    </button>
-                  ) : (
-                    <span className="text-xs text-text-muted">Completa al menos un dato de contacto.</span>
-                  )}
-
-                  <div className="ml-auto flex gap-2">
-                    <button
-                      type="button"
-                      onClick={closeModal}
-                      disabled={isSaving || isDeleting}
-                      className="rounded-xl bg-[#f5f3ff] px-4 py-2 text-sm font-medium text-text-primary transition-colors hover:bg-primary-50 disabled:opacity-60"
-                    >
-                      Cancelar
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={!canSubmit || isSaving || isDeleting}
-                      className="inline-flex items-center gap-2 rounded-xl bg-primary-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-primary-700 disabled:opacity-60"
-                    >
-                      <PlusIcon className="h-4 w-4" />
-                      {isSaving
-                        ? modalMode === 'create'
-                          ? 'Creando...'
-                          : 'Actualizando...'
-                        : modalMode === 'create'
-                        ? 'Crear cita'
-                        : 'Guardar cambios'}
-                    </button>
-                  </div>
-                </div>
-              </form>
+            <div ref={agendaRef} className="scroll-mt-6 @5xl:sticky @5xl:top-6">
+              <DayAgenda
+                date={selectedDayDate}
+                isToday={selectedDayKey === toDateKey(new Date())}
+                appointments={selectedDayAppointments}
+                googleEvents={googleEventsByDay.get(selectedDayKey) ?? []}
+                hiddenByFilters={hiddenByFilters}
+                onClearFilters={clearFilters}
+                onOpenAppointment={openEdit}
+                onCreate={() => openCreate(selectedDayDate)}
+              />
             </div>
           </div>
         )}
       </div>
+
+      {modal && (
+        <AppointmentFormModal
+          key={modal.appointment ? `${modal.appointment.agentKind}-${modal.appointment.id}` : `new-${modal.date.getTime()}`}
+          appointment={modal.appointment}
+          initialDate={modal.date}
+          agents={agents}
+          onClose={closeModal}
+          onChanged={refreshAppointments}
+        />
+      )}
+
+      {confirmDialog}
     </div>
   )
 }

@@ -27,11 +27,11 @@ const paddingStyles = {
 }
 
 const radiusStyles = {
-  sm: 'rounded-md',
-  md: 'rounded-lg',
-  lg: 'rounded-xl',
-  xl: 'rounded-2xl',
-  '2xl': 'rounded-3xl',
+  sm: 'rounded-sm',
+  md: 'rounded-md',
+  lg: 'rounded-lg',
+  xl: 'rounded-xl',
+  '2xl': 'rounded-2xl',
 }
 
 export default function Card({
@@ -49,13 +49,23 @@ export default function Card({
         variantStyles[variant],
         paddingStyles[padding],
         radiusStyles[radius],
-        hover && 'transition-all duration-200 ease-out hover:shadow-lg hover:-translate-y-0.5 cursor-pointer',
+        hover && 'transition-[box-shadow,transform] duration-200 ease-out hover:shadow-lg hover:-translate-y-0.5 cursor-pointer',
         onClick && 'cursor-pointer',
         className
       )}
       onClick={onClick}
       role={onClick ? 'button' : undefined}
       tabIndex={onClick ? 0 : undefined}
+      onKeyDown={
+        onClick
+          ? (event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault()
+                onClick()
+              }
+            }
+          : undefined
+      }
     >
       {children}
     </div>

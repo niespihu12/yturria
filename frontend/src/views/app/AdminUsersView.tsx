@@ -1,11 +1,17 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ShieldCheckIcon, UsersIcon, PlusIcon, XMarkIcon } from '@heroicons/react/24/outline'
-import { getAdminUsers, getAuthenticatedUser, adminCreateUser } from '@/api/AuthAPI'
-import type { AdminUserSummary } from '@/types/index'
 import { useForm } from 'react-hook-form'
 import { toast } from 'react-toastify'
+import { LockClosedIcon, PlusIcon } from '@heroicons/react/24/outline'
+import { getAdminUsers, adminCreateUser } from '@/api/AuthAPI'
+import type { AdminUserSummary } from '@/types/index'
+import { useCurrentUser } from '@/hooks/useCurrentUser'
+import PageHeader from '@/components/ui/PageHeader'
+import Button from '@/components/ui/Button'
+import Badge from '@/components/ui/Badge'
+import Modal from '@/components/ui/Modal'
+import FormField, { inputClass } from '@/components/app/shell/FormField'
 
 function formatDate(unixSecs: number) {
   return new Date(unixSecs * 1000).toLocaleDateString('es-CO', {
@@ -16,10 +22,14 @@ function formatDate(unixSecs: number) {
 }
 
 function roleLabel(role: AdminUserSummary['role']) {
-  if (role === 'super_admin') return 'Super Admin'
-  if (role === 'admin') return 'Admin'
+  if (role === 'super_admin') return 'Super administrador'
+  if (role === 'admin') return 'Administrador'
   if (role === 'supervisor') return 'Supervisor'
   return 'Agente'
+}
+
+function plural(count: number, singular: string, pluralForm: string) {
+  return `${count} ${count === 1 ? singular : pluralForm}`
 }
 
 type CreateUserForm = {
@@ -29,26 +39,47 @@ type CreateUserForm = {
   role: string
 }
 
+const EMPTY_FORM: CreateUserForm = { name: '', email: '', password: '', role: 'agent' }
+
+const resourceLinkClass =
+  'inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-border-default px-2.5 py-1 text-xs font-medium text-text-secondary transition-colors hover:border-primary-300 hover:bg-primary-50 hover:text-primary-800'
+
+const headerCellClass = 'px-4 py-3 text-left text-xs font-medium text-text-tertiary first:pl-5 last:pr-5'
+const cellClass = 'px-4 py-4 align-top text-sm text-text-secondary first:pl-5 last:pr-5'
+// La primera columna queda fija al desplazar la tabla en pantallas angostas.
+const stickyCellClass =
+  'sticky left-0 z-10 shadow-[1px_0_0_0_var(--color-border-subtle)] xl:shadow-none'
+
+function ResourceLinks({ user }: { user: AdminUserSummary }) {
+  const query = `?user_id=${encodeURIComponent(user._id)}`
+  const links = [
+    { to: `/agentes_voz${query}`, label: 'Voz', count: user.voice_agents_count, full: 'Agentes de voz' },
+    { to: `/agentes_texto${query}`, label: 'Texto', count: user.text_agents_count, full: 'Agentes de texto' },
+    { to: `/numeros_telefono${query}`, label: 'Números', count: user.phone_numbers_count, full: 'Números de teléfono' },
+  ]
+  return (
+    <div className="flex gap-2">
+      {links.map((link) => (
+        <Link
+          key={link.label}
+          to={link.to}
+          aria-label={`${link.full} de ${user.name}: ${link.count}`}
+          className={resourceLinkClass}
+        >
+          {link.label}
+          <span className="font-semibold tabular-nums text-text-primary">{link.count}</span>
+        </Link>
+      ))}
+    </div>
+  )
+}
+
 export default function AdminUsersView() {
   const queryClient = useQueryClient()
   const [showModal, setShowModal] = useState(false)
+  const { isSuperAdmin, isLoading: isLoadingUser } = useCurrentUser()
 
-  const {
-    data: currentUser,
-    isLoading: isLoadingUser,
-    isError: isCurrentUserError,
-  } = useQuery({
-    queryKey: ['auth-user'],
-    queryFn: getAuthenticatedUser,
-  })
-
-  const isSuperAdmin = currentUser?.role === 'super_admin'
-
-  const {
-    data,
-    isLoading,
-    isError,
-  } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ['admin-users'],
     queryFn: getAdminUsers,
     enabled: isSuperAdmin,
@@ -61,17 +92,19 @@ export default function AdminUsersView() {
     handleSubmit,
     reset,
     formState: { errors },
-  } = useForm<CreateUserForm>({
-    defaultValues: { name: '', email: '', password: '', role: 'agent' },
-  })
+  } = useForm<CreateUserForm>({ defaultValues: EMPTY_FORM })
+
+  const closeModal = useCallback(() => {
+    setShowModal(false)
+    reset()
+  }, [reset])
 
   const createMutation = useMutation({
     mutationFn: adminCreateUser,
-    onSuccess: (data) => {
-      toast.success(data.message)
+    onSuccess: (result) => {
+      toast.success(result.message)
       queryClient.invalidateQueries({ queryKey: ['admin-users'] })
-      setShowModal(false)
-      reset()
+      closeModal()
     },
     onError: (err: Error) => toast.error(err.message),
   })
@@ -93,33 +126,33 @@ export default function AdminUsersView() {
         acc.phone += row.phone_numbers_count
         return acc
       },
-      { voice: 0, text: 0, phone: 0 }
+      { voice: 0, text: 0, phone: 0 },
     )
   }, [users])
 
   if (isLoadingUser) {
     return (
-      <div className="h-full overflow-y-auto">
-        <div className="w-full p-8">
-          <div className="flex h-52 items-center justify-center rounded-3xl border border-border-default bg-surface text-text-secondary shadow-sm">
-            Cargando permisos...
-          </div>
-        </div>
+      <div role="status" className="flex h-full items-center justify-center text-sm text-text-secondary">
+        Cargando permisos…
       </div>
     )
   }
 
-  if (isCurrentUserError || !isSuperAdmin) {
+  if (!isSuperAdmin) {
     return (
       <div className="h-full overflow-y-auto">
-        <div className="w-full p-8">
-          <div className="flex h-56 flex-col items-center justify-center gap-3 rounded-3xl border border-border-default bg-surface text-center shadow-sm">
-            <ShieldCheckIcon className="h-10 w-10 text-amber-500" />
-            <h1 className="text-xl font-semibold text-text-primary">Acceso restringido</h1>
-            <p className="max-w-xl text-sm text-text-secondary">
-              Este panel solo esta disponible para la cuenta super admin de la plataforma.
-            </p>
-          </div>
+        <div className="mx-auto flex w-full max-w-xl flex-col items-start gap-4 px-4 py-16 sm:px-6">
+          <LockClosedIcon aria-hidden="true" className="h-8 w-8 text-text-tertiary" />
+          <h1 className="font-display text-2xl text-primary-800">Acceso restringido</h1>
+          <p className="text-sm leading-relaxed text-text-secondary">
+            Esta sección solo está disponible para la cuenta de super administrador de la plataforma.
+          </p>
+          <Link
+            to="/dashboard"
+            className="text-sm font-medium text-primary-700 underline-offset-4 hover:text-primary-800 hover:underline"
+          >
+            Volver al Dashboard
+          </Link>
         </div>
       </div>
     )
@@ -127,183 +160,161 @@ export default function AdminUsersView() {
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="w-full p-8">
-        <section className="section-enter mb-8 overflow-hidden rounded-3xl border border-border-default bg-surface px-6 py-6 shadow-sm">
-          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-primary-600">
-                Admin
-              </p>
-              <h1 className="mt-2 text-3xl font-bold text-text-primary">Panel por usuario</h1>
-              <p className="mt-2 max-w-2xl text-sm text-text-secondary">
-                Gestiona todas las cuentas de la plataforma y entra directo a los recursos de cada
-                usuario.
-              </p>
-            </div>
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => setShowModal(true)}
-                className="inline-flex items-center gap-2 rounded-xl bg-primary-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-[#3a1d9e] transition-colors"
-              >
-                <PlusIcon className="h-4 w-4" />
-                Crear usuario
-              </button>
-              <div className="inline-flex items-center gap-2 rounded-xl bg-primary-50 px-3 py-2 text-sm font-medium text-primary-600">
-                <UsersIcon className="h-4 w-4" />
-                {users.length} usuarios
-              </div>
-            </div>
-          </div>
-        </section>
+      <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+        <PageHeader
+          title="Usuarios de la plataforma"
+          description="Cuentas con acceso a la consola. Desde aquí puede crear una cuenta o revisar los agentes y números de cada usuario."
+          actions={
+            <Button leftIcon={<PlusIcon aria-hidden="true" className="h-4 w-4" />} onClick={() => setShowModal(true)}>
+              Crear usuario
+            </Button>
+          }
+        />
 
-        <div className="mb-6 grid gap-4 md:grid-cols-4">
-          <div className="rounded-2xl border border-border-default bg-surface p-4 shadow-sm">
-            <p className="text-xs uppercase tracking-[0.16em] text-text-tertiary">Usuarios</p>
-            <p className="mt-2 text-2xl font-semibold text-text-primary">{users.length}</p>
-          </div>
-          <div className="rounded-2xl border border-border-default bg-surface p-4 shadow-sm">
-            <p className="text-xs uppercase tracking-[0.16em] text-text-tertiary">Agentes de voz</p>
-            <p className="mt-2 text-2xl font-semibold text-text-primary">{totals.voice}</p>
-          </div>
-          <div className="rounded-2xl border border-border-default bg-surface p-4 shadow-sm">
-            <p className="text-xs uppercase tracking-[0.16em] text-text-tertiary">Agentes de texto</p>
-            <p className="mt-2 text-2xl font-semibold text-text-primary">{totals.text}</p>
-          </div>
-          <div className="rounded-2xl border border-border-default bg-surface p-4 shadow-sm">
-            <p className="text-xs uppercase tracking-[0.16em] text-text-tertiary">Numeros</p>
-            <p className="mt-2 text-2xl font-semibold text-text-primary">{totals.phone}</p>
-          </div>
-        </div>
+        {!isLoading && !isError && users.length > 0 && (
+          <p className="mb-4 text-sm tabular-nums text-text-secondary">
+            <span className="font-semibold text-text-primary">{plural(users.length, 'usuario', 'usuarios')}</span>
+            <span aria-hidden="true" className="px-2 text-text-muted">·</span>
+            {plural(totals.voice, 'agente de voz', 'agentes de voz')}
+            <span aria-hidden="true" className="px-2 text-text-muted">·</span>
+            {plural(totals.text, 'agente de texto', 'agentes de texto')}
+            <span aria-hidden="true" className="px-2 text-text-muted">·</span>
+            {plural(totals.phone, 'número', 'números')}
+          </p>
+        )}
 
-        <div className="overflow-hidden rounded-3xl border border-border-default bg-surface shadow-sm">
+        <div className="overflow-hidden rounded-xl border border-border-default bg-surface">
           {isLoading ? (
-            <div className="flex h-48 items-center justify-center text-text-secondary">
-              Cargando usuarios...
-            </div>
+            <p role="status" className="px-6 py-16 text-center text-sm text-text-secondary">
+              Cargando usuarios…
+            </p>
           ) : isError ? (
-            <div className="flex h-48 items-center justify-center px-6 text-center text-text-secondary">
-              No fue posible cargar el panel administrativo de usuarios.
-            </div>
+            <p className="px-6 py-16 text-center text-sm text-text-secondary">
+              No pudimos cargar la lista de usuarios. Recargue la página para intentarlo de nuevo.
+            </p>
           ) : users.length === 0 ? (
-            <div className="flex h-48 items-center justify-center text-text-secondary">
-              No hay usuarios registrados.
-            </div>
+            <p className="px-6 py-16 text-center text-sm text-text-secondary">
+              Aún no hay usuarios. Use «Crear usuario» para dar acceso a la primera persona.
+            </p>
           ) : (
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-border-default">
-                  <th className="px-6 py-3.5 text-left text-xs font-medium uppercase tracking-wider text-text-tertiary">
-                    Usuario
-                  </th>
-                  <th className="px-6 py-3.5 text-left text-xs font-medium uppercase tracking-wider text-text-tertiary">
-                    Rol
-                  </th>
-                  <th className="px-6 py-3.5 text-left text-xs font-medium uppercase tracking-wider text-text-tertiary">
-                    Estado
-                  </th>
-                  <th className="px-6 py-3.5 text-left text-xs font-medium uppercase tracking-wider text-text-tertiary">
-                    Seguridad
-                  </th>
-                  <th className="px-6 py-3.5 text-left text-xs font-medium uppercase tracking-wider text-text-tertiary">
-                    Recursos
-                  </th>
-                  <th className="px-6 py-3.5 text-right text-xs font-medium uppercase tracking-wider text-text-tertiary">
-                    Acciones
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#e4e0f5]">
-                {users.map((user) => (
-                  <tr key={user._id}>
-                    <td className="px-6 py-4">
-                      <p className="text-sm font-medium text-text-primary">{user.name}</p>
-                      <p className="text-sm text-text-secondary">{user.email}</p>
-                      <p className="mt-1 text-xs text-text-muted">
-                        Alta: {formatDate(user.created_at_unix_secs)}
-                      </p>
-                    </td>
-                    <td className="px-6 py-4 text-sm text-black/70">{roleLabel(user.role)}</td>
-                    <td className="px-6 py-4 text-sm text-black/70">
-                      {user.confirmed ? 'Confirmado' : 'Pendiente'}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-black/70">
-                      MFA: {user.mfa_enabled ? 'Activo' : 'Inactivo'}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-black/70">
-                      Voz {user.voice_agents_count} · Texto {user.text_agents_count} · Numeros{' '}
-                      {user.phone_numbers_count}
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex justify-end gap-2">
-                        <Link
-                          to={`/agentes_voz?user_id=${encodeURIComponent(user._id)}`}
-                          className="rounded-lg bg-[#f5f3ff] px-2.5 py-1.5 text-xs font-medium text-primary-600 transition-colors hover:bg-primary-50"
-                        >
-                          Voz
-                        </Link>
-                        <Link
-                          to={`/agentes_texto?user_id=${encodeURIComponent(user._id)}`}
-                          className="rounded-lg bg-[#f5f3ff] px-2.5 py-1.5 text-xs font-medium text-primary-600 transition-colors hover:bg-primary-50"
-                        >
-                          Texto
-                        </Link>
-                        <Link
-                          to={`/numeros_telefono?user_id=${encodeURIComponent(user._id)}`}
-                          className="rounded-lg bg-[#f5f3ff] px-2.5 py-1.5 text-xs font-medium text-primary-600 transition-colors hover:bg-primary-50"
-                        >
-                          Numeros
-                        </Link>
-                      </div>
-                    </td>
+            <div
+              role="region"
+              aria-label="Usuarios de la plataforma"
+              tabIndex={0}
+              className="custom-scrollbar overflow-x-auto focus-visible:outline-offset-[-2px]"
+            >
+              <table className="w-full min-w-[46rem]">
+                <thead className="bg-surface-muted">
+                  <tr className="border-b border-border-default">
+                    <th scope="col" className={`${headerCellClass} ${stickyCellClass} bg-surface-muted`}>
+                      Usuario
+                    </th>
+                    <th scope="col" className={headerCellClass}>Rol</th>
+                    <th scope="col" className={headerCellClass}>Estado</th>
+                    <th scope="col" className={headerCellClass}>Verificación</th>
+                    <th scope="col" className={headerCellClass}>Recursos</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-border-subtle">
+                  {users.map((user) => (
+                    <tr key={user._id}>
+                      <th scope="row" className={`${cellClass} ${stickyCellClass} bg-surface text-left font-normal`}>
+                        <p className="font-medium text-text-primary">{user.name}</p>
+                        <p className="whitespace-nowrap">{user.email}</p>
+                        <p className="mt-1 whitespace-nowrap text-xs text-text-tertiary">
+                          Desde el {formatDate(user.created_at_unix_secs)}
+                        </p>
+                      </th>
+                      <td className={`${cellClass} whitespace-nowrap`}>{roleLabel(user.role)}</td>
+                      <td className={cellClass}>
+                        <Badge variant={user.confirmed ? 'success' : 'warning'} size="sm">
+                          {user.confirmed ? 'Confirmado' : 'Pendiente'}
+                        </Badge>
+                      </td>
+                      <td className={cellClass}>{user.mfa_enabled ? 'Activada' : 'Desactivada'}</td>
+                      <td className={cellClass}>
+                        <ResourceLinks user={user} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
-
-        {showModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-            <div className="w-full max-w-md rounded-2xl bg-surface p-6 shadow-xl">
-              <div className="mb-4 flex items-center justify-between">
-                <h2 className="text-lg font-bold text-primary-600">Crear nuevo usuario</h2>
-                <button onClick={() => { setShowModal(false); reset() }} className="rounded-lg p-1 text-text-muted hover:bg-black/5">
-                  <XMarkIcon className="h-5 w-5" />
-                </button>
-              </div>
-              <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-text-secondary">Nombre completo *</label>
-                  <input {...register('name', { required: 'El nombre es requerido' })} className="w-full rounded-xl border border-border-default bg-surface px-4 py-2.5 text-sm outline-none focus:border-primary-500 focus:ring-1 focus:ring-[#271173]" placeholder="Ej: Enrique Yturria" />
-                  {errors.name && <p className="mt-1 text-xs text-rose-500">{errors.name.message}</p>}
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-text-secondary">Email *</label>
-                  <input {...register('email', { required: 'El email es requerido' })} type="email" className="w-full rounded-xl border border-border-default bg-surface px-4 py-2.5 text-sm outline-none focus:border-primary-500 focus:ring-1 focus:ring-[#271173]" placeholder="correo@ejemplo.com" />
-                  {errors.email && <p className="mt-1 text-xs text-rose-500">{errors.email.message}</p>}
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-text-secondary">Contraseña temporal *</label>
-                  <input {...register('password', { required: 'La contraseña es requerida', minLength: { value: 8, message: 'Mínimo 8 caracteres' } })} type="password" className="w-full rounded-xl border border-border-default bg-surface px-4 py-2.5 text-sm outline-none focus:border-primary-500 focus:ring-1 focus:ring-[#271173]" placeholder="Mínimo 8 caracteres" />
-                  {errors.password && <p className="mt-1 text-xs text-rose-500">{errors.password.message}</p>}
-                </div>
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-text-secondary">Rol</label>
-                  <select {...register('role')} className="w-full rounded-xl border border-border-default bg-surface px-4 py-2.5 text-sm outline-none focus:border-primary-500 focus:ring-1 focus:ring-[#271173]">
-                    <option value="agent">Agente</option>
-                    <option value="supervisor">Supervisor</option>
-                    <option value="admin">Admin</option>
-                  </select>
-                </div>
-                <div className="pt-2 flex justify-end gap-3">
-                  <button type="button" onClick={() => { setShowModal(false); reset() }} className="rounded-xl border border-border-default px-4 py-2.5 text-sm font-medium text-text-secondary hover:bg-primary-50/60">Cancelar</button>
-                  <button type="submit" disabled={createMutation.isPending} className="rounded-xl bg-primary-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-[#3a1d9e] disabled:opacity-50">Crear usuario</button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
       </div>
+
+      <Modal
+        open={showModal}
+        onClose={closeModal}
+        title="Crear usuario"
+        description="La persona ingresará con una contraseña temporal que podrá cambiar en Configuración."
+        dismissOnBackdrop={false}
+      >
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-5" noValidate>
+          <FormField label="Nombre completo" error={errors.name?.message}>
+            {(control) => (
+              <input
+                {...control}
+                type="text"
+                autoComplete="off"
+                placeholder="Ej.: Laura Gómez"
+                className={inputClass}
+                {...register('name', { required: 'Ingrese el nombre de la persona' })}
+              />
+            )}
+          </FormField>
+          <FormField label="Correo electrónico" error={errors.email?.message}>
+            {(control) => (
+              <input
+                {...control}
+                type="email"
+                autoComplete="off"
+                placeholder="correo@empresa.com"
+                className={inputClass}
+                {...register('email', {
+                  required: 'Ingrese el correo de la persona',
+                  pattern: {
+                    value: /\S+@\S+\.\S+/,
+                    message: 'Revise el correo; debe tener la forma nombre@empresa.com',
+                  },
+                })}
+              />
+            )}
+          </FormField>
+          <FormField label="Contraseña temporal" hint="Mínimo 8 caracteres." error={errors.password?.message}>
+            {(control) => (
+              <input
+                {...control}
+                type="password"
+                autoComplete="new-password"
+                className={inputClass}
+                {...register('password', {
+                  required: 'Ingrese una contraseña temporal',
+                  minLength: { value: 8, message: 'La contraseña debe tener al menos 8 caracteres' },
+                })}
+              />
+            )}
+          </FormField>
+          <FormField label="Rol">
+            {(control) => (
+              <select {...control} className={inputClass} {...register('role')}>
+                <option value="agent">Agente</option>
+                <option value="supervisor">Supervisor</option>
+                <option value="admin">Administrador</option>
+              </select>
+            )}
+          </FormField>
+          <div className="flex flex-col-reverse gap-2 border-t border-border-subtle pt-5 sm:flex-row sm:justify-end">
+            <Button type="button" variant="ghost" onClick={closeModal}>
+              Cancelar
+            </Button>
+            <Button type="submit" isLoading={createMutation.isPending}>
+              Crear usuario
+            </Button>
+          </div>
+        </form>
+      </Modal>
     </div>
   )
 }

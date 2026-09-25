@@ -1,16 +1,17 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'react-toastify'
-import {
-  ExclamationTriangleIcon,
-  CheckCircleIcon,
-  XCircleIcon,
-  ArrowDownTrayIcon,
-  ChevronDownIcon,
-  ChevronUpIcon,
-} from '@heroicons/react/24/outline'
+import { ArrowDownTrayIcon, ChevronDownIcon } from '@heroicons/react/24/outline'
 import { getTextAgents, getSofiaErrors, updateSofiaErrorLabel, downloadSofiaErrorsCsv } from '@/api/TextAgentsAPI'
 import type { TextAgentSummary, SofiaError, SofiaErrorLabel } from '@/types/textAgent'
+import PageHeader from '@/components/ui/PageHeader'
+import Button from '@/components/ui/Button'
+import Skeleton from '@/components/ui/Skeleton'
+import SegmentedFilter from '@/components/app/escalations/SegmentedFilter'
+import { cn } from '@/lib/utils'
+import { channelLabel, formatPhone, phoneFromTitle } from '@/lib/escalations'
+
+type LabelFilter = SofiaErrorLabel | 'all'
 
 function formatDate(unixSecs: number) {
   return new Date(unixSecs * 1000).toLocaleDateString('es-CO', {
@@ -19,31 +20,43 @@ function formatDate(unixSecs: number) {
   })
 }
 
-const LABEL_CONFIG = {
-  '': { label: 'Sin clasificar', color: 'bg-gray-100 text-gray-600' },
-  true_positive: { label: 'Alucinación real', color: 'bg-red-100 text-red-700' },
-  false_positive: { label: 'Falso positivo', color: 'bg-green-100 text-green-700' },
-} as const
+const LABEL_CONFIG: Record<SofiaErrorLabel, { label: string; badge: string }> = {
+  '': { label: 'Sin revisar', badge: 'bg-neutral-100 text-text-secondary ring-border-default' },
+  true_positive: { label: 'Error confirmado', badge: 'bg-warning-50 text-warning-700 ring-warning-500/30' },
+  false_positive: { label: 'Respuesta correcta', badge: 'bg-success-50 text-success-700 ring-success-500/25' },
+}
+
+const FILTER_OPTIONS: Array<{ value: LabelFilter; label: string }> = [
+  { value: 'all', label: 'Todas' },
+  { value: '', label: 'Sin revisar' },
+  { value: 'true_positive', label: 'Error confirmado' },
+  { value: 'false_positive', label: 'Respuesta correcta' },
+]
+
+function conversationTitle(error: SofiaError): string {
+  const phone = phoneFromTitle(error.title)
+  if (phone) return `${formatPhone(phone)} · WhatsApp`
+  return error.title?.trim() || 'Conversación sin título'
+}
 
 function TranscriptRow({ entry }: { entry: { role: string; message: string } }) {
   const isAI = entry.role === 'assistant'
   return (
-    <div className={`flex gap-2 ${isAI ? 'justify-start' : 'justify-end'}`}>
+    <li className={cn('flex', isAI ? 'justify-end' : 'justify-start')}>
       <div
-        className={`max-w-[80%] rounded-xl px-3 py-2 text-sm ${
-          isAI ? 'bg-[#f3f0ff] text-black' : 'bg-[#271173] text-white'
-        }`}
+        className={cn(
+          'max-w-[85%] rounded-xl border px-3.5 py-2 text-sm leading-relaxed sm:max-w-[75%]',
+          isAI ? 'border-primary-100 bg-primary-50 text-text-primary' : 'border-border-default bg-surface text-text-primary',
+        )}
       >
-        <span className="mb-0.5 block text-[10px] font-semibold opacity-60">
-          {isAI ? 'Sofía' : 'Usuario'}
-        </span>
-        {entry.message}
+        <span className="mb-0.5 block text-xs font-medium text-text-tertiary">{isAI ? 'Sofía' : 'Cliente'}</span>
+        <span className="whitespace-pre-wrap">{entry.message}</span>
       </div>
-    </div>
+    </li>
   )
 }
 
-function ErrorCard({
+function ErrorItem({
   error,
   onLabelChange,
 }: {
@@ -51,88 +64,83 @@ function ErrorCard({
   onLabelChange: (conversationId: string, label: SofiaErrorLabel) => void
 }) {
   const [expanded, setExpanded] = useState(false)
-  const labelCfg = LABEL_CONFIG[error.sofia_error_label]
+  const panelId = useId()
+  const labelCfg = LABEL_CONFIG[error.sofia_error_label] ?? LABEL_CONFIG['']
+  const when = error.escalated_at_unix_secs || error.created_at_unix_secs
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-[#e4e0f5] bg-white shadow-sm">
-      <div
-        className="flex cursor-pointer items-center gap-4 px-5 py-4"
-        onClick={() => setExpanded(v => !v)}
+    <li>
+      <button
+        type="button"
+        aria-expanded={expanded}
+        aria-controls={panelId}
+        onClick={() => setExpanded((value) => !value)}
+        className="flex w-full items-start gap-4 px-5 py-4 text-left transition-colors hover:bg-surface-muted focus-visible:outline-offset-[-2px]"
       >
-        <ExclamationTriangleIcon className="h-5 w-5 shrink-0 text-amber-500" />
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold text-black">
-            {error.title || error.conversation_id}
-          </p>
-          <p className="mt-0.5 text-xs text-black/50">
-            {error.created_at_unix_secs ? formatDate(error.created_at_unix_secs) : '—'} · {error.channel}
-          </p>
-        </div>
-        <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${labelCfg.color}`}>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-semibold text-text-primary">{conversationTitle(error)}</span>
+          <span className="mt-0.5 block text-xs text-text-tertiary">
+            {when ? formatDate(when) : 'Sin fecha'} · {channelLabel(error.channel)}
+          </span>
+        </span>
+        <span className={cn('inline-flex shrink-0 items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset', labelCfg.badge)}>
           {labelCfg.label}
         </span>
-        {expanded ? (
-          <ChevronUpIcon className="h-4 w-4 shrink-0 text-black/40" />
-        ) : (
-          <ChevronDownIcon className="h-4 w-4 shrink-0 text-black/40" />
-        )}
-      </div>
+        <ChevronDownIcon
+          aria-hidden="true"
+          className={cn('mt-0.5 h-4 w-4 shrink-0 text-text-tertiary transition-transform duration-200', expanded && 'rotate-180')}
+        />
+      </button>
 
       {expanded && (
-        <div className="border-t border-[#e4e0f5] px-5 pb-5 pt-4">
-          <div className="mb-4 flex max-h-72 flex-col gap-2 overflow-y-auto rounded-xl bg-gray-50 p-3">
-            {error.transcript.length === 0 ? (
-              <p className="text-center text-xs text-black/40">Sin mensajes</p>
-            ) : (
-              error.transcript.map((t, i) => <TranscriptRow key={i} entry={t} />)
-            )}
-          </div>
+        <div id={panelId} className="border-t border-border-subtle bg-surface-muted px-5 pb-5 pt-4">
+          {error.transcript.length === 0 ? (
+            <p className="text-sm text-text-secondary">Esta conversación no tiene mensajes.</p>
+          ) : (
+            <ol className="flex max-h-80 flex-col gap-2 overflow-y-auto">
+              {error.transcript.map((entry, index) => (
+                <TranscriptRow key={index} entry={entry} />
+              ))}
+            </ol>
+          )}
 
-          <div className="flex flex-wrap gap-2">
-            <span className="self-center text-xs font-medium text-black/50">Clasificar:</span>
-            <button
-              onClick={() => onLabelChange(error.conversation_id, 'true_positive')}
-              className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
-                error.sofia_error_label === 'true_positive'
-                  ? 'border-red-400 bg-red-50 text-red-700'
-                  : 'border-[#e4e0f5] bg-white text-black/60 hover:border-red-300'
-              }`}
-            >
-              <XCircleIcon className="h-3.5 w-3.5" />
-              Alucinación real
-            </button>
-            <button
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <span className="text-sm text-text-secondary">¿La respuesta de Sofía fue correcta?</span>
+            <Button
+              size="sm"
+              variant={error.sofia_error_label === 'false_positive' ? 'secondary' : 'outline'}
+              aria-pressed={error.sofia_error_label === 'false_positive'}
               onClick={() => onLabelChange(error.conversation_id, 'false_positive')}
-              className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
-                error.sofia_error_label === 'false_positive'
-                  ? 'border-green-400 bg-green-50 text-green-700'
-                  : 'border-[#e4e0f5] bg-white text-black/60 hover:border-green-300'
-              }`}
             >
-              <CheckCircleIcon className="h-3.5 w-3.5" />
-              Falso positivo
-            </button>
+              Sí, era correcta
+            </Button>
+            <Button
+              size="sm"
+              variant={error.sofia_error_label === 'true_positive' ? 'secondary' : 'outline'}
+              aria-pressed={error.sofia_error_label === 'true_positive'}
+              onClick={() => onLabelChange(error.conversation_id, 'true_positive')}
+            >
+              No, tenía un error
+            </Button>
             {error.sofia_error_label !== '' && (
-              <button
-                onClick={() => onLabelChange(error.conversation_id, '')}
-                className="rounded-lg border border-[#e4e0f5] px-3 py-1.5 text-xs text-black/40 hover:border-gray-300"
-              >
-                Limpiar
-              </button>
+              <Button size="sm" variant="ghost" onClick={() => onLabelChange(error.conversation_id, '')}>
+                Quitar clasificación
+              </Button>
             )}
           </div>
         </div>
       )}
-    </div>
+    </li>
   )
 }
 
 export default function SofiaErrorsView() {
   const queryClient = useQueryClient()
   const [selectedAgentId, setSelectedAgentId] = useState('')
-  const [labelFilter, setLabelFilter] = useState<SofiaErrorLabel | 'all'>('all')
+  const [labelFilter, setLabelFilter] = useState<LabelFilter>('all')
+  const agentSelectId = useId()
 
-  const { data: agentsData } = useQuery({
+  const { data: agentsData, isLoading: isLoadingAgents } = useQuery({
     queryKey: ['text-agents'],
     queryFn: () => getTextAgents({}),
   })
@@ -154,94 +162,95 @@ export default function SofiaErrorsView() {
       queryClient.invalidateQueries({ queryKey: ['sofia-errors', selectedAgentId] })
       toast.success('Clasificación guardada')
     },
-    onError: () => toast.error('Error al guardar clasificación'),
+    onError: () => toast.error('No se pudo guardar la clasificación. Intente de nuevo.'),
   })
 
   const handleExport = () => {
     downloadSofiaErrorsCsv(selectedAgentId).catch((error: Error) => toast.error(error.message))
   }
 
+  const emptyMessage =
+    labelFilter === 'all'
+      ? 'No hay respuestas por revisar. Cuando Sofía no esté segura de una respuesta y pase la conversación a una persona, aparecerá aquí.'
+      : `No hay conversaciones con la clasificación “${LABEL_CONFIG[labelFilter].label}”.`
+
   return (
     <div className="h-full overflow-y-auto">
-      <div className="w-full p-8">
-        {/* Header */}
-        <section className="section-enter mb-8 overflow-hidden rounded-[28px] border border-[#e4e0f5] bg-white px-6 py-6 shadow-sm">
-          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#271173]">
-                Calidad de IA
-              </p>
-              <h1 className="mt-2 text-3xl font-bold text-black">Dashboard de Alucinaciones</h1>
-              <p className="mt-2 max-w-2xl text-sm text-black/60">
-                Conversaciones donde Sofía expresó incertidumbre repetida y fue escalada automáticamente.
-                Clasifica cada caso para mejorar el modelo.
-              </p>
-            </div>
-            <button
+      <div className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+        <PageHeader
+          title="Respuestas por revisar"
+          description="Conversaciones en las que Sofía no estaba segura de la respuesta y pasó el caso a una persona. Revise cada una e indique si la respuesta fue correcta; así sabrá qué información reforzar."
+          actions={
+            <Button
+              variant="outline"
               onClick={handleExport}
-              disabled={!selectedAgentId || errors.length === 0}
-              className="flex items-center gap-2 rounded-xl bg-[#271173] px-4 py-2.5 text-sm font-semibold text-white transition-opacity disabled:opacity-40 hover:opacity-90"
+              disabled={!selectedAgentId}
+              leftIcon={<ArrowDownTrayIcon className="h-4 w-4" aria-hidden="true" />}
             >
-              <ArrowDownTrayIcon className="h-4 w-4" />
               Exportar CSV
-            </button>
-          </div>
-        </section>
+            </Button>
+          }
+        />
 
-        {/* Filters */}
-        <div className="mb-6 flex flex-wrap items-center gap-3">
-          <select
-            value={selectedAgentId}
-            onChange={e => setSelectedAgentId(e.target.value)}
-            className="rounded-xl border border-[#e4e0f5] bg-white px-3 py-2 text-sm text-black focus:border-[#271173] focus:outline-none"
-          >
-            {agents.map(a => (
-              <option key={a.agent_id} value={a.agent_id}>{a.name}</option>
-            ))}
-          </select>
-
-          {(['all', '', 'true_positive', 'false_positive'] as const).map(f => (
-            <button
-              key={f}
-              onClick={() => setLabelFilter(f)}
-              className={`rounded-xl px-3 py-2 text-sm font-medium transition-colors ${
-                labelFilter === f
-                  ? 'bg-[#271173] text-white'
-                  : 'border border-[#e4e0f5] bg-white text-black/60 hover:border-[#271173]'
-              }`}
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+          <div className="flex items-center gap-2">
+            <label htmlFor={agentSelectId} className="text-sm font-medium text-text-secondary">
+              Agente
+            </label>
+            <select
+              id={agentSelectId}
+              value={selectedAgentId}
+              onChange={(event) => setSelectedAgentId(event.target.value)}
+              disabled={isLoadingAgents || agents.length === 0}
+              className="h-10 min-w-0 flex-1 rounded-lg border border-border-default bg-surface px-3 text-sm text-text-primary focus-visible:border-primary-600 disabled:opacity-60 sm:w-60 sm:flex-none"
             >
-              {f === 'all' ? 'Todos' : LABEL_CONFIG[f].label}
-            </button>
-          ))}
+              {isLoadingAgents && <option value="">Cargando agentes…</option>}
+              {!isLoadingAgents && agents.length === 0 && <option value="">Sin agentes de texto</option>}
+              {agents.map((agent) => (
+                <option key={agent.agent_id} value={agent.agent_id}>{agent.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <SegmentedFilter
+            label="Clasificación"
+            value={labelFilter}
+            onChange={setLabelFilter}
+            options={FILTER_OPTIONS}
+          />
 
           {data && (
-            <span className="ml-auto text-sm text-black/40">
-              {data.total} {data.total === 1 ? 'resultado' : 'resultados'}
+            <span className="text-sm tabular-nums text-text-tertiary sm:ml-auto">
+              {data.total} {data.total === 1 ? 'conversación' : 'conversaciones'}
             </span>
           )}
         </div>
 
-        {/* Content */}
-        {isLoading ? (
-          <div className="flex h-40 items-center justify-center">
-            <div className="h-8 w-8 animate-spin rounded-full border-2 border-[#271173] border-t-transparent" />
-          </div>
-        ) : errors.length === 0 ? (
-          <div className="flex h-40 flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-[#e4e0f5]">
-            <CheckCircleIcon className="h-8 w-8 text-green-400" />
-            <p className="text-sm text-black/40">No hay alucinaciones detectadas</p>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-3">
-            {errors.map(e => (
-              <ErrorCard
-                key={e.conversation_id}
-                error={e}
-                onLabelChange={(conversationId, label) => setLabel({ conversationId, label })}
-              />
-            ))}
-          </div>
-        )}
+        <div className="mt-4">
+          {isLoading ? (
+            <div className="space-y-4 rounded-xl border border-border-default bg-surface p-5" aria-label="Cargando conversaciones">
+              <Skeleton height={16} width="55%" />
+              <Skeleton height={16} width="45%" />
+              <Skeleton height={16} width="50%" />
+            </div>
+          ) : errors.length === 0 ? (
+            <p className="rounded-xl border border-dashed border-border-strong px-5 py-12 text-center text-sm text-text-secondary">
+              {!isLoadingAgents && agents.length === 0
+                ? 'Todavía no tiene agentes de texto.'
+                : emptyMessage}
+            </p>
+          ) : (
+            <ul className="divide-y divide-border-subtle overflow-hidden rounded-xl border border-border-default bg-surface">
+              {errors.map((error) => (
+                <ErrorItem
+                  key={error.conversation_id}
+                  error={error}
+                  onLabelChange={(conversationId, label) => setLabel({ conversationId, label })}
+                />
+              ))}
+            </ul>
+          )}
+        </div>
       </div>
     </div>
   )

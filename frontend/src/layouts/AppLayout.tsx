@@ -1,12 +1,15 @@
-import { Suspense, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { Navigate, Outlet } from 'react-router-dom'
 import { toast } from 'react-toastify'
-import Sidebar from '@/components/app/Sidebar'
 import { ToastContainer } from 'react-toastify'
+import Sidebar from '@/components/app/Sidebar'
+import MobileNav from '@/components/app/shell/MobileNav'
 import { bootstrapClientAgents } from '@/api/VoiceRuntimeAPI'
 import { useCurrentUser } from '@/hooks/useCurrentUser'
-import OnboardingWizard from '@/components/app/onboarding/OnboardingWizard'
+
+// Se muestra una sola vez por agente: no forma parte del bundle inicial.
+const OnboardingWizard = lazy(() => import('@/components/app/onboarding/OnboardingWizard'))
 
 export default function AppLayout() {
   const { user, isSuperAdmin, isLoading } = useCurrentUser()
@@ -69,13 +72,13 @@ export default function AppLayout() {
 
         if (textError === 'provider_key_missing') {
           toast.error(
-            'Sin API Key de IA configurada. Contacta al administrador para activar tu cuenta.',
+            'Su cuenta aún no tiene activada la inteligencia artificial. Contacte al administrador para activarla.',
             { autoClose: 8000 },
           )
         }
       },
       onError: () => {
-        toast.error('Error al inicializar tu cuenta. Recarga la página si el problema persiste.')
+        toast.error('No pudimos preparar su cuenta. Recargue la página; si la situación continúa, contacte al administrador.')
       },
       onSettled: () => {
         if (bootstrapInFlightUserRef.current === userId) {
@@ -88,14 +91,25 @@ export default function AppLayout() {
   if (!localStorage.getItem('AUTH_TOKEN')) return <Navigate to="/auth/login" replace />
 
   return (
-    <div className="flex h-screen overflow-hidden bg-bg-secondary text-text-primary">
+    <div className="flex h-dvh flex-col overflow-hidden bg-bg-secondary text-text-primary lg:flex-row">
+      <a
+        href="#contenido"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-600 focus:rounded-lg focus:bg-surface focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-primary-800 focus:shadow-md"
+      >
+        Saltar al contenido
+      </a>
+      <MobileNav />
       <Sidebar />
-      <main className="flex h-full min-h-0 min-w-0 flex-1 overflow-hidden">
+      <main id="contenido" tabIndex={-1} className="flex min-h-0 min-w-0 flex-1 overflow-hidden focus:outline-none">
         <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
           <Suspense
             fallback={
               <div className="flex h-full items-center justify-center">
-                <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary-600 border-t-transparent" />
+                <div
+                  role="status"
+                  aria-label="Cargando"
+                  className="h-5 w-5 animate-spin rounded-full border-2 border-primary-600 border-t-transparent"
+                />
               </div>
             }
           >
@@ -103,18 +117,22 @@ export default function AppLayout() {
           </Suspense>
         </div>
       </main>
+      {/* Se pausan al pasar el puntero o perder el foco (WCAG 2.2.1) y duran lo suficiente para leerse. */}
       <ToastContainer
-        pauseOnHover={false}
-        pauseOnFocusLoss={false}
+        autoClose={7000}
+        pauseOnHover
+        pauseOnFocusLoss
         theme="light"
         toastClassName="!bg-surface !border !border-border-default !shadow-lg !rounded-xl !text-text-primary"
         progressClassName="!bg-primary-500"
       />
       {wizardAgentId && (
-        <OnboardingWizard
-          agentId={wizardAgentId}
-          onComplete={() => setWizardAgentId(null)}
-        />
+        <Suspense fallback={null}>
+          <OnboardingWizard
+            agentId={wizardAgentId}
+            onComplete={() => setWizardAgentId(null)}
+          />
+        </Suspense>
       )}
     </div>
   )

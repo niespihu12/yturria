@@ -1,167 +1,149 @@
-import { useMemo } from 'react'
+import { useId } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import {
-  ArrowTopRightOnSquareIcon,
-  ClipboardDocumentIcon,
-  CodeBracketIcon,
-  GlobeAltIcon,
-} from '@heroicons/react/24/outline'
+import { ArrowTopRightOnSquareIcon, ClipboardDocumentIcon } from '@heroicons/react/24/outline'
 import { toast } from 'react-toastify'
 
 import { getTextAgentEmbedConfig } from '@/api/TextAgentsAPI'
+import AdvancedSection from '@/components/ui/AdvancedSection'
+import Button from '@/components/ui/Button'
+import { useCurrentUser } from '@/hooks/useCurrentUser'
 
 type Props = {
   agentId: string
 }
 
-async function copySnippet(text: string, label: string) {
+async function copyCode(text: string) {
   try {
     await navigator.clipboard.writeText(text)
-    toast.success(`${label} copiado al portapapeles`)
+    toast.success('Código copiado. Ya puede pegarlo en su sitio web.')
   } catch {
-    toast.error('No se pudo copiar el snippet')
+    toast.error('No se pudo copiar. Seleccione el código y cópielo manualmente.')
   }
 }
 
+function CodeBlock({ label, value, hint }: { label: string; value: string; hint?: string }) {
+  const id = useId()
+  return (
+    <div>
+      <div className="mb-2 flex flex-wrap items-end justify-between gap-2">
+        <div>
+          <label htmlFor={id} className="text-sm font-medium text-text-primary">
+            {label}
+          </label>
+          {hint && <p className="mt-0.5 text-xs text-text-tertiary">{hint}</p>}
+        </div>
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          leftIcon={<ClipboardDocumentIcon className="h-4 w-4" aria-hidden="true" />}
+          onClick={() => void copyCode(value)}
+        >
+          Copiar código
+        </Button>
+      </div>
+      <textarea
+        id={id}
+        readOnly
+        value={value}
+        rows={7}
+        onFocus={(event) => event.currentTarget.select()}
+        className="w-full resize-none rounded-lg border border-border-default bg-surface-muted p-3 font-mono text-xs leading-relaxed text-text-secondary focus:border-primary-600"
+      />
+    </div>
+  )
+}
+
 export default function TextAgentIntegrationTab({ agentId }: Props) {
+  const { isSuperAdmin } = useCurrentUser()
   const { data, isLoading, isError } = useQuery({
     queryKey: ['text-agent-embed-config', agentId],
     queryFn: () => getTextAgentEmbedConfig(agentId),
     enabled: !!agentId,
   })
 
-  const iframeUrl = useMemo(() => data?.iframe_url ?? '', [data])
-  const iframeSnippet = useMemo(() => data?.iframe_snippet ?? '', [data])
-  const scriptSnippet = useMemo(() => data?.script_snippet ?? '', [data])
+  const iframeUrl = data?.iframe_url ?? ''
+  const iframeSnippet = data?.iframe_snippet ?? ''
+  const scriptSnippet = data?.script_snippet ?? ''
 
   return (
-    <div className="max-w-5xl space-y-5">
-      <section className="rounded-2xl border border-[#e4e0f5] bg-white p-5 shadow-sm">
-        <p className="inline-flex items-center gap-2 rounded-full border border-[#d8d3ee] bg-[#f7f5ff] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#271173]">
-          <GlobeAltIcon className="h-3.5 w-3.5" />
-          Integración embebible
+    <div className="max-w-4xl space-y-8">
+      <div>
+        <h2 className="text-base font-semibold text-text-primary">Chat en su sitio web</h2>
+        <p className="mt-1 max-w-[65ch] text-sm leading-relaxed text-text-secondary">
+          Copie el código y péguelo en la página de su sitio donde quiera mostrar el chat. Sus
+          clientes podrán conversar con el agente sin salir de su sitio.
         </p>
-        <h2 className="mt-3 text-xl font-semibold text-[#1a1a2f]">Integrar en tu sitio</h2>
-        <p className="mt-2 text-sm leading-6 text-[#1a1a2f]/70">
-          Usa el iframe o snippet para insertar este agente de texto en cualquier página web.
-        </p>
-      </section>
+      </div>
 
       {isLoading && (
-        <section className="rounded-2xl border border-[#e4e0f5] bg-white p-5 text-sm text-black/60 shadow-sm">
-          Cargando configuración de integración...
-        </section>
+        <div className="space-y-3" aria-label="Cargando el código del chat">
+          <div className="skeleton h-40" />
+          <div className="skeleton h-24" />
+        </div>
       )}
 
       {isError && (
-        <section className="rounded-2xl border border-rose-200 bg-rose-50 p-5 text-sm text-rose-700 shadow-sm">
-          No se pudo generar la configuración embebible del agente de texto.
-        </section>
+        <p role="alert" className="text-sm text-danger-700">
+          No pudimos preparar el código del chat. Recargue la página o intente más tarde.
+        </p>
       )}
 
       {!isLoading && !isError && data && data.embed_enabled === false && (
-        <section className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-800 shadow-sm">
-          La integración embebible está deshabilitada para este agente.
-        </section>
+        <p className="rounded-lg bg-warning-50 px-4 py-3 text-sm text-warning-700">
+          El chat para sitios web está desactivado para este agente.
+        </p>
       )}
 
       {!isLoading && !isError && data && data.embed_enabled !== false && iframeUrl && (
         <>
-          <section className="rounded-2xl border border-[#e4e0f5] bg-white p-5 shadow-sm">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <h3 className="text-sm font-semibold uppercase tracking-[0.12em] text-[#1a1a2f]/55">
-                Vista previa rápida
-              </h3>
+          <section className="space-y-5">
+            <CodeBlock
+              label="Código para su sitio web"
+              hint="Funciona en cualquier página HTML, WordPress o Webflow."
+              value={iframeSnippet}
+            />
+
+            <div>
+              <h3 className="text-sm font-medium text-text-primary">Dónde pegarlo</h3>
+              <dl className="mt-2 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-[auto_1fr]">
+                <dt className="font-medium text-text-secondary">WordPress</dt>
+                <dd className="text-text-secondary">Agregue un bloque «HTML personalizado» y pegue el código.</dd>
+                <dt className="font-medium text-text-secondary">Webflow</dt>
+                <dd className="text-text-secondary">Inserte un elemento «Embed» y pegue el código.</dd>
+                <dt className="font-medium text-text-secondary">Sitio propio</dt>
+                <dd className="text-text-secondary">Pídale a su equipo web que lo ubique en la página deseada.</dd>
+              </dl>
+            </div>
+
+            <AdvancedSection
+              key={isSuperAdmin ? 'admin' : 'client'}
+              title="Más opciones de instalación"
+              description="Versión con script, para equipos técnicos."
+              defaultOpen={isSuperAdmin}
+            >
+              <CodeBlock label="Código con script" value={scriptSnippet} />
+            </AdvancedSection>
+          </section>
+
+          <section className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h3 className="text-base font-semibold text-text-primary">Así lo verán sus clientes</h3>
               <a
                 href={iframeUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center gap-1 text-xs font-semibold text-[#271173] hover:text-[#1f0d5a]"
+                className="inline-flex items-center gap-1 text-sm font-semibold text-primary-700 hover:text-primary-800"
               >
-                Abrir en pestaña nueva
-                <ArrowTopRightOnSquareIcon className="h-3.5 w-3.5" />
+                Abrir en una pestaña nueva
+                <ArrowTopRightOnSquareIcon className="h-4 w-4" aria-hidden="true" />
               </a>
             </div>
-
-            <div className="overflow-hidden rounded-xl border border-[#ece8fb] bg-[#faf9ff] p-2">
-              <iframe
-                src={iframeUrl}
-                title="Vista previa del chat embebido"
-                className="h-130 w-full rounded-lg border-0 bg-white"
-              />
-            </div>
-          </section>
-
-          <section className="grid gap-4 lg:grid-cols-2">
-            <article className="rounded-2xl border border-[#e4e0f5] bg-white p-5 shadow-sm">
-              <div className="mb-3 flex items-center justify-between gap-2">
-                <h3 className="inline-flex items-center gap-2 text-sm font-semibold text-[#1a1a2f]">
-                  <CodeBracketIcon className="h-4 w-4 text-[#271173]" />
-                  Snippet iframe
-                </h3>
-                <button
-                  type="button"
-                  onClick={() => copySnippet(iframeSnippet, 'Snippet iframe')}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-[#d8d3ee] bg-[#f7f5ff] px-2.5 py-1 text-xs font-semibold text-[#271173] hover:bg-[#ede9ff]"
-                >
-                  <ClipboardDocumentIcon className="h-3.5 w-3.5" />
-                  Copiar
-                </button>
-              </div>
-              <textarea
-                readOnly
-                value={iframeSnippet}
-                className="h-56 w-full resize-none rounded-xl border border-[#ece8fb] bg-[#faf9ff] p-3 font-mono text-xs text-[#1a1a2f] focus:outline-none"
-              />
-            </article>
-
-            <article className="rounded-2xl border border-[#e4e0f5] bg-white p-5 shadow-sm">
-              <div className="mb-3 flex items-center justify-between gap-2">
-                <h3 className="inline-flex items-center gap-2 text-sm font-semibold text-[#1a1a2f]">
-                  <CodeBracketIcon className="h-4 w-4 text-[#271173]" />
-                  Snippet script
-                </h3>
-                <button
-                  type="button"
-                  onClick={() => copySnippet(scriptSnippet, 'Snippet script')}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-[#d8d3ee] bg-[#f7f5ff] px-2.5 py-1 text-xs font-semibold text-[#271173] hover:bg-[#ede9ff]"
-                >
-                  <ClipboardDocumentIcon className="h-3.5 w-3.5" />
-                  Copiar
-                </button>
-              </div>
-              <textarea
-                readOnly
-                value={scriptSnippet}
-                className="h-56 w-full resize-none rounded-xl border border-[#ece8fb] bg-[#faf9ff] p-3 font-mono text-xs text-[#1a1a2f] focus:outline-none"
-              />
-            </article>
-          </section>
-
-          <section className="rounded-2xl border border-[#e4e0f5] bg-white p-5 shadow-sm">
-            <h3 className="text-sm font-semibold uppercase tracking-[0.12em] text-[#1a1a2f]/55">
-              Guía rápida
-            </h3>
-            <div className="mt-3 grid gap-3 md:grid-cols-3">
-              <div className="rounded-xl border border-[#ece8fb] bg-[#faf9ff] p-3">
-                <p className="text-xs font-semibold text-[#271173]">HTML estático</p>
-                <p className="mt-1 text-xs leading-5 text-[#1a1a2f]/70">
-                  Pega el snippet iframe donde quieres mostrar el chat de texto.
-                </p>
-              </div>
-              <div className="rounded-xl border border-[#ece8fb] bg-[#faf9ff] p-3">
-                <p className="text-xs font-semibold text-[#271173]">WordPress</p>
-                <p className="mt-1 text-xs leading-5 text-[#1a1a2f]/70">
-                  Usa un bloque HTML personalizado y pega el snippet iframe.
-                </p>
-              </div>
-              <div className="rounded-xl border border-[#ece8fb] bg-[#faf9ff] p-3">
-                <p className="text-xs font-semibold text-[#271173]">Webflow</p>
-                <p className="mt-1 text-xs leading-5 text-[#1a1a2f]/70">
-                  Inserta un elemento Embed y pega el snippet iframe o script.
-                </p>
-              </div>
-            </div>
+            <iframe
+              src={iframeUrl}
+              title="Vista previa del chat para su sitio web"
+              className="h-130 w-full rounded-xl border border-border-default bg-surface"
+            />
           </section>
         </>
       )}

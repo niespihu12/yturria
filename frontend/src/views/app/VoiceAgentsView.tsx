@@ -1,69 +1,63 @@
-﻿import { useMemo, useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useId, useMemo, useState } from 'react'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'react-toastify'
 import { useForm, useWatch } from 'react-hook-form'
-import {
-  PlusIcon,
-  SparklesIcon,
-  TrashIcon,
-  PencilSquareIcon,
-  PhoneIcon,
-  XMarkIcon,
-} from '@heroicons/react/24/outline'
+import { PlusIcon, TrashIcon, PencilSquareIcon, PhoneIcon } from '@heroicons/react/24/outline'
 import { createAgent, deleteAgent, getAgents } from '@/api/VoiceRuntimeAPI'
 import { listTextAgentTemplates } from '@/api/TextAgentsAPI'
 import type { AgentListItem } from '@/types/agent'
 import type { TextAgentTemplate, TextAgentTemplateKey } from '@/types/textAgent'
 import { useCurrentUser } from '@/hooks/useCurrentUser'
+import PageHeader from '@/components/ui/PageHeader'
+import Button from '@/components/ui/Button'
+import Modal from '@/components/ui/Modal'
+import Badge from '@/components/ui/Badge'
+import Skeleton from '@/components/ui/Skeleton'
+import { useConfirm } from '@/components/ui/ConfirmDialog'
+import { describeError, errorClass, inputClass, labelClass } from '@/components/app/agent/agentUi'
 
 type CreateForm = {
   name: string
   template_key: TextAgentTemplateKey
 }
 
-const TEMPLATE_ACCENTS: Record<
-  TextAgentTemplateKey,
-  {
-    surface: string
-    border: string
-    chip: string
-    dot: string
-    gradient: string
-  }
-> = {
+type TemplateCopy = Pick<TextAgentTemplate, 'label' | 'summary' | 'description' | 'highlights'>
+
+// Textos de negocio (con tildes) para las plantillas conocidas; las demás usan el texto del servidor.
+const TEMPLATE_COPY: Partial<Record<TextAgentTemplateKey, TemplateCopy>> = {
   sofia: {
-    surface: 'bg-primary-50',
-    border: 'border-primary-200',
-    chip: 'bg-primary-100 text-primary-700',
-    dot: 'bg-primary-500',
-    gradient: 'from-primary-500/10 to-primary-600/5',
+    label: 'Sofía',
+    summary: 'Asesora comercial para seguros que pasa la llamada a una persona del equipo cuando hace falta.',
+    description:
+      'Ideal para ventas y atención de seguros. Recoge el contexto comercial de cada llamada y puede transferir la conversación a un asesor.',
+    highlights: ['Flujo comercial para seguros', 'Transferencia a un asesor', 'Lista para empezar'],
   },
   recepcionista: {
-    surface: 'bg-accent-50',
-    border: 'border-accent-200',
-    chip: 'bg-accent-100 text-accent-700',
-    dot: 'bg-accent-500',
-    gradient: 'from-accent-500/10 to-accent-600/5',
+    label: 'Recepcionista',
+    summary: 'Agenda citas, toma mensajes y responde dudas operativas.',
+    description:
+      'Pensada para la recepción y el primer contacto: horarios, disponibilidad, mensajes y solicitudes de cita.',
+    highlights: ['Agenda y mensajes', 'Sirve para distintos negocios', 'Conversaciones cortas'],
   },
   faq_bot: {
-    surface: 'bg-warning-50',
-    border: 'border-warning-200',
-    chip: 'bg-warning-100 text-warning-700',
-    dot: 'bg-warning-500',
-    gradient: 'from-warning-500/10 to-warning-600/5',
+    label: 'Preguntas frecuentes',
+    summary: 'Responde preguntas frecuentes con su base de conocimiento, sin transferir llamadas.',
+    description:
+      'Hecha para el autoservicio: responde con base en sus documentos, sin inventar respuestas ni transferir a una persona.',
+    highlights: ['Basada en sus documentos', 'Evita inventar respuestas', 'Sin transferencias automáticas'],
   },
   custom: {
-    surface: 'bg-info-50',
-    border: 'border-info-200',
-    chip: 'bg-info-100 text-info-700',
-    dot: 'bg-info-500',
-    gradient: 'from-info-500/10 to-info-600/5',
+    label: 'Personalizada',
+    summary: 'Empieza en blanco para configurar el agente desde cero.',
+    description:
+      'Para casos especiales: usted define las instrucciones, el saludo y el comportamiento del agente.',
+    highlights: ['Instrucciones a su medida', 'Configuración completa', 'Para casos especiales'],
   },
 }
 
-function getTemplateAccent(templateKey: TextAgentTemplateKey) {
-  return TEMPLATE_ACCENTS[templateKey] ?? TEMPLATE_ACCENTS.sofia
+function getTemplateCopy(template: TextAgentTemplate): TemplateCopy {
+  return TEMPLATE_COPY[template.key] ?? template
 }
 
 function formatDate(unixSecs: number) {
@@ -74,6 +68,8 @@ function formatDate(unixSecs: number) {
   })
 }
 
+const LIST_COLUMNS = 'grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 md:grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)_minmax(0,1fr)_auto]'
+
 export default function VoiceAgentsView() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
@@ -81,10 +77,14 @@ export default function VoiceAgentsView() {
   const [showModal, setShowModal] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const { isSuperAdmin } = useCurrentUser()
+  const [confirm, confirmDialog] = useConfirm()
+  const formId = useId()
+  const nameId = useId()
+  const templatesId = useId()
 
   const scopedUserId = searchParams.get('user_id') || undefined
 
-  const { data, isLoading, isError } = useQuery({
+  const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ['agents', scopedUserId ?? 'all'],
     queryFn: () => getAgents({ userId: scopedUserId }),
   })
@@ -102,6 +102,7 @@ export default function VoiceAgentsView() {
   const templates: TextAgentTemplate[] = templatesData?.templates ?? []
   const clientAgentLimit = templatesData?.client_agent_limit ?? 3
   const canCreate = isSuperAdmin || agents.length < clientAgentLimit
+  const isEmpty = !isLoading && !isError && agents.length === 0
 
   const defaultValues = useMemo<CreateForm>(
     () => ({
@@ -115,7 +116,6 @@ export default function VoiceAgentsView() {
     register,
     handleSubmit,
     control,
-    setValue,
     reset,
     formState: { errors },
   } = useForm<CreateForm>({ defaultValues })
@@ -140,7 +140,7 @@ export default function VoiceAgentsView() {
               prompt: '',
               llm: 'gemini-2.5-flash',
             },
-            first_message: 'Hola, en que puedo ayudarte?',
+            first_message: 'Hola, ¿en qué puedo ayudarle?',
             language: 'es',
           },
         },
@@ -151,7 +151,8 @@ export default function VoiceAgentsView() {
       closeModal()
       navigate(`/agentes_voz/${newAgent.agent_id}`)
     },
-    onError: (error: Error) => toast.error(error.message),
+    onError: (err: Error) =>
+      toast.error(describeError(err, 'No pudimos crear el agente. Intente de nuevo.')),
   })
 
   const { mutate: remove } = useMutation({
@@ -161,351 +162,275 @@ export default function VoiceAgentsView() {
       queryClient.invalidateQueries({ queryKey: ['agents'] })
       setDeletingId(null)
     },
-    onError: (error: Error) => {
-      toast.error(error.message)
+    onError: (err: Error) => {
+      toast.error(describeError(err, 'No pudimos eliminar el agente. Intente de nuevo.'))
       setDeletingId(null)
     },
   })
 
-  const handleDelete = (agentId: string, event: React.MouseEvent) => {
-    event.stopPropagation()
-    if (confirm('Eliminar este agente?')) {
-      setDeletingId(agentId)
-      remove(agentId)
-    }
+  const handleDelete = async (agent: AgentListItem) => {
+    const accepted = await confirm({
+      title: `¿Eliminar el agente «${agent.name}»?`,
+      description:
+        'El agente dejará de atender llamadas y se perderá su configuración: saludo, voz, instrucciones y herramientas. Esta acción no se puede deshacer.',
+      confirmLabel: 'Eliminar agente',
+      tone: 'danger',
+    })
+    if (!accepted) return
+    setDeletingId(agent.agent_id)
+    remove(agent.agent_id)
   }
+
+  const createButton = (
+    <Button leftIcon={<PlusIcon className="h-4 w-4" aria-hidden="true" />} onClick={() => setShowModal(true)}>
+      Nuevo agente
+    </Button>
+  )
 
   return (
     <div className="h-full overflow-y-auto">
-    <div className="w-full p-8">
-      <section className="section-enter mb-8 overflow-hidden rounded-3xl border border-border-default bg-surface px-6 py-6 shadow-sm">
-        <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-primary-600">
-              Workspace
-            </p>
-            <h1 className="mt-2 text-3xl font-bold text-text-primary">Agentes de Voz</h1>
-            <p className="mt-2 max-w-2xl text-sm text-text-secondary">
-              Entra directo al detalle del agente para editar prompt, knowledge base, herramientas
-              y pruebas de llamada desde un solo lugar.
-            </p>
-          </div>
+      <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-8 sm:py-8">
+        <PageHeader
+          title="Agentes de voz"
+          description="Atienden las llamadas de sus clientes con el saludo, la voz y la información que usted defina."
+          actions={
+            <>
+              {!isSuperAdmin && !isLoading && (
+                <span className="text-sm text-text-secondary tabular-nums">
+                  {agents.length} de {clientAgentLimit} agentes en uso
+                </span>
+              )}
+              {canCreate && !isEmpty && !isError && createButton}
+            </>
+          }
+        />
 
-          <div className="flex flex-col items-start gap-2 sm:items-end">
-            {!isSuperAdmin && (
-              <div className="rounded-full border border-primary-200 bg-primary-50 px-3 py-1 text-xs font-semibold text-primary-700">
-                {agents.length} / {clientAgentLimit} agentes usados
-              </div>
-            )}
-            {canCreate && (
-              <button
-                onClick={() => setShowModal(true)}
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white transition-all duration-200 hover:bg-primary-700 hover:-translate-y-px shadow-sm"
-              >
-                <PlusIcon className="w-4 h-4" />
-                Nuevo agente
-              </button>
+        {(scopedUserId || (!canCreate && !isSuperAdmin)) && (
+          <div className="mb-4 space-y-1 text-sm text-text-secondary">
+            {scopedUserId && <p>Está viendo los agentes de un solo usuario.</p>}
+            {!canCreate && !isSuperAdmin && (
+              <p>
+                Alcanzó el límite de {clientAgentLimit} agentes de su cuenta. Para crear otro,
+                elimine uno que ya no use.
+              </p>
             )}
           </div>
-        </div>
-      </section>
-
-      <div className="mb-5 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
-        <div>
-          <h2 className="text-lg font-semibold text-text-primary">Listado</h2>
-          <p className="mt-1 text-sm text-text-secondary">
-            {scopedUserId
-              ? 'Vista filtrada por usuario para revision administrativa.'
-              : 'La consola ahora abre por defecto en esta seccion justo despues del login.'}
-          </p>
-        </div>
-        {!canCreate && !isSuperAdmin && (
-          <p className="text-sm font-medium text-text-tertiary">
-            Ya alcanzaste el limite de {clientAgentLimit} agentes para esta cuenta.
-          </p>
         )}
-      </div>
 
-      <div className="overflow-hidden rounded-3xl border border-border-default bg-surface shadow-sm">
-        {isLoading ? (
-          <div className="flex h-48 items-center justify-center text-text-secondary">
-            <div className="flex items-center gap-2.5">
-              <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary-600 border-t-transparent" />
-              Cargando agentes...
-            </div>
-          </div>
-        ) : isError ? (
-          <div className="flex h-48 items-center justify-center px-6 text-center text-text-secondary">
-            Error al cargar agentes. Revisa la configuracion de la plataforma y vuelve a intentar.
-          </div>
-        ) : agents.length === 0 ? (
-          <div className="flex h-48 flex-col items-center justify-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary-50">
-              <PhoneIcon className="h-6 w-6 text-primary-600" />
-            </div>
-            <p className="text-sm text-text-secondary">No hay agentes todavia</p>
-            {canCreate && (
-              <button
-                onClick={() => setShowModal(true)}
-                className="text-sm font-medium text-primary-600 transition-colors hover:text-primary-700"
-              >
-                Crea tu primer agente
-              </button>
-            )}
-          </div>
-        ) : (
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-border-default bg-bg-secondary/50">
-                <th className="px-6 py-3.5 text-left text-xs font-semibold uppercase tracking-wider text-text-tertiary">
-                  Nombre
-                </th>
-                <th className="px-6 py-3.5 text-left text-xs font-semibold uppercase tracking-wider text-text-tertiary">
-                  Creado por
-                </th>
-                <th className="px-6 py-3.5 text-left text-xs font-semibold uppercase tracking-wider text-text-tertiary">
-                  Creado en
-                </th>
-                <th className="px-6 py-3.5 text-right text-xs font-semibold uppercase tracking-wider text-text-tertiary">
-                  Acciones
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border-default">
-              {agents.map((agent) => (
-                <tr
-                  key={agent.agent_id}
-                  onClick={() => navigate(`/agentes_voz/${agent.agent_id}`)}
-                  className="group cursor-pointer transition-all duration-150 hover:bg-primary-50/60"
-                >
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary-50 ring-1 ring-primary-100">
-                        <PhoneIcon className="h-4 w-4 text-primary-600" />
-                      </div>
-                      <span className="text-sm font-semibold text-text-primary transition-colors group-hover:text-primary-700">
-                        {agent.name}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 text-sm text-text-secondary">
-                    {agent.access_info?.creator_email ?? '-'}
-                  </td>
-                  <td className="px-6 py-4 text-sm text-text-secondary">
-                    {agent.created_at_unix_secs ? formatDate(agent.created_at_unix_secs) : '-'}
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="flex items-center justify-end gap-1">
-                      <button
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          navigate(`/agentes_voz/${agent.agent_id}`)
-                        }}
-                        className="rounded-lg p-2 text-text-tertiary transition-all duration-200 hover:bg-primary-50 hover:text-primary-700"
-                        title="Editar"
-                      >
-                        <PencilSquareIcon className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={(event) => handleDelete(agent.agent_id, event)}
-                        disabled={deletingId === agent.agent_id}
-                        className="rounded-lg p-2 text-text-tertiary transition-all duration-200 hover:bg-danger-50 hover:text-danger-600 disabled:opacity-50"
-                        title="Eliminar"
-                      >
-                        <TrashIcon className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
+        <section
+          aria-label="Listado de agentes de voz"
+          aria-busy={isLoading}
+          className="overflow-hidden rounded-xl border border-border-default bg-surface"
+        >
+          {isLoading ? (
+            <div className="divide-y divide-border-subtle px-5">
+              {[0, 1, 2].map((row) => (
+                <Skeleton.TableRow key={row} columns={3} />
               ))}
-            </tbody>
-          </table>
-        )}
+            </div>
+          ) : isError ? (
+            <div className="flex flex-col items-start gap-3 px-6 py-10 sm:items-center sm:text-center">
+              <p className="text-base font-semibold text-text-primary">
+                No pudimos cargar sus agentes de voz
+              </p>
+              <p className="max-w-[60ch] text-sm text-text-secondary">
+                {describeError(error, 'Intente de nuevo en unos minutos.')}
+              </p>
+              <Button variant="outline" size="sm" isLoading={isFetching} onClick={() => refetch()}>
+                Reintentar
+              </Button>
+            </div>
+          ) : agents.length === 0 ? (
+            <div className="flex flex-col items-start gap-3 px-6 py-12 sm:items-center sm:text-center">
+              <PhoneIcon className="h-6 w-6 text-primary-600" aria-hidden="true" />
+              <p className="text-base font-semibold text-text-primary">Aún no hay agentes de voz</p>
+              <p className="max-w-[55ch] text-sm text-text-secondary">
+                Cree un agente para atender llamadas con el saludo, la voz y la información de su
+                operación. Podrá probarlo desde el navegador antes de conectarlo a un número.
+              </p>
+              {canCreate && <div className="pt-1">{createButton}</div>}
+            </div>
+          ) : (
+            <>
+              <div
+                aria-hidden="true"
+                className={`${LIST_COLUMNS} hidden border-b border-border-default bg-surface-muted px-5 py-3 text-xs font-medium text-text-tertiary md:grid`}
+              >
+                <span>Nombre</span>
+                <span>Creado por</span>
+                <span>Fecha de creación</span>
+                <span className="w-20" />
+              </div>
+              <ul className="divide-y divide-border-subtle">
+                {agents.map((agent) => {
+                  const createdAt = agent.created_at_unix_secs
+                    ? formatDate(agent.created_at_unix_secs)
+                    : null
+                  const creator = agent.access_info?.creator_email ?? null
+
+                  return (
+                    <li
+                      key={agent.agent_id}
+                      className={`${LIST_COLUMNS} relative px-5 py-4 transition-colors hover:bg-primary-50/60`}
+                    >
+                      <div className="min-w-0">
+                        <Link
+                          to={`/agentes_voz/${agent.agent_id}`}
+                          className="block truncate text-sm font-semibold text-text-primary after:absolute after:inset-0 after:content-[''] hover:text-primary-700 focus-visible:outline-none focus-visible:after:rounded-lg focus-visible:after:ring-2 focus-visible:after:ring-inset focus-visible:after:ring-primary-500"
+                        >
+                          {agent.name}
+                        </Link>
+                        <p className="mt-0.5 truncate text-xs text-text-tertiary md:hidden">
+                          {[creator, createdAt].filter(Boolean).join(' · ') || 'Sin datos de creación'}
+                        </p>
+                      </div>
+                      <span className="hidden truncate text-sm text-text-secondary md:block">
+                        {creator ?? '—'}
+                      </span>
+                      <span className="hidden text-sm text-text-secondary tabular-nums md:block">
+                        {createdAt ?? '—'}
+                      </span>
+                      <div className="relative z-10 flex w-20 items-center justify-end gap-1">
+                        <button
+                          type="button"
+                          onClick={() => navigate(`/agentes_voz/${agent.agent_id}`)}
+                          aria-label={`Editar ${agent.name}`}
+                          className="rounded-lg p-2 text-text-tertiary transition-colors hover:bg-primary-50 hover:text-primary-700"
+                        >
+                          <PencilSquareIcon className="h-4 w-4" aria-hidden="true" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(agent)}
+                          disabled={deletingId === agent.agent_id}
+                          aria-label={`Eliminar ${agent.name}`}
+                          className="rounded-lg p-2 text-text-tertiary transition-colors hover:bg-danger-50 hover:text-danger-700 disabled:opacity-50"
+                        >
+                          <TrashIcon className="h-4 w-4" aria-hidden="true" />
+                        </button>
+                      </div>
+                    </li>
+                  )
+                })}
+              </ul>
+            </>
+          )}
+        </section>
       </div>
 
-      {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-surface-overlay p-4 backdrop-blur-md">
-          <div className="modal-content flex flex-col w-full max-w-5xl max-h-[90vh] rounded-3xl border border-border-default bg-surface shadow-2xl">
-            <div className="border-b border-border-default bg-gradient-to-br from-primary-50 via-surface to-bg-secondary px-6 py-5 shrink-0">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-primary-700">
-                    Crear agente de voz
-                  </p>
-                  <h2 className="mt-2 text-2xl font-bold text-text-primary">Elige una plantilla</h2>
-                  <p className="mt-2 max-w-2xl text-sm text-text-secondary">
-                    Al crear el agente, la plantilla define el prompt inicial, mensaje de bienvenida
-                    y contexto operativo.
-                  </p>
-                </div>
-
-                <button
-                  onClick={closeModal}
-                  className="rounded-xl p-2 text-text-muted transition-all duration-200 hover:bg-neutral-100 hover:text-text-primary"
-                >
-                  <XMarkIcon className="h-5 w-5" />
-                </button>
-              </div>
-            </div>
-
-            <div className="overflow-y-auto flex-1 min-h-0 rounded-b-3xl">
-            <form
-              onSubmit={handleSubmit((values) => create(values))}
-              className="grid gap-0 lg:grid-cols-[1.55fr_0.95fr]"
+      <Modal
+        open={showModal}
+        onClose={closeModal}
+        size="xl"
+        dismissOnBackdrop={false}
+        title="Nuevo agente de voz"
+        description="Elija una plantilla como punto de partida. Después podrá ajustar el saludo, la voz y las instrucciones."
+        footer={
+          <>
+            <Button variant="ghost" onClick={closeModal}>
+              Cancelar
+            </Button>
+            <Button
+              type="submit"
+              form={formId}
+              isLoading={isCreating}
+              disabled={loadingTemplates || templatesError}
             >
-              <div className="border-b border-border-default p-6 lg:border-b-0 lg:border-r border-r-border-default">
-                <input
-                  type="hidden"
-                  {...register('template_key', { required: 'Selecciona una plantilla' })}
-                />
-
-                {loadingTemplates ? (
-                  <div className="flex min-h-60 items-center justify-center text-sm text-text-tertiary">
-                    <div className="flex items-center gap-2">
-                      <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary-600 border-t-transparent" />
-                      Cargando plantillas...
-                    </div>
-                  </div>
-                ) : templatesError ? (
-                  <div className="rounded-3xl border border-danger-200 bg-danger-50 px-5 py-4 text-sm text-danger-700">
-                    No fue posible cargar plantillas. Cierra el modal e intenta de nuevo.
-                  </div>
-                ) : (
-                  <div className="grid gap-4 md:grid-cols-2">
-                    {templates.map((template) => {
-                      const isSelected = selectedTemplateKey === template.key
-                      const accent = getTemplateAccent(template.key)
-                      return (
-                        <button
-                          key={template.key}
-                          type="button"
-                          onClick={() =>
-                            setValue('template_key', template.key, {
-                              shouldDirty: true,
-                              shouldTouch: true,
-                              shouldValidate: true,
-                            })}
-                          className={`group rounded-2xl border p-5 text-left transition-all duration-200 ${
-                            isSelected
-                              ? `${accent.border} ${accent.surface} shadow-lg ring-1 ring-inset ring-primary-200`
-                              : 'border-border-default bg-surface hover:border-primary-300 hover:bg-primary-50/40'
-                          }`}
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2">
-                                <span className={`h-2.5 w-2.5 rounded-full ${accent.dot}`} />
-                                <h3 className="text-base font-semibold text-text-primary">{template.label}</h3>
-                              </div>
-                              <p className="mt-2 text-sm leading-relaxed text-text-secondary">{template.summary}</p>
-                            </div>
-
-                            {template.recommended && (
-                              <span className="shrink-0 rounded-full bg-primary-600 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-white shadow-sm">
-                                recomendado
-                              </span>
-                            )}
-                          </div>
-
-                          <div className="mt-4 flex flex-wrap gap-2">
-                            {template.highlights.map((highlight) => (
-                              <span
-                                key={highlight}
-                                className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${accent.chip}`}
-                              >
-                                {highlight}
-                              </span>
-                            ))}
-                          </div>
-                        </button>
-                      )
-                    })}
-                  </div>
-                )}
-
-                {errors.template_key && (
-                  <p className="mt-3 text-xs text-danger-600">{errors.template_key.message}</p>
-                )}
-              </div>
-
-              <div className="flex flex-col justify-between bg-bg-secondary p-6">
-                <div className="space-y-5">
-                  <div className="rounded-2xl border border-border-default bg-surface p-5 shadow-sm">
-                    <div className="flex items-center gap-2">
-                      <SparklesIcon className="h-4 w-4 text-primary-600" />
-                      <p className="text-xs font-semibold uppercase tracking-[0.22em] text-primary-700">
-                        Seleccion actual
-                      </p>
-                    </div>
-
-                    {selectedTemplate ? (
-                      <div className="mt-3 space-y-3">
-                        <div>
-                          <h3 className="text-lg font-semibold text-text-primary">{selectedTemplate.label}</h3>
-                          <p className="mt-1 text-sm text-text-secondary">{selectedTemplate.description}</p>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          {selectedTemplate.highlights.map((highlight) => (
-                            <span
-                              key={highlight}
-                              className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${getTemplateAccent(selectedTemplate.key).chip}`}
-                            >
-                              {highlight}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    ) : (
-                      <p className="mt-3 text-sm text-text-tertiary">
-                        Elige una plantilla para ver su enfoque antes de crear el agente.
-                      </p>
-                    )}
-                  </div>
-
-                  <div>
-                    <label className="mb-1.5 block text-sm font-medium text-text-primary">
-                      Nombre del agente
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="Ej: Agente comercial principal"
-                      className="w-full rounded-xl border border-border-default bg-surface px-3 py-2.5 text-sm text-text-primary placeholder:text-text-muted transition-all duration-200 focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 focus:outline-none"
-                      {...register('name', { required: 'El nombre es requerido' })}
-                    />
-                    {errors.name && (
-                      <p className="mt-1 text-xs text-danger-600">{errors.name.message}</p>
-                    )}
-                  </div>
-                </div>
-
-                <div className="mt-8 flex gap-3">
-                  <button
-                    type="button"
-                    onClick={closeModal}
-                    className="flex-1 rounded-xl bg-neutral-100 px-4 py-2.5 text-sm font-medium text-text-secondary transition-all duration-200 hover:bg-neutral-200 hover:text-text-primary"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={isCreating || loadingTemplates || templatesError}
-                    className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white transition-all duration-200 hover:bg-primary-700 hover:-translate-y-px shadow-sm disabled:opacity-60 disabled:hover:translate-y-0"
-                  >
-                    {isCreating && (
-                      <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
-                    )}
-                    Crear agente
-                  </button>
-                </div>
-              </div>
-            </form>
-            </div>
+              Crear agente
+            </Button>
+          </>
+        }
+      >
+        <form
+          id={formId}
+          onSubmit={handleSubmit((values) => create(values))}
+          className="space-y-6"
+          noValidate
+        >
+          <div>
+            <label htmlFor={nameId} className={labelClass}>
+              Nombre del agente
+            </label>
+            <input
+              id={nameId}
+              type="text"
+              placeholder="Ej.: Atención de siniestros"
+              aria-invalid={errors.name ? true : undefined}
+              aria-describedby={errors.name ? `${nameId}-error` : undefined}
+              className={`mt-2 ${inputClass}`}
+              {...register('name', { required: 'Escriba un nombre para el agente.' })}
+            />
+            {errors.name && (
+              <p id={`${nameId}-error`} className={errorClass}>
+                {errors.name.message}
+              </p>
+            )}
           </div>
-        </div>
-      )}
-    </div>
+
+          <fieldset>
+            <legend className={labelClass}>Plantilla</legend>
+            {loadingTemplates ? (
+              <div className="mt-3 grid gap-3 md:grid-cols-2">
+                <Skeleton height={112} className="rounded-xl" />
+                <Skeleton height={112} className="rounded-xl" />
+              </div>
+            ) : templatesError ? (
+              <p className="mt-3 rounded-lg bg-surface-muted px-4 py-3 text-sm text-text-secondary">
+                No pudimos cargar las plantillas. Cierre esta ventana e intente de nuevo en unos
+                minutos.
+              </p>
+            ) : (
+              <div className="mt-3 grid gap-3 md:grid-cols-2">
+                {templates.map((template) => {
+                  const copy = getTemplateCopy(template)
+                  const optionId = `${templatesId}-${template.key}`
+                  return (
+                    <label
+                      key={template.key}
+                      className="flex cursor-pointer flex-col gap-2 rounded-xl border border-border-default bg-surface p-4 transition-colors hover:border-primary-300 has-[:checked]:border-primary-600 has-[:checked]:bg-primary-50 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-primary-500 has-[:focus-visible]:ring-offset-2"
+                    >
+                      <span className="flex items-start justify-between gap-3">
+                        <span className="flex items-center gap-2.5">
+                          <input
+                            type="radio"
+                            value={template.key}
+                            aria-labelledby={`${optionId}-name`}
+                            aria-describedby={`${optionId}-summary`}
+                            className="h-4 w-4 accent-primary-600"
+                            {...register('template_key', { required: 'Elija una plantilla.' })}
+                          />
+                          <span id={`${optionId}-name`} className="text-sm font-semibold text-text-primary">
+                            {copy.label}
+                          </span>
+                        </span>
+                        {template.recommended && (
+                          <Badge variant="primary" size="sm">
+                            Recomendada
+                          </Badge>
+                        )}
+                      </span>
+                      <span id={`${optionId}-summary`} className="text-sm leading-relaxed text-text-secondary">
+                        {copy.summary}
+                      </span>
+                      {copy.highlights.length > 0 && (
+                        <span className="text-xs text-text-tertiary">{copy.highlights.join(' · ')}</span>
+                      )}
+                    </label>
+                  )
+                })}
+              </div>
+            )}
+            {errors.template_key && <p className={errorClass}>{errors.template_key.message}</p>}
+            {selectedTemplate && !loadingTemplates && !templatesError && (
+              <p className="mt-3 max-w-[65ch] text-sm leading-relaxed text-text-secondary">
+                {getTemplateCopy(selectedTemplate).description}
+              </p>
+            )}
+          </fieldset>
+        </form>
+      </Modal>
+
+      {confirmDialog}
     </div>
   )
 }
-
-

@@ -1,6 +1,6 @@
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
 @import "tailwindcss";
 @import "./styles/design-tokens.css";
+@import "./styles/brand-bolivar.css";
 
 /* ─── Base styles ───────────────────────────────────────────────────────── */
 @layer base {
@@ -13,13 +13,13 @@
   body {
     background-color: var(--color-bg-secondary);
     color: var(--color-text-primary);
+    font-kerning: normal;
   }
 
-  /* Focus visible rings for accessibility */
+  /* Foco visible y con contraste suficiente (antes era un halo al 15 %). */
   :focus-visible {
-    outline: none;
-    box-shadow: var(--shadow-focus);
-    border-radius: var(--radius-sm);
+    outline: 2px solid var(--color-border-focus);
+    outline-offset: 2px;
   }
 
   /* Smooth scrolling */
@@ -51,16 +51,35 @@
 }
 
 /* ─── Touch target sizing ──────────────────────────────────────────────── */
-@layer base {
-  button,
-  a,
-  input,
-  select,
-  textarea,
-  [role="button"] {
-    min-height: 44px;
-    min-width: 44px;
+/* Solo en pantallas táctiles, y sin min-width: un ancho mínimo global
+   comprimía las pestañas y botones con texto dentro de contenedores flex. */
+@media (pointer: coarse) {
+  @layer base {
+    button,
+    select,
+    input:not([type="checkbox"]):not([type="radio"]),
+    [role="button"] {
+      min-height: 44px;
+    }
+
+    /* Botones solo-ícono (llevan aria-label) y enlaces de contacto. */
+    button[aria-label] {
+      min-width: 44px;
+    }
+
+    a[href^="tel:"],
+    a[href^="mailto:"] {
+      display: inline-flex;
+      align-items: center;
+      min-height: 44px;
+    }
   }
+}
+
+/* ─── Numerales alineados para cifras y tablas ─────────────────────────── */
+.tabular-nums,
+table {
+  font-variant-numeric: tabular-nums;
 }
 
 /* ─── Modal content entry animation ────────────────────────────────────── */
@@ -108,21 +127,6 @@
 .stagger-item:nth-child(7) { animation-delay: 240ms; }
 .stagger-item:nth-child(n+8) { animation-delay: 280ms; }
 
-/* ─── Sidebar nav item subtle entry ────────────────────────────────────── */
-.nav-item {
-  animation: navItemIn 220ms var(--ease-out-strong) both;
-}
-
-@keyframes navItemIn {
-  from {
-    opacity: 0;
-    transform: translateX(-8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
 
 /* ─── Skeleton loading shimmer ─────────────────────────────────────────── */
 .skeleton {

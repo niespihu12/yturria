@@ -1,18 +1,16 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'react-toastify'
-import {
-  ChevronDownIcon,
-  PlusIcon,
-  TrashIcon,
-  XMarkIcon,
-} from '@heroicons/react/24/outline'
+import { ChevronDownIcon, PlusIcon, TrashIcon, XMarkIcon } from '@heroicons/react/24/outline'
 import {
   createTextAgentTool,
   deleteTextAgentTool,
   updateTextAgentTool,
 } from '@/api/TextAgentsAPI'
 import type { TextAgentTool } from '@/types/textAgent'
+import Badge from '@/components/ui/Badge'
+import Button from '@/components/ui/Button'
+import { useConfirm } from '@/components/ui/ConfirmDialog'
 
 type Props = {
   agentId: string
@@ -58,14 +56,6 @@ const EMPTY_DRAFT: ToolDraft = {
   display_fields: '',
 }
 
-const METHOD_COLORS: Record<HttpMethod, string> = {
-  GET: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-  POST: 'bg-blue-50 text-blue-700 border-blue-200',
-  PUT: 'bg-amber-50 text-amber-700 border-amber-200',
-  PATCH: 'bg-orange-50 text-orange-700 border-orange-200',
-  DELETE: 'bg-rose-50 text-rose-700 border-rose-200',
-}
-
 const PARAM_TYPE_LABELS: Record<ParamType, string> = {
   string: 'Texto',
   number: 'Número',
@@ -74,9 +64,13 @@ const PARAM_TYPE_LABELS: Record<ParamType, string> = {
 }
 
 const inputClass =
-  'w-full rounded-xl border border-[#e4e0f5] bg-white px-3 py-2.5 text-sm text-black placeholder:text-black/40 transition-colors focus:border-[#271173] focus:outline-none'
+  'h-10 w-full rounded-lg border border-border-default bg-surface px-3 text-sm text-text-primary placeholder:text-text-tertiary transition-colors focus:border-primary-600'
+const smallInputClass =
+  'h-9 min-w-0 rounded-lg border border-border-default bg-surface px-2.5 text-sm text-text-primary placeholder:text-text-tertiary focus:border-primary-600'
 
-const labelClass = 'mb-1.5 block text-xs font-semibold uppercase tracking-wide text-black/50'
+const labelClass = 'mb-1.5 block text-sm font-medium text-text-primary'
+const hintClass = 'mt-1 text-xs leading-relaxed text-text-tertiary'
+const microLabelClass = 'mb-1.5 text-xs font-semibold text-text-tertiary'
 
 function buildParametersSchema(params: ParamDef[]): object {
   if (params.length === 0) return {}
@@ -117,6 +111,7 @@ function HeadersEditor({
         <div key={i} className="flex gap-2">
           <input
             type="text"
+            aria-label={`Nombre del encabezado ${i + 1}`}
             value={h.key}
             onChange={(e) => {
               const next = [...headers]
@@ -124,36 +119,39 @@ function HeadersEditor({
               onChange(next)
             }}
             placeholder="Authorization"
-            className="min-w-0 flex-1 rounded-lg border border-[#e4e0f5] bg-white px-3 py-2 text-sm text-black placeholder:text-black/40 focus:border-[#271173] focus:outline-none"
+            className={`${smallInputClass} flex-1 font-mono`}
           />
           <input
             type="text"
+            aria-label={`Valor del encabezado ${i + 1}`}
             value={h.value}
             onChange={(e) => {
               const next = [...headers]
               next[i] = { ...next[i], value: e.target.value }
               onChange(next)
             }}
-            placeholder="Bearer token..."
-            className="min-w-0 flex-1 rounded-lg border border-[#e4e0f5] bg-white px-3 py-2 text-sm text-black placeholder:text-black/40 focus:border-[#271173] focus:outline-none"
+            placeholder="Bearer …"
+            className={`${smallInputClass} flex-1 font-mono`}
           />
           <button
             type="button"
             onClick={() => onChange(headers.filter((_, idx) => idx !== i))}
-            className="rounded-lg border border-rose-200 p-2 text-rose-500 transition-colors hover:bg-rose-50"
+            aria-label={`Quitar el encabezado ${i + 1}`}
+            className="rounded-lg p-2 text-text-tertiary transition-colors hover:bg-danger-50 hover:text-danger-700"
           >
-            <XMarkIcon className="h-4 w-4" />
+            <XMarkIcon className="h-4 w-4" aria-hidden="true" />
           </button>
         </div>
       ))}
-      <button
+      <Button
         type="button"
+        variant="ghost"
+        size="sm"
+        leftIcon={<PlusIcon className="h-3.5 w-3.5" aria-hidden="true" />}
         onClick={() => onChange([...headers, { key: '', value: '' }])}
-        className="flex items-center gap-1.5 rounded-lg border border-dashed border-[#d4cfee] px-3 py-1.5 text-xs font-medium text-black/50 transition-colors hover:border-[#271173] hover:text-[#271173]"
       >
-        <PlusIcon className="h-3.5 w-3.5" />
-        Agregar header
-      </button>
+        Agregar encabezado
+      </Button>
     </div>
   )
 }
@@ -165,79 +163,93 @@ function ParamsEditor({
   params: ParamDef[]
   onChange: (p: ParamDef[]) => void
 }) {
+  const baseId = useId()
   return (
     <div className="space-y-2">
-      {params.map((p, i) => (
-        <div key={i} className="rounded-xl border border-[#e4e0f5] bg-[#fafafa] p-3">
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={p.name}
-              onChange={(e) => {
-                const next = [...params]
-                next[i] = { ...next[i], name: e.target.value }
-                onChange(next)
-              }}
-              placeholder="nombre_param"
-              className="min-w-0 w-36 rounded-lg border border-[#e4e0f5] bg-white px-2.5 py-1.5 font-mono text-xs text-black placeholder:text-black/30 focus:border-[#271173] focus:outline-none"
-            />
-            <select
-              value={p.type}
-              onChange={(e) => {
-                const next = [...params]
-                next[i] = { ...next[i], type: e.target.value as ParamType }
-                onChange(next)
-              }}
-              className="rounded-lg border border-[#e4e0f5] bg-white px-2 py-1.5 text-xs text-black focus:border-[#271173] focus:outline-none"
-            >
-              {(Object.keys(PARAM_TYPE_LABELS) as ParamType[]).map((t) => (
-                <option key={t} value={t}>{PARAM_TYPE_LABELS[t]}</option>
-              ))}
-            </select>
-            <div className="flex flex-1 items-center gap-2">
-              <label className="flex cursor-pointer items-center gap-1.5 text-xs text-black/60 select-none">
+      {params.length > 0 && (
+        <ul className="divide-y divide-border-subtle rounded-lg border border-border-default">
+          {params.map((p, i) => (
+            <li key={i} className="space-y-2 p-3">
+              <div className="flex flex-wrap items-center gap-2">
                 <input
-                  type="checkbox"
-                  checked={p.required}
+                  type="text"
+                  aria-label={`Nombre del parámetro ${i + 1}`}
+                  value={p.name}
                   onChange={(e) => {
                     const next = [...params]
-                    next[i] = { ...next[i], required: e.target.checked }
+                    next[i] = { ...next[i], name: e.target.value }
                     onChange(next)
                   }}
-                  className="h-3.5 w-3.5 accent-[#271173]"
+                  placeholder="nombre_parametro"
+                  className={`${smallInputClass} w-40 font-mono`}
                 />
-                Requerido
-              </label>
-            </div>
-            <button
-              type="button"
-              onClick={() => onChange(params.filter((_, idx) => idx !== i))}
-              className="rounded-lg border border-rose-200 p-1.5 text-rose-400 transition-colors hover:bg-rose-50"
-            >
-              <XMarkIcon className="h-3.5 w-3.5" />
-            </button>
-          </div>
-          <input
-            type="text"
-            value={p.description}
-            onChange={(e) => {
-              const next = [...params]
-              next[i] = { ...next[i], description: e.target.value }
-              onChange(next)
-            }}
-            placeholder="Describe para qué sirve este parámetro..."
-            className="mt-2 w-full rounded-lg border border-[#e4e0f5] bg-white px-2.5 py-1.5 text-xs text-black placeholder:text-black/30 focus:border-[#271173] focus:outline-none"
-          />
-        </div>
-      ))}
-      <button
+                <select
+                  aria-label={`Tipo del parámetro ${i + 1}`}
+                  value={p.type}
+                  onChange={(e) => {
+                    const next = [...params]
+                    next[i] = { ...next[i], type: e.target.value as ParamType }
+                    onChange(next)
+                  }}
+                  className={smallInputClass}
+                >
+                  {(Object.keys(PARAM_TYPE_LABELS) as ParamType[]).map((t) => (
+                    <option key={t} value={t}>
+                      {PARAM_TYPE_LABELS[t]}
+                    </option>
+                  ))}
+                </select>
+                <label
+                  htmlFor={`${baseId}-required-${i}`}
+                  className="flex flex-1 cursor-pointer select-none items-center gap-1.5 text-sm text-text-secondary"
+                >
+                  <input
+                    id={`${baseId}-required-${i}`}
+                    type="checkbox"
+                    checked={p.required}
+                    onChange={(e) => {
+                      const next = [...params]
+                      next[i] = { ...next[i], required: e.target.checked }
+                      onChange(next)
+                    }}
+                    className="h-4 w-4 accent-primary-700"
+                  />
+                  Obligatorio
+                </label>
+                <button
+                  type="button"
+                  onClick={() => onChange(params.filter((_, idx) => idx !== i))}
+                  aria-label={`Quitar el parámetro ${p.name || i + 1}`}
+                  className="rounded-lg p-2 text-text-tertiary transition-colors hover:bg-danger-50 hover:text-danger-700"
+                >
+                  <XMarkIcon className="h-4 w-4" aria-hidden="true" />
+                </button>
+              </div>
+              <input
+                type="text"
+                aria-label={`Descripción del parámetro ${i + 1}`}
+                value={p.description}
+                onChange={(e) => {
+                  const next = [...params]
+                  next[i] = { ...next[i], description: e.target.value }
+                  onChange(next)
+                }}
+                placeholder="Para qué sirve este dato"
+                className={`${smallInputClass} w-full`}
+              />
+            </li>
+          ))}
+        </ul>
+      )}
+      <Button
         type="button"
+        variant="ghost"
+        size="sm"
+        leftIcon={<PlusIcon className="h-3.5 w-3.5" aria-hidden="true" />}
         onClick={() => onChange([...params, { ...EMPTY_PARAM }])}
-        className="flex items-center gap-1.5 rounded-lg border border-dashed border-[#d4cfee] px-3 py-1.5 text-xs font-medium text-black/50 transition-colors hover:border-[#271173] hover:text-[#271173]"
       >
-        <PlusIcon className="h-3.5 w-3.5" />
         Agregar parámetro
-      </button>
+      </Button>
     </div>
   )
 }
@@ -252,77 +264,81 @@ function ResponseMappingEditor({
   onChange: (result_field: string, display_fields: string) => void
 }) {
   const [open, setOpen] = useState(false)
+  const baseId = useId()
   const hasData = result_field.trim() || display_fields.trim()
 
   return (
     <div className="space-y-3">
       <button
         type="button"
+        aria-expanded={open}
+        aria-controls={`${baseId}-panel`}
         onClick={() => setOpen((p) => !p)}
-        className="flex w-full items-center justify-between rounded-xl border border-dashed border-[#d4cfee] bg-[#fafafa] px-4 py-3 text-left transition-colors hover:border-[#271173]/30 hover:bg-[#f5f3ff]"
+        className="flex w-full items-center justify-between gap-3 rounded-lg border border-border-default px-4 py-3 text-left transition-colors hover:bg-surface-muted"
       >
-        <div>
-          <p className="text-xs font-semibold text-black/70">
-            ¿Cómo mostrar los resultados?
+        <span>
+          <span className="flex items-center gap-2 text-sm font-medium text-text-primary">
+            Cómo mostrar los resultados
             {hasData && (
-              <span className="ml-2 rounded-full bg-[#ede9ff] px-2 py-0.5 text-[10px] text-[#271173]">configurado</span>
+              <Badge variant="primary" size="sm">
+                Configurado
+              </Badge>
             )}
-          </p>
-          <p className="mt-0.5 text-[11px] text-black/40">
-            Opcional — si lo omites el agente mostrará la respuesta completa
-          </p>
-        </div>
+          </span>
+          <span className="mt-0.5 block text-xs text-text-tertiary">
+            Opcional. Si lo omite, el agente usa la respuesta completa.
+          </span>
+        </span>
         <ChevronDownIcon
-          className={`h-4 w-4 shrink-0 text-black/40 transition-transform duration-200 ease-out ${open ? 'rotate-180' : ''}`}
+          aria-hidden="true"
+          className={`h-4 w-4 shrink-0 text-text-tertiary transition-transform duration-200 ease-out ${open ? 'rotate-180' : ''}`}
         />
       </button>
 
       {open && (
-        <div className="space-y-4 rounded-xl border border-[#e4e0f5] bg-white p-4">
+        <div id={`${baseId}-panel`} className="space-y-4 px-1">
           <div>
-            <label className="mb-1 block text-xs font-semibold text-black/70">
-              ¿En qué campo de la respuesta están los datos?
+            <label htmlFor={`${baseId}-result`} className={labelClass}>
+              Campo de la respuesta con los datos
             </label>
             <input
+              id={`${baseId}-result`}
               type="text"
               value={result_field}
               onChange={(e) => onChange(e.target.value, display_fields)}
-              placeholder="items   ó   results   ó   data"
-              className="w-full rounded-lg border border-[#e4e0f5] bg-[#fafafa] px-3 py-2 text-sm text-black placeholder:text-black/30 focus:border-[#271173] focus:outline-none"
+              placeholder="items, results o data"
+              className={`${inputClass} font-mono`}
             />
-            <p className="mt-1 text-[11px] text-black/40">
-              Escribe el nombre del campo tal como aparece en la respuesta JSON de la API.
-            </p>
+            <p className={hintClass}>Escriba el nombre del campo tal como aparece en la respuesta JSON.</p>
           </div>
 
           <div>
-            <label className="mb-1 block text-xs font-semibold text-black/70">
-              ¿Qué información mostrar de cada resultado?
+            <label htmlFor={`${baseId}-display`} className={labelClass}>
+              Datos que se muestran de cada resultado
             </label>
             <input
+              id={`${baseId}-display`}
               type="text"
               value={display_fields}
               onChange={(e) => onChange(result_field, e.target.value)}
               placeholder="nombre, precio, descripcion"
-              className="w-full rounded-lg border border-[#e4e0f5] bg-[#fafafa] px-3 py-2 text-sm text-black placeholder:text-black/30 focus:border-[#271173] focus:outline-none"
+              className={`${inputClass} font-mono`}
             />
-            <p className="mt-1 text-[11px] text-black/40">
-              Escribe los campos separados por coma. El agente los mostrará en ese orden.
-            </p>
+            <p className={hintClass}>Separe los campos con comas. El agente los muestra en ese orden.</p>
           </div>
 
-          {(result_field.trim() || display_fields.trim()) && (
-            <div className="rounded-lg border border-[#e4e0f5] bg-[#f5f3ff] px-3 py-2">
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-black/40">Vista previa</p>
-              <p className="mt-1 font-mono text-xs text-black/60">
+          {display_fields.trim() && (
+            <p className="text-xs text-text-secondary">
+              Vista previa:{' '}
+              <code className="font-mono text-text-primary">
                 {display_fields
                   .split(',')
                   .map((f) => f.trim())
                   .filter(Boolean)
                   .map((f) => `{${f}}`)
-                  .join(' · ') || '(sin campos)'}
-              </p>
-            </div>
+                  .join(' · ')}
+              </code>
+            </p>
           )}
         </div>
       )}
@@ -330,24 +346,34 @@ function ResponseMappingEditor({
   )
 }
 
-function ToolCard({ tool, agentId }: { tool: TextAgentTool; agentId: string }) {
+function ToolRow({
+  tool,
+  agentId,
+  onDelete,
+}: {
+  tool: TextAgentTool
+  agentId: string
+  onDelete: (tool: TextAgentTool, remove: () => void) => void
+}) {
   const queryClient = useQueryClient()
   const [expanded, setExpanded] = useState(false)
+  const detailId = useId()
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['text-agent', agentId] })
 
   const { mutate: remove, isPending: isRemoving } = useMutation({
     mutationFn: () => deleteTextAgentTool(agentId, tool.id),
-    onSuccess: () => { toast.success('Herramienta eliminada'); refresh() },
+    onSuccess: () => {
+      toast.success('Herramienta eliminada')
+      refresh()
+    },
     onError: (e: Error) => toast.error(e.message),
   })
 
-  const { mutate: toggle } = useMutation({
+  const { mutate: toggle, isPending: isToggling } = useMutation({
     mutationFn: (enabled: boolean) => updateTextAgentTool(agentId, tool.id, { enabled }),
     onSuccess: () => refresh(),
     onError: (e: Error) => toast.error(e.message),
   })
-
-  const mc = METHOD_COLORS[tool.http_method] ?? 'bg-gray-50 text-gray-600 border-gray-200'
 
   const schema = (tool.parameters_schema as Record<string, unknown>) ?? {}
   const properties = (schema.properties ?? {}) as Record<string, ToolParameterSchemaDef>
@@ -361,113 +387,116 @@ function ToolCard({ tool, agentId }: { tool: TextAgentTool; agentId: string }) {
   const displayTemplate = typeof rawDisplayTemplate === 'string' ? rawDisplayTemplate : ''
 
   return (
-    <div className="overflow-hidden rounded-xl border border-[#e4e0f5] bg-white">
-      <div className="flex items-center gap-3 px-5 py-4">
-        <span className={`rounded-md border px-2 py-0.5 text-xs font-bold tabular-nums ${mc}`}>
+    <li>
+      <div className="flex flex-wrap items-start gap-3 px-4 py-4 sm:px-5">
+        <Badge size="sm" className="mt-0.5 font-mono">
           {tool.http_method}
-        </span>
+        </Badge>
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold text-black">{tool.name}</p>
-          <p className="truncate text-xs text-black/50">{tool.endpoint_url}</p>
-          {tool.description && <p className="mt-0.5 text-xs text-black/60">{tool.description}</p>}
+          <p className="text-sm font-semibold text-text-primary">{tool.name}</p>
+          {tool.description && <p className="mt-0.5 text-sm text-text-secondary">{tool.description}</p>}
+          <p className="mt-0.5 truncate font-mono text-xs text-text-tertiary">{tool.endpoint_url}</p>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 items-center gap-1">
           <button
             type="button"
+            role="switch"
+            aria-checked={tool.enabled}
+            aria-label={`Herramienta ${tool.name} ${tool.enabled ? 'activa' : 'inactiva'}`}
+            disabled={isToggling}
             onClick={() => toggle(!tool.enabled)}
-            className={`rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors ${
-              tool.enabled
-                ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                : 'border-[#e4e0f5] text-black/50 hover:bg-[#f5f3ff]'
+            className={`relative mr-2 inline-flex h-6 w-10 shrink-0 items-center rounded-full transition-colors disabled:opacity-60 ${
+              tool.enabled ? 'bg-primary-600' : 'bg-neutral-300'
             }`}
           >
-            {tool.enabled ? 'Activa' : 'Inactiva'}
+            <span
+              aria-hidden="true"
+              className={`absolute left-0.5 h-5 w-5 rounded-full bg-surface shadow transition-transform ${
+                tool.enabled ? 'translate-x-4' : 'translate-x-0'
+              }`}
+            />
           </button>
           <button
             type="button"
+            aria-expanded={expanded}
+            aria-controls={detailId}
+            aria-label={expanded ? `Ocultar detalles de ${tool.name}` : `Ver detalles de ${tool.name}`}
             onClick={() => setExpanded((p) => !p)}
-            className="rounded-lg border border-[#e4e0f5] p-1.5 text-black/50 transition-colors duration-150 hover:border-[#271173] hover:text-[#271173]"
+            className="rounded-lg p-2 text-text-tertiary transition-colors hover:bg-neutral-100 hover:text-text-primary"
           >
             <ChevronDownIcon
+              aria-hidden="true"
               className={`h-4 w-4 transition-transform duration-200 ease-out ${expanded ? 'rotate-180' : ''}`}
             />
           </button>
           <button
             type="button"
             disabled={isRemoving}
-            onClick={() => remove()}
-            className="rounded-lg border border-rose-200 p-1.5 text-rose-500 transition-colors hover:bg-rose-50 disabled:opacity-50"
+            onClick={() => onDelete(tool, () => remove())}
+            aria-label={`Eliminar ${tool.name}`}
+            className="rounded-lg p-2 text-text-tertiary transition-colors hover:bg-danger-50 hover:text-danger-700 disabled:opacity-50"
           >
-            <TrashIcon className="h-4 w-4" />
+            <TrashIcon className="h-4 w-4" aria-hidden="true" />
           </button>
         </div>
       </div>
 
       {expanded && (
-        <div className="space-y-4 border-t border-[#e4e0f5] bg-[#fafafa] px-5 py-4">
-          {/* Headers */}
+        <div id={detailId} className="space-y-4 border-t border-border-subtle bg-surface-muted px-4 py-4 sm:px-5">
           {Object.keys(tool.headers).length > 0 && (
             <div>
-              <p className={labelClass}>Headers</p>
-              <div className="divide-y divide-[#e4e0f5] rounded-lg border border-[#e4e0f5] bg-white">
+              <p className={microLabelClass}>Encabezados</p>
+              <dl className="space-y-1 font-mono text-xs">
                 {Object.entries(tool.headers).map(([k, v]) => (
-                  <div key={k} className="flex items-center gap-2 px-3 py-2 font-mono text-xs">
-                    <span className="text-[#271173]">{k}:</span>
-                    <span className="break-all text-black/70">{v}</span>
+                  <div key={k} className="flex gap-2">
+                    <dt className="text-primary-700">{k}:</dt>
+                    <dd className="break-all text-text-secondary">{v}</dd>
                   </div>
                 ))}
-              </div>
+              </dl>
             </div>
           )}
 
-          {/* Parameters */}
           {paramEntries.length > 0 && (
             <div>
-              <p className={labelClass}>Parámetros</p>
-              <div className="space-y-1">
+              <p className={microLabelClass}>Parámetros</p>
+              <ul className="space-y-1.5">
                 {paramEntries.map(([name, def]) => (
-                  <div key={name} className="flex items-start gap-2 rounded-lg border border-[#e4e0f5] bg-white px-3 py-2">
-                    <span className="font-mono text-xs font-semibold text-[#271173]">{name}</span>
-                    <span className="rounded bg-[#f5f3ff] px-1.5 py-0.5 text-[10px] font-semibold text-[#271173]/70">
+                  <li key={name} className="flex flex-wrap items-center gap-2 text-xs">
+                    <span className="font-mono font-semibold text-primary-700">{name}</span>
+                    <span className="text-text-tertiary">
                       {PARAM_TYPE_LABELS[def.type as ParamType] ?? def.type}
+                      {required.includes(name) && ' · obligatorio'}
                     </span>
-                    {required.includes(name) && (
-                      <span className="rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-semibold text-rose-600">
-                        requerido
-                      </span>
-                    )}
-                    {def.description && (
-                      <span className="ml-1 text-xs text-black/50">{def.description}</span>
-                    )}
-                  </div>
+                    {def.description && <span className="text-text-secondary">{def.description}</span>}
+                  </li>
                 ))}
-              </div>
+              </ul>
             </div>
           )}
 
-          {/* Response mapping */}
           {(resultPath || displayTemplate) && (
             <div>
-              <p className={labelClass}>Mapeo de respuesta</p>
-              <div className="space-y-1">
+              <p className={microLabelClass}>Cómo se muestran los resultados</p>
+              <dl className="space-y-1 text-xs">
                 {resultPath && (
-                  <div className="flex items-center gap-2 rounded-lg border border-[#e4e0f5] bg-white px-3 py-2">
-                    <span className="text-xs font-semibold text-black/50">Ruta</span>
-                    <code className="font-mono text-xs text-[#271173]">{resultPath}</code>
+                  <div className="flex gap-2">
+                    <dt className="text-text-tertiary">Campo</dt>
+                    <dd className="font-mono text-text-primary">{resultPath}</dd>
                   </div>
                 )}
                 {displayTemplate && (
-                  <div className="flex items-center gap-2 rounded-lg border border-[#e4e0f5] bg-white px-3 py-2">
-                    <span className="text-xs font-semibold text-black/50">Plantilla</span>
-                    <code className="font-mono text-xs text-black/70">{displayTemplate}</code>
+                  <div className="flex gap-2">
+                    <dt className="text-text-tertiary">Formato</dt>
+                    <dd className="font-mono text-text-secondary">{displayTemplate}</dd>
                   </div>
                 )}
-              </div>
+              </dl>
             </div>
           )}
         </div>
       )}
-    </div>
+    </li>
   )
 }
 
@@ -475,6 +504,9 @@ export default function TextAgentToolsTab({ agentId, tools }: Props) {
   const queryClient = useQueryClient()
   const [draft, setDraft] = useState<ToolDraft>(EMPTY_DRAFT)
   const [showForm, setShowForm] = useState(false)
+  const [confirm, confirmDialog] = useConfirm()
+  const baseId = useId()
+  const fieldId = (name: string) => `${baseId}-${name}`
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['text-agent', agentId] })
 
@@ -503,160 +535,174 @@ export default function TextAgentToolsTab({ agentId, tools }: Props) {
     onError: (e: Error) => toast.error(e.message),
   })
 
+  const handleDelete = async (tool: TextAgentTool, remove: () => void) => {
+    const accepted = await confirm({
+      title: `¿Eliminar «${tool.name}»?`,
+      description: 'El agente dejará de consultar este sistema durante las conversaciones. Esta acción no se puede deshacer.',
+      confirmLabel: 'Eliminar herramienta',
+      tone: 'danger',
+    })
+    if (accepted) remove()
+  }
+
+  const cancelForm = () => {
+    setDraft(EMPTY_DRAFT)
+    setShowForm(false)
+  }
+
   const canCreate = draft.name.trim() && draft.endpoint_url.trim()
 
   return (
-    <div className="max-w-4xl space-y-5">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+    <div className="max-w-3xl space-y-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h2 className="text-base font-semibold text-black">Herramientas</h2>
-          <p className="text-xs text-black/50">
-            Conecta APIs externas que el agente puede invocar durante una conversación.
+          <h2 className="text-base font-semibold text-text-primary">Herramientas</h2>
+          <p className="mt-1 max-w-[60ch] text-sm text-text-secondary">
+            Conecte el agente con sus sistemas (por ejemplo, para consultar pólizas o precios) y los
+            consultará durante la conversación. Normalmente lo configura su equipo técnico.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => setShowForm((p) => !p)}
-          className="flex items-center gap-2 rounded-xl bg-[#271173] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#1f0d5a]"
-        >
-          {showForm ? <XMarkIcon className="h-4 w-4" /> : <PlusIcon className="h-4 w-4" />}
-          {showForm ? 'Cancelar' : 'Nueva herramienta'}
-        </button>
+        {!showForm && (
+          <Button
+            type="button"
+            variant="secondary"
+            leftIcon={<PlusIcon className="h-4 w-4" aria-hidden="true" />}
+            onClick={() => setShowForm(true)}
+          >
+            Nueva herramienta
+          </Button>
+        )}
       </div>
 
-      {/* Creation form */}
       {showForm && (
-        <div className="space-y-6 rounded-2xl border border-[#e4e0f5] bg-white p-6 shadow-sm">
-          <h3 className="text-sm font-semibold text-black">Configurar herramienta</h3>
+        <section
+          aria-labelledby={fieldId('form-title')}
+          className="space-y-6 rounded-xl border border-border-default bg-surface p-5 sm:p-6"
+        >
+          <h3 id={fieldId('form-title')} className="text-base font-semibold text-text-primary">
+            Nueva herramienta
+          </h3>
 
-          {/* Basic info */}
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-4 @lg:grid-cols-2">
             <div>
-              <label className={labelClass}>Nombre *</label>
+              <label htmlFor={fieldId('name')} className={labelClass}>
+                Nombre <span className="font-normal text-text-tertiary">(obligatorio)</span>
+              </label>
               <input
+                id={fieldId('name')}
                 type="text"
                 value={draft.name}
                 onChange={(e) => setDraft((p) => ({ ...p, name: e.target.value }))}
                 placeholder="buscar_producto"
-                className={inputClass}
+                className={`${inputClass} font-mono`}
               />
             </div>
             <div>
-              <label className={labelClass}>Descripción</label>
+              <label htmlFor={fieldId('description')} className={labelClass}>
+                Para qué sirve
+              </label>
               <input
+                id={fieldId('description')}
                 type="text"
                 value={draft.description}
                 onChange={(e) => setDraft((p) => ({ ...p, description: e.target.value }))}
-                placeholder="Busca un producto por nombre o SKU"
+                placeholder="Busca un producto por nombre o código"
                 className={inputClass}
               />
             </div>
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-[auto_1fr]">
+          <div className="grid gap-4 sm:grid-cols-[8rem_1fr]">
             <div>
-              <label className={labelClass}>Método</label>
+              <label htmlFor={fieldId('method')} className={labelClass}>
+                Método
+              </label>
               <select
+                id={fieldId('method')}
                 value={draft.http_method}
                 onChange={(e) => setDraft((p) => ({ ...p, http_method: e.target.value as HttpMethod }))}
-                className="rounded-xl border border-[#e4e0f5] bg-white px-3 py-2.5 text-sm font-semibold text-black focus:border-[#271173] focus:outline-none"
+                className={`${inputClass} font-mono`}
               >
                 {(['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as HttpMethod[]).map((m) => (
-                  <option key={m} value={m}>{m}</option>
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
                 ))}
               </select>
             </div>
             <div>
-              <label className={labelClass}>URL del endpoint *</label>
+              <label htmlFor={fieldId('url')} className={labelClass}>
+                Dirección (URL) <span className="font-normal text-text-tertiary">(obligatoria)</span>
+              </label>
               <input
+                id={fieldId('url')}
                 type="url"
                 value={draft.endpoint_url}
                 onChange={(e) => setDraft((p) => ({ ...p, endpoint_url: e.target.value }))}
-                placeholder="https://api.tienda.com/v1/products/search"
-                className={inputClass}
+                placeholder="https://api.suempresa.com/v1/productos/buscar"
+                className={`${inputClass} font-mono`}
               />
             </div>
           </div>
 
-          {/* Headers */}
-          <div>
-            <label className={labelClass}>Headers de autenticación</label>
+          <fieldset>
+            <legend className={labelClass}>Encabezados de autenticación</legend>
             <HeadersEditor
               headers={draft.headers}
               onChange={(h) => setDraft((p) => ({ ...p, headers: h }))}
             />
-          </div>
+          </fieldset>
 
-          <div className="grid gap-6 lg:grid-cols-2">
-            {/* Parameters */}
-            <div>
-              <div className="mb-2">
-                <label className={labelClass}>Parámetros que enviará el agente</label>
-                <p className="text-[11px] text-black/40">
-                  Define qué datos incluirá el agente al llamar esta API.
-                </p>
-              </div>
-              <ParamsEditor
-                params={draft.params}
-                onChange={(p) => setDraft((prev) => ({ ...prev, params: p }))}
-              />
-            </div>
-
-            {/* Response mapping */}
-            <ResponseMappingEditor
-              result_field={draft.result_field}
-              display_fields={draft.display_fields}
-              onChange={(result_field, display_fields) =>
-                setDraft((p) => ({ ...p, result_field, display_fields }))
-              }
+          <fieldset>
+            <legend className={labelClass}>Datos que envía el agente</legend>
+            <p className="-mt-1 mb-2 text-xs text-text-tertiary">
+              Lo que el agente incluirá al consultar el sistema.
+            </p>
+            <ParamsEditor
+              params={draft.params}
+              onChange={(p) => setDraft((prev) => ({ ...prev, params: p }))}
             />
-          </div>
+          </fieldset>
 
-          <div className="flex justify-end gap-3 border-t border-[#e4e0f5] pt-4">
-            <button
-              type="button"
-              onClick={() => { setDraft(EMPTY_DRAFT); setShowForm(false) }}
-              className="rounded-xl bg-[#f5f3ff] px-4 py-2 text-sm font-medium text-black/70 transition-colors hover:bg-[#ede9ff]"
-            >
+          <ResponseMappingEditor
+            result_field={draft.result_field}
+            display_fields={draft.display_fields}
+            onChange={(result_field, display_fields) =>
+              setDraft((p) => ({ ...p, result_field, display_fields }))
+            }
+          />
+
+          <div className="flex flex-col-reverse gap-2 border-t border-border-subtle pt-4 sm:flex-row sm:justify-end">
+            <Button type="button" variant="ghost" onClick={cancelForm}>
               Cancelar
-            </button>
-            <button
-              type="button"
-              disabled={!canCreate || isCreating}
-              onClick={() => createTool()}
-              className="flex items-center gap-2 rounded-xl bg-[#271173] px-5 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#1f0d5a] disabled:opacity-50"
-            >
-              {isCreating && (
-                <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
-              )}
+            </Button>
+            <Button type="button" isLoading={isCreating} disabled={!canCreate} onClick={() => createTool()}>
               Crear herramienta
-            </button>
+            </Button>
           </div>
-        </div>
+        </section>
       )}
 
-      {/* Tool list */}
       {tools.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-[#d4cfee] bg-[#fafafa] py-12 text-center">
-          <p className="text-sm text-black/50">No hay herramientas configuradas todavía.</p>
-          <button
-            type="button"
-            onClick={() => setShowForm(true)}
-            className="mt-2 text-sm font-medium text-[#271173] hover:text-[#1f0d5a]"
-          >
-            Crea la primera herramienta
-          </button>
-        </div>
+        !showForm && (
+          <p className="rounded-xl border border-dashed border-border-strong px-6 py-10 text-center text-sm text-text-tertiary">
+            Este agente aún no consulta ningún sistema externo.
+          </p>
+        )
       ) : (
-        <div className="space-y-3">
-          {tools.map((tool, i) => (
-            <div key={tool.id} className="stagger-item" style={{ animationDelay: `${i * 40}ms` }}>
-              <ToolCard tool={tool} agentId={agentId} />
-            </div>
+        <ul className="divide-y divide-border-subtle rounded-xl border border-border-default bg-surface">
+          {tools.map((tool) => (
+            <ToolRow
+              key={tool.id}
+              tool={tool}
+              agentId={agentId}
+              onDelete={(target, remove) => void handleDelete(target, remove)}
+            />
           ))}
-        </div>
+        </ul>
       )}
+
+      {confirmDialog}
     </div>
   )
 }

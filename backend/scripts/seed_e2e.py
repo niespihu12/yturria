@@ -43,3 +43,10 @@ with Session(engine) as session:
     session.commit()
 
 print(f"seed_e2e: {len(USERS)} usuarios creados en {db_file}")
+
+if os.environ.get("SEED_DEMO_DATA") == "1":
+    from demo_data import seed_demo_data  # noqa: E402
+
+    with Session(engine) as session:
+        seed_demo_data(session, owner_email="cliente@e2e.test")
+    print("seed_e2e: datos de demostración creados")

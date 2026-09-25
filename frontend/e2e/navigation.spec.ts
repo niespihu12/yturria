@@ -2,18 +2,18 @@ import { expect, test } from '@playwright/test'
 import { ADMIN, API_URL, CLIENT, apiToken, login, trackPageErrors } from './helpers'
 
 const ROUTES: Array<[string, string | RegExp]> = [
-  ['/dashboard', /Dashboard operativo/],
+  ['/dashboard', 'Resumen de hoy'],
   ['/agentes_voz', 'Agentes de Voz'],
   ['/agentes_texto', 'Agentes de Texto'],
-  ['/escalamientos', 'Bandeja de Escalamientos'],
+  ['/escalamientos', 'Bandeja de atención'],
   ['/citas', 'Citas'],
-  ['/whatsapp_config', 'WhatsApp Configuration'],
-  ['/numeros_telefono', 'Numeros de telefono'],
-  ['/directorio', 'Directorio de Asesores'],
-  ['/configuracion', 'Configuracion'],
-  ['/sofia-errores', 'Dashboard de Alucinaciones'],
-  ['/voice-analytics', 'Voice Analytics'],
-  ['/admin/usuarios', 'Panel por usuario'],
+  ['/whatsapp_config', 'WhatsApp saliente'],
+  ['/numeros_telefono', 'Números de teléfono'],
+  ['/directorio', 'Directorio de asesores'],
+  ['/configuracion', 'Configuración'],
+  ['/sofia-errores', 'Respuestas por revisar'],
+  ['/voice-analytics', 'Análisis de llamadas'],
+  ['/admin/usuarios', 'Usuarios de la plataforma'],
 ]
 
 test('el super admin recorre todos los módulos sin errores de JavaScript', async ({ page }) => {
@@ -46,5 +46,5 @@ test('un cliente no ve ni puede usar la administración', async ({ page, request
 test('rutas desconocidas vuelven al inicio de la app', async ({ page }) => {
   await login(page, CLIENT)
   await page.goto('/ruta-que-no-existe')
-  await expect(page).toHaveURL(/\/agentes_voz$/)
+  await expect(page).toHaveURL(/\/dashboard$/)
 })

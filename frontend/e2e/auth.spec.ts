@@ -11,20 +11,20 @@ test.describe('Autenticación', () => {
     await page.goto('/auth/login')
     await page.getByPlaceholder('correo@empresa.com').fill(ADMIN.email)
     await page.getByPlaceholder('••••••••').fill('ClaveIncorrecta1')
-    await page.getByRole('button', { name: 'Iniciar Sesion' }).click()
+    await page.getByRole('button', { name: 'Iniciar sesión' }).click()
     await expect(page.getByText('Email o password incorrectos')).toBeVisible()
     await expect(page).toHaveURL(/\/auth\/login$/)
   })
 
   test('los mensajes de validación se actualizan en cada envío', async ({ page }) => {
     await page.goto('/auth/login')
-    await page.getByRole('button', { name: 'Iniciar Sesion' }).click()
-    await expect(page.getByText(/email es obligatorio/i)).toBeVisible()
+    await page.getByRole('button', { name: 'Iniciar sesión' }).click()
+    await expect(page.getByText('Ingrese su correo electrónico')).toBeVisible()
 
     await page.getByPlaceholder('correo@empresa.com').fill(ADMIN.email)
-    await page.getByRole('button', { name: 'Iniciar Sesion' }).click()
-    await expect(page.getByText(/email es obligatorio/i)).toHaveCount(0)
-    await expect(page.getByText(/password es obligatorio/i)).toBeVisible()
+    await page.getByRole('button', { name: 'Iniciar sesión' }).click()
+    await expect(page.getByText('Ingrese su correo electrónico')).toHaveCount(0)
+    await expect(page.getByText('Ingrese su contraseña')).toBeVisible()
   })
 
   test('login y logout limpian la sesión', async ({ page }) => {

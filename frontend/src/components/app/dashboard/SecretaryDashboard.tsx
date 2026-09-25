@@ -1,358 +1,454 @@
-import {
-  ArrowTrendingUpIcon,
-  CalendarDaysIcon,
-  CheckCircleIcon,
-  ClockIcon,
-  ExclamationTriangleIcon,
-  PhoneIcon,
-  SparklesIcon,
-} from '@heroicons/react/24/outline'
+import { useId, type ReactNode } from 'react'
+import { Link } from 'react-router-dom'
+import { ChevronRightIcon } from '@heroicons/react/24/outline'
 import type { AgentListItem, Conversation, PhoneNumber } from '@/types/agent'
 import type { TextAgentSummary, TextConversation, UpcomingRenewal } from '@/types/textAgent'
+import { cn } from '@/lib/utils'
+import {
+  channelLabel,
+  describeEscalationReason,
+  escalationHref,
+  formatElapsed,
+  formatPhone,
+  isOpenEscalation,
+  phoneFromTitle,
+  timeAgo,
+} from '@/lib/escalations'
+import {
+  ChannelBreakdown,
+  HourlyActivityChart,
+  type ChannelRow,
+  type HourBucket,
+} from '@/components/app/dashboard/ActivityCharts'
 
-type DashboardDataset = {
+export type DashboardDataset = {
   voiceAgents: AgentListItem[]
   textAgents: TextAgentSummary[]
   phoneNumbers: PhoneNumber[]
   voiceConversations: Conversation[]
   textConversations: TextConversation[]
   upcomingRenewals: UpcomingRenewal[]
-}
-
-type QueueItem = {
-  conversationId: string
-  channel: string
-  agentName: string
-  reason: string
-  priority: 'alta' | 'media'
-  updatedAt: number
-  summary: string
+  /** Momento de la carga (ms); sirve de "ahora" para los tiempos relativos. */
+  loadedAt: number
 }
 
 type Props = {
   data: DashboardDataset
-  loadedAtText: string
+  isSuperAdmin: boolean
 }
 
-const QUOTE_RE = /cotiz|precio|costo|contratar|interesa|llam(en|ame)/i
-const CLAIM_RE = /siniestro|accidente|robo|choque|reclamo|dan[o\u00f1]/i
+type Stat = {
+  label: string
+  value: string
+  suffix?: string
+  detail?: string
+}
 
-function asUnix(value: number | undefined): number {
+const QUEUE_LIMIT = 5
+
+const LINK_BUTTON =
+  'inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg px-4 text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2'
+
+const RENEWAL_STATUS: Record<UpcomingRenewal['renewal_status'], string> = {
+  none: 'Sin gestionar',
+  scheduled: 'Programada',
+  reminder_due: 'Recordatorio por enviar',
+  reminder_sent: 'Recordatorio enviado',
+  contacted: 'Cliente contactado',
+  renewed: 'Renovada',
+  expired: 'Vencida',
+  cancelled: 'Cancelada',
+}
+
+function asUnix(value: number | null | undefined): number {
   if (typeof value !== 'number' || Number.isNaN(value) || value <= 0) return 0
   return Math.floor(value)
 }
 
 function formatClock(unix: number): string {
   if (!unix) return '--:--'
-  return new Date(unix * 1000).toLocaleTimeString('es-CO', {
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+  return new Date(unix * 1000).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })
 }
 
-function formatDate(unix: number): string {
-  if (!unix) return '--'
-  return new Date(unix * 1000).toLocaleDateString('es-CO', {
-    day: '2-digit',
-    month: 'short',
-  })
+function formatShortDate(unix: number): string {
+  return new Date(unix * 1000).toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })
 }
 
 function formatDuration(totalSeconds: number): string {
-  const safeSeconds = Math.max(0, Math.floor(totalSeconds))
-  const minutes = Math.floor(safeSeconds / 60)
-  const seconds = safeSeconds % 60
-  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+  const seconds = Math.max(0, Math.round(totalSeconds))
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
 }
 
-function buildQueue(data: DashboardDataset): QueueItem[] {
-  const textAgentNames = new Map(data.textAgents.map((agent) => [agent.agent_id, agent.name]))
-  const sorted = data.textConversations
-    .slice()
-    .sort((a, b) => asUnix(b.updated_at_unix_secs) - asUnix(a.updated_at_unix_secs))
-
-  const queue: QueueItem[] = []
-  const seen = new Set<string>()
-
-  for (const conversation of sorted) {
-    if (seen.has(conversation.conversation_id)) continue
-
-    const status = String(conversation.escalation_status ?? 'none').toLowerCase()
-    const preview = String(conversation.last_message_preview ?? '')
-    const messageCount = Number(conversation.message_count ?? 0)
-
-    let reason = ''
-    let priority: 'alta' | 'media' = 'media'
-
-    if (status === 'pending' || status === 'in_progress') {
-      reason = status === 'pending' ? 'Escalacion pendiente' : 'Escalacion en progreso'
-      priority = 'alta'
-    } else if (CLAIM_RE.test(preview)) {
-      reason = 'Posible siniestro reportado'
-      priority = 'alta'
-    } else if (QUOTE_RE.test(preview)) {
-      reason = 'Lead con intencion de compra'
-      priority = 'media'
-    } else if (messageCount >= 4) {
-      reason = '4+ mensajes sin resolver'
-      priority = 'media'
-    }
-
-    if (!reason) continue
-
-    queue.push({
-      conversationId: conversation.conversation_id,
-      channel: conversation.channel,
-      agentName: textAgentNames.get(conversation.agent_id) ?? conversation.agent_id,
-      reason,
-      priority,
-      updatedAt: asUnix(conversation.updated_at_unix_secs),
-      summary: preview || 'Sin resumen disponible.',
-    })
-
-    seen.add(conversation.conversation_id)
-    if (queue.length >= 8) break
+function callStatusLabel(status: unknown): string {
+  const value = String(status ?? '').toLowerCase()
+  if (value === 'done' || value === 'completed') return 'Finalizada'
+  if (value === 'failed') return 'No se completó'
+  if (['in-progress', 'in_progress', 'processing', 'initiated', 'active', 'ringing'].includes(value)) {
+    return 'En curso'
   }
-
-  return queue
+  return 'Registrada'
 }
 
-export default function SecretaryDashboard({ data, loadedAtText }: Props) {
-  const todayStart = new Date()
-  todayStart.setHours(0, 0, 0, 0)
-  const todayStartUnix = Math.floor(todayStart.getTime() / 1000)
+function buildHourBuckets(timestamps: number[], nowMs: number): HourBucket[] {
+  const hour = new Date(nowMs)
+  hour.setMinutes(0, 0, 0)
+  const currentHour = Math.floor(hour.getTime() / 1000)
+  const buckets: HourBucket[] = Array.from({ length: 12 }, (_, index) => {
+    const start = currentHour - (11 - index) * 3600
+    const label = `${String(new Date(start * 1000).getHours()).padStart(2, '0')}:00`
+    return { start, label, count: 0 }
+  })
+  const first = buckets[0].start
+  for (const timestamp of timestamps) {
+    const index = Math.floor((timestamp - first) / 3600)
+    if (index >= 0 && index < buckets.length) buckets[index].count += 1
+  }
+  return buckets
+}
 
-  const queue = buildQueue(data)
-  const openEscalations = data.textConversations.filter((conversation) => {
-    const status = String(conversation.escalation_status ?? 'none').toLowerCase()
-    return status === 'pending' || status === 'in_progress'
-  }).length
+export default function SecretaryDashboard({ data, isSuperAdmin }: Props) {
+  const nowMs = data.loadedAt
+  const nowUnix = Math.floor(nowMs / 1000)
+  const todayDate = new Date(nowMs)
+  todayDate.setHours(0, 0, 0, 0)
+  const todayStart = Math.floor(todayDate.getTime() / 1000)
+  const yesterdayStart = todayStart - 86400
 
-  const pendingToday = queue.filter((item) => item.updatedAt >= todayStartUnix).length
-  const callsToday = data.voiceConversations.filter(
-    (conversation) => asUnix(conversation.start_time_unix_secs) >= todayStartUnix
+  const textAgentNames = new Map(data.textAgents.map((agent) => [agent.agent_id, agent.name]))
+  const voiceAgentNames = new Map(data.voiceAgents.map((agent) => [agent.agent_id, agent.name]))
+
+  // ── Quién necesita a una persona ──────────────────────────────────────────
+  const waiting = data.textConversations
+    .filter((conversation) => isOpenEscalation(conversation.escalation_status))
+    .map((conversation) => ({
+      conversation,
+      since:
+        asUnix(conversation.escalated_at_unix_secs) || asUnix(conversation.updated_at_unix_secs),
+    }))
+    .sort((a, b) => a.since - b.since)
+
+  // ── Cifras de hoy ─────────────────────────────────────────────────────────
+  const startOf = (item: { start_time_unix_secs?: number }) => asUnix(item.start_time_unix_secs)
+  const textToday = data.textConversations.filter((item) => startOf(item) >= todayStart)
+  const voiceToday = data.voiceConversations.filter((item) => startOf(item) >= todayStart)
+  const inYesterday = (item: { start_time_unix_secs?: number }) =>
+    startOf(item) >= yesterdayStart && startOf(item) < todayStart
+  const conversationsYesterday =
+    data.textConversations.filter(inYesterday).length + data.voiceConversations.filter(inYesterday).length
+  const handedToday = textToday.filter(
+    (item) => item.escalation_status && item.escalation_status !== 'none',
   ).length
+
+  const callDurations = voiceToday
+    .map((call) => call.call_duration_secs)
+    .filter((value): value is number => typeof value === 'number' && value > 0)
+  const avgCall = callDurations.length
+    ? callDurations.reduce((sum, value) => sum + value, 0) / callDurations.length
+    : 0
+
   const renewals = data.upcomingRenewals
     .slice()
     .sort((a, b) => a.renewal_date_unix_secs - b.renewal_date_unix_secs)
+  const renewalsThisWeek = renewals.filter((item) => item.days_until_renewal <= 7).length
 
-  const renewalsDue7Days = renewals.filter((item) => item.days_until_renewal <= 7).length
-  const renewalsDue30Days = renewals.length
+  const stats: Stat[] = [
+    {
+      label: 'Conversaciones hoy',
+      value: String(textToday.length + voiceToday.length),
+      detail: `Ayer: ${conversationsYesterday}`,
+    },
+  ]
+  if (textToday.length > 0) {
+    stats.push({
+      label: 'Chats resueltos por los agentes',
+      value: String(textToday.length - handedToday),
+      suffix: `de ${textToday.length}`,
+      detail:
+        handedToday === 0
+          ? 'Ninguno necesitó a una persona'
+          : `${handedToday} ${handedToday === 1 ? 'pasó' : 'pasaron'} a una persona del equipo`,
+    })
+  }
+  if (data.voiceAgents.length > 0 || voiceToday.length > 0) {
+    stats.push({
+      label: 'Llamadas hoy',
+      value: String(voiceToday.length),
+      detail: avgCall ? `Duración media: ${formatDuration(avgCall)} min` : 'Sin llamadas todavía',
+    })
+  }
+  if (renewals.length > 0) {
+    stats.push({
+      label: 'Renovaciones en 30 días',
+      value: String(renewals.length),
+      detail:
+        renewalsThisWeek > 0
+          ? `${renewalsThisWeek} en los próximos 7 días`
+          : 'Ninguna en los próximos 7 días',
+    })
+  }
+  if (isSuperAdmin && data.phoneNumbers.length > 0) {
+    const assigned = data.phoneNumbers.filter((phone) => phone.assigned_agent?.agent_id).length
+    stats.push({
+      label: 'Números con agente asignado',
+      value: String(assigned),
+      suffix: `de ${data.phoneNumbers.length}`,
+    })
+  }
+
+  // ── Actividad y canales ───────────────────────────────────────────────────
+  const hourBuckets = buildHourBuckets(
+    [...data.textConversations.map(startOf), ...data.voiceConversations.map(startOf)].filter(Boolean),
+    nowMs,
+  )
+
+  const weekStart = nowUnix - 7 * 86400
+  const channelCounts = new Map<string, number>()
+  for (const call of data.voiceConversations) {
+    if (startOf(call) >= weekStart) channelCounts.set('voice', (channelCounts.get('voice') ?? 0) + 1)
+  }
+  for (const chat of data.textConversations) {
+    if (startOf(chat) < weekStart) continue
+    const key = String(chat.channel ?? 'web')
+    channelCounts.set(key, (channelCounts.get(key) ?? 0) + 1)
+  }
+  const channelRows: ChannelRow[] = Array.from(channelCounts, ([key, count]) => ({
+    key,
+    label: key === 'voice' ? 'Llamadas' : channelLabel(key),
+    count,
+  })).sort((a, b) => b.count - a.count)
 
   const recentCalls = data.voiceConversations
     .slice()
-    .sort(
-      (a, b) => asUnix(b.start_time_unix_secs) - asUnix(a.start_time_unix_secs)
-    )
-    .slice(0, 6)
-
-  const voiceAgentNames = new Map(data.voiceAgents.map((agent) => [agent.agent_id, agent.name]))
-
-  const recommendation =
-    renewalsDue7Days > 0
-      ? 'Prioriza renovaciones que vencen en los próximos 7 días y agenda contacto inmediato.'
-      : openEscalations > 0
-      ? 'Prioriza escalaciones abiertas antes de nuevas cotizaciones para no perder leads calientes.'
-      : queue.length > 0
-        ? 'Procesa la bandeja por prioridad: siniestros, luego intencion de compra y finalmente seguimientos.'
-        : 'Bandeja limpia. Este es buen momento para validar renovaciones y hacer llamadas preventivas.'
+    .sort((a, b) => startOf(b) - startOf(a))
+    .slice(0, 5)
 
   return (
-    <>
-      <section className="section-enter relative overflow-hidden rounded-[30px] border border-[#d8d3ee] bg-white p-8 shadow-sm">
-        <div className="pointer-events-none absolute -right-24 -top-24 h-64 w-64 rounded-full bg-[#271173]/10 blur-3xl" />
-        <div className="relative flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div className="max-w-3xl">
-            <p className="inline-flex items-center gap-1.5 rounded-full border border-[#d8d3ee] bg-[#f7f5ff] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#271173]">
-              <SparklesIcon className="h-3.5 w-3.5" />
-              Secretaria Digital
-            </p>
-            <h1 className="mt-4 text-4xl font-semibold leading-tight text-[#1a1a2f]">
-              Panel operativo para gestionar
-              <span className="text-[#271173]"> llamadas, leads y escalaciones</span>
-            </h1>
-            <p className="mt-3 text-sm leading-6 text-[#23233d]/70">
-              Vista simple orientada a accion inmediata. Ultima carga: {loadedAtText}
-            </p>
-          </div>
-        </div>
-      </section>
+    <div className="space-y-10">
+      <AttentionQueue
+        waiting={waiting}
+        nowMs={nowMs}
+        textAgentNames={textAgentNames}
+        showAgent={data.textAgents.length > 1}
+      />
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <article className="rounded-2xl border border-[#e4e0f5] bg-white p-5 shadow-sm">
-          <p className="text-xs uppercase tracking-[0.12em] text-[#1a1a2f]/45">Pendientes hoy</p>
-          <p className="mt-3 text-3xl font-semibold text-[#1a1a2f]">{pendingToday}</p>
-          <p className="mt-2 text-xs text-[#1a1a2f]/60">Conversaciones que requieren accion</p>
-        </article>
-
-        <article className="rounded-2xl border border-[#e4e0f5] bg-white p-5 shadow-sm">
-          <p className="text-xs uppercase tracking-[0.12em] text-[#1a1a2f]/45">Escalaciones abiertas</p>
-          <p className="mt-3 text-3xl font-semibold text-[#1a1a2f]">{openEscalations}</p>
-          <p className="mt-2 inline-flex items-center gap-1 text-xs text-rose-600">
-            <ExclamationTriangleIcon className="h-3.5 w-3.5" />
-            Prioridad alta de seguimiento
-          </p>
-        </article>
-
-        <article className="rounded-2xl border border-[#e4e0f5] bg-white p-5 shadow-sm">
-          <p className="text-xs uppercase tracking-[0.12em] text-[#1a1a2f]/45">Llamadas hoy</p>
-          <p className="mt-3 text-3xl font-semibold text-[#1a1a2f]">{callsToday}</p>
-          <p className="mt-2 text-xs text-[#1a1a2f]/60">Actividad de voz del dia</p>
-        </article>
-
-        <article className="rounded-2xl border border-[#e4e0f5] bg-white p-5 shadow-sm">
-          <p className="text-xs uppercase tracking-[0.12em] text-[#1a1a2f]/45">Renovaciones 30 días</p>
-          <p className="mt-3 text-3xl font-semibold text-[#1a1a2f]">{renewalsDue30Days}</p>
-          <p className="mt-2 inline-flex items-center gap-1 text-xs text-emerald-600">
-            <CheckCircleIcon className="h-3.5 w-3.5" />
-            {renewalsDue7Days} vencen en la próxima semana
-          </p>
-        </article>
-      </section>
-
-      <section className="grid gap-4 xl:grid-cols-[1.5fr,1fr]">
-        <article className="rounded-2xl border border-[#e4e0f5] bg-white p-5 shadow-sm">
-          <div className="mb-4 flex items-center justify-between gap-3">
-            <div>
-              <p className="text-xs uppercase tracking-[0.12em] text-[#1a1a2f]/45">Bandeja prioritaria</p>
-              <h2 className="mt-1 text-xl font-semibold text-[#1a1a2f]">Que atender ahora</h2>
-            </div>
-            <span className="rounded-full border border-[#d8d3ee] bg-[#f7f5ff] px-3 py-1 text-xs font-semibold text-[#271173]">
-              {queue.length} en cola
-            </span>
-          </div>
-
-          <div className="space-y-3">
-            {queue.length === 0 && (
-              <div className="rounded-xl border border-[#ece8fb] bg-[#faf9ff] p-4 text-sm text-[#1a1a2f]/60">
-                No hay pendientes urgentes en este momento.
-              </div>
-            )}
-
-            {queue.map((item) => (
-              <div key={item.conversationId} className="rounded-xl border border-[#ece8fb] bg-[#faf9ff] p-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-sm font-semibold text-[#1a1a2f]">{item.agentName}</p>
-                  <div className="inline-flex items-center gap-2">
-                    <span
-                      className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                        item.priority === 'alta'
-                          ? 'bg-rose-50 text-rose-700 ring-1 ring-rose-200'
-                          : 'bg-amber-50 text-amber-700 ring-1 ring-amber-200'
-                      }`}
-                    >
-                      {item.priority}
-                    </span>
-                    <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-[#1a1a2f]/65 ring-1 ring-[#e0dbf5]">
-                      {item.channel}
-                    </span>
-                  </div>
-                </div>
-                <p className="mt-1 text-xs font-medium text-[#271173]">{item.reason}</p>
-                <p className="mt-1 text-xs leading-5 text-[#1a1a2f]/65">{item.summary}</p>
-                <p className="mt-2 inline-flex items-center gap-1 text-[11px] text-[#1a1a2f]/50">
-                  <ClockIcon className="h-3.5 w-3.5" />
-                  Actualizado {formatClock(item.updatedAt)}
-                </p>
-              </div>
-            ))}
-          </div>
-        </article>
-
-        <article className="rounded-2xl border border-[#e4e0f5] bg-white p-5 shadow-sm">
-          <p className="text-xs uppercase tracking-[0.12em] text-[#1a1a2f]/45">Siguiente mejor accion</p>
-          <h2 className="mt-2 text-xl font-semibold text-[#1a1a2f]">Plan recomendado</h2>
-          <p className="mt-4 text-sm leading-6 text-[#1a1a2f]/75">{recommendation}</p>
-
-          <div className="mt-5 rounded-xl border border-[#ece8fb] bg-[#faf9ff] p-4 text-sm text-[#1a1a2f]/70">
-            <p className="inline-flex items-center gap-2 font-semibold text-[#271173]">
-              <ArrowTrendingUpIcon className="h-4 w-4" />
-              Orden sugerido de trabajo
-            </p>
-            <ol className="mt-2 space-y-1 text-xs leading-5 text-[#1a1a2f]/70">
-              <li>1. Resolver escalaciones pendientes.</li>
-              <li>2. Llamar leads con intencion de compra.</li>
-              <li>3. Confirmar renovaciones próximas y registrar estatus.</li>
-            </ol>
-          </div>
-
-          <div className="mt-4 rounded-xl border border-[#ece8fb] bg-[#faf9ff] p-4 text-sm text-[#1a1a2f]/70">
-            <p className="inline-flex items-center gap-2 font-semibold text-[#271173]">
-              <CalendarDaysIcon className="h-4 w-4" />
-              Calendario de renovaciones
-            </p>
-
-            <div className="mt-3 space-y-2">
-              {renewals.length === 0 && (
-                <p className="text-xs text-[#1a1a2f]/55">
-                  No hay renovaciones cargadas para los próximos 30 días.
-                </p>
-              )}
-
-              {renewals.slice(0, 5).map((renewal) => (
-                <div
-                  key={renewal.conversation_id}
-                  className="rounded-lg border border-[#e8e3fb] bg-white px-3 py-2"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-xs font-semibold text-[#1a1a2f]">{renewal.agent_name}</p>
-                    <span className="rounded-full bg-[#f5f3ff] px-2 py-0.5 text-[10px] font-semibold text-[#271173]">
-                      {formatDate(renewal.renewal_date_unix_secs)}
-                    </span>
-                  </div>
-                  <p className="mt-1 text-[11px] text-[#1a1a2f]/70">
-                    {renewal.days_until_renewal === 0
-                      ? 'Vence hoy'
-                      : `Vence en ${renewal.days_until_renewal} día(s)`}
-                    {' · '}
-                    {renewal.renewal_status}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </article>
-      </section>
-
-      <section className="rounded-2xl border border-[#e4e0f5] bg-white p-5 shadow-sm">
-        <div className="mb-4 flex items-center justify-between gap-3">
-          <div>
-            <p className="text-xs uppercase tracking-[0.12em] text-[#1a1a2f]/45">Historial reciente</p>
-            <h2 className="mt-1 text-xl font-semibold text-[#1a1a2f]">Ultimas llamadas</h2>
-          </div>
-          <PhoneIcon className="h-5 w-5 text-[#271173]" />
+      <div className="grid items-start gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] lg:gap-8">
+        <div className="space-y-10">
+          <TodayStats stats={stats} />
+          <ChannelBreakdown rows={channelRows} periodLabel="Últimos 7 días" />
         </div>
 
-        <div className="space-y-2">
-          {recentCalls.length === 0 && (
-            <div className="rounded-xl border border-[#ece8fb] bg-[#faf9ff] p-4 text-sm text-[#1a1a2f]/60">
-              Aun no hay llamadas registradas para mostrar.
-            </div>
+        <div className="space-y-10">
+          <HourlyActivityChart buckets={hourBuckets} />
+
+          {renewals.length > 0 && (
+            <ListSection title="Renovaciones próximas" aside="Próximos 30 días">
+              {renewals.slice(0, 5).map((renewal) => {
+                const phone = phoneFromTitle(renewal.title)
+                const who = phone ? formatPhone(phone) : renewal.title?.trim() || 'Conversación sin título'
+                return (
+                  <li key={renewal.conversation_id} className="flex items-start justify-between gap-4 px-5 py-3.5">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-text-primary">{who}</p>
+                      <p className="mt-0.5 text-xs text-text-tertiary">
+                        {renewal.agent_name} · {RENEWAL_STATUS[renewal.renewal_status] ?? 'Sin gestionar'}
+                      </p>
+                    </div>
+                    <div className="shrink-0 text-right text-sm tabular-nums">
+                      <p className="text-text-primary">
+                        {renewal.days_until_renewal <= 0
+                          ? 'Vence hoy'
+                          : renewal.days_until_renewal === 1
+                            ? 'Mañana'
+                            : `En ${renewal.days_until_renewal} días`}
+                      </p>
+                      <p className="text-xs text-text-tertiary">{formatShortDate(renewal.renewal_date_unix_secs)}</p>
+                    </div>
+                  </li>
+                )
+              })}
+            </ListSection>
           )}
 
-          {recentCalls.map((call) => {
-            const startedAt = asUnix(call.start_time_unix_secs)
-            const duration = Number(call.call_duration_secs ?? 0)
-            const agentName = voiceAgentNames.get(call.agent_id) ?? call.agent_id
-
-            return (
-              <div
-                key={call.conversation_id}
-                className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#ece8fb] bg-[#faf9ff] px-4 py-3"
-              >
-                <div>
-                  <p className="text-sm font-semibold text-[#1a1a2f]">{agentName}</p>
-                  <p className="text-xs text-[#1a1a2f]/60">Estado: {call.status}</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-sm font-semibold text-[#1a1a2f]">{formatDuration(duration)}</p>
-                  <p className="text-xs text-[#1a1a2f]/60">{formatClock(startedAt)}</p>
-                </div>
-              </div>
-            )
-          })}
+          {recentCalls.length > 0 && (
+            <ListSection title="Últimas llamadas">
+              {recentCalls.map((call) => (
+                <li key={call.conversation_id} className="flex items-center justify-between gap-4 px-5 py-3.5">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-text-primary">
+                      {voiceAgentNames.get(call.agent_id) ?? 'Agente de voz'}
+                    </p>
+                    <p className="mt-0.5 text-xs text-text-tertiary">{callStatusLabel(call.status)}</p>
+                  </div>
+                  <div className="shrink-0 text-right text-sm tabular-nums">
+                    <p className="text-text-primary">{formatDuration(Number(call.call_duration_secs ?? 0))} min</p>
+                    <p className="text-xs text-text-tertiary">{formatClock(startOf(call))}</p>
+                  </div>
+                </li>
+              ))}
+            </ListSection>
+          )}
         </div>
-      </section>
-    </>
+      </div>
+    </div>
+  )
+}
+
+function AttentionQueue({
+  waiting,
+  nowMs,
+  textAgentNames,
+  showAgent,
+}: {
+  waiting: Array<{ conversation: TextConversation; since: number }>
+  nowMs: number
+  textAgentNames: Map<string, string>
+  showAgent: boolean
+}) {
+  const headingId = useId()
+  const count = waiting.length
+  const oldest = waiting[0]
+  const waitedFor = oldest?.since ? formatElapsed(nowMs / 1000 - oldest.since) : null
+
+  const headline =
+    count === 0
+      ? 'Nadie está esperando a una persona del equipo'
+      : `${count} ${count === 1 ? 'conversación espera' : 'conversaciones esperan'} a una persona del equipo`
+  const detail =
+    count === 0
+      ? 'Los agentes están atendiendo todas las conversaciones. Aquí verá cuando alguien necesite a una persona.'
+      : waitedFor
+        ? count === 1
+          ? `Lleva ${waitedFor} esperando.`
+          : `La más antigua lleva ${waitedFor} esperando.`
+        : 'Revíselas en la bandeja.'
+
+  return (
+    <section aria-labelledby={headingId} className="overflow-hidden rounded-xl border border-border-default bg-surface">
+      <div className="flex flex-col gap-4 px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+        <div className="flex min-w-0 items-start gap-3">
+          <span
+            aria-hidden="true"
+            className={cn('mt-2 h-2.5 w-2.5 shrink-0 rounded-full', count ? 'bg-warning-500' : 'bg-success-500')}
+          />
+          <div className="min-w-0">
+            <h2 id={headingId} className="text-lg font-semibold text-text-primary">
+              {headline}
+            </h2>
+            <p className="mt-0.5 max-w-[65ch] text-sm text-text-secondary">{detail}</p>
+          </div>
+        </div>
+        <Link
+          to="/escalamientos"
+          className={cn(
+            LINK_BUTTON,
+            count
+              ? 'bg-primary-600 text-text-inverse shadow-sm hover:bg-primary-700'
+              : 'border border-border-strong text-text-primary hover:bg-neutral-50',
+          )}
+        >
+          {count ? 'Abrir la bandeja' : 'Ver la bandeja'}
+        </Link>
+      </div>
+
+      {count > 0 && (
+        <div className="border-t border-border-default">
+          <h3 className="px-5 pb-1 pt-4 text-sm font-semibold text-text-primary sm:px-6">Qué atender ahora</h3>
+          <ul className="divide-y divide-border-subtle">
+            {waiting.slice(0, QUEUE_LIMIT).map(({ conversation, since }) => {
+              const preview = conversation.last_message_preview?.trim()
+              return (
+                <li key={conversation.conversation_id}>
+                  <Link
+                    to={escalationHref(conversation.conversation_id, conversation.agent_id)}
+                    className="group flex items-start gap-4 px-5 py-3.5 transition-colors hover:bg-surface-muted focus-visible:outline-offset-[-2px] sm:px-6"
+                  >
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-medium text-text-primary">
+                        {describeEscalationReason(conversation.escalation_reason)}
+                      </span>
+                      {preview && (
+                        <span className="mt-0.5 block truncate text-sm text-text-secondary">
+                          Último mensaje: “{preview}”
+                        </span>
+                      )}
+                      <span className="mt-1 block text-xs text-text-tertiary">
+                        {channelLabel(conversation.channel)}
+                        {showAgent && textAgentNames.get(conversation.agent_id)
+                          ? ` · ${textAgentNames.get(conversation.agent_id)}`
+                          : ''}
+                        {conversation.escalation_status === 'in_progress' ? ' · En atención' : ''}
+                        <span className="tabular-nums sm:hidden"> · {timeAgo(since, nowMs)}</span>
+                      </span>
+                    </span>
+                    <span className="flex shrink-0 items-center gap-1.5 pt-0.5 text-xs tabular-nums text-text-tertiary">
+                      <span className="hidden sm:inline">{timeAgo(since, nowMs)}</span>
+                      <ChevronRightIcon
+                        aria-hidden="true"
+                        className="h-4 w-4 text-text-muted transition-colors group-hover:text-text-secondary"
+                      />
+                    </span>
+                  </Link>
+                </li>
+              )
+            })}
+          </ul>
+          {count > QUEUE_LIMIT && (
+            <div className="border-t border-border-subtle px-5 py-3 sm:px-6">
+              <Link to="/escalamientos" className="text-sm font-medium text-text-link hover:underline">
+                Ver las {count} conversaciones en la bandeja
+              </Link>
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  )
+}
+
+function TodayStats({ stats }: { stats: Stat[] }) {
+  const titleId = useId()
+  return (
+    <section aria-labelledby={titleId}>
+      <h2 id={titleId} className="text-base font-semibold text-text-primary">
+        Hoy en cifras
+      </h2>
+      <dl className="mt-3 divide-y divide-border-subtle rounded-xl border border-border-default bg-surface">
+        {stats.map((stat) => (
+          <div key={stat.label} className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-4 px-5 py-4">
+            <dt className="text-sm text-text-secondary">{stat.label}</dt>
+            <dd className="row-span-2 text-right tabular-nums">
+              <span className="text-2xl font-semibold leading-none text-text-primary">{stat.value}</span>
+              {stat.suffix && <span className="text-sm text-text-secondary"> {stat.suffix}</span>}
+            </dd>
+            {stat.detail && <dd className="mt-0.5 text-xs text-text-tertiary">{stat.detail}</dd>}
+          </div>
+        ))}
+      </dl>
+    </section>
+  )
+}
+
+function ListSection({
+  title,
+  aside,
+  children,
+}: {
+  title: string
+  aside?: string
+  children: ReactNode
+}) {
+  const titleId = useId()
+  return (
+    <section aria-labelledby={titleId}>
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 id={titleId} className="text-base font-semibold text-text-primary">
+          {title}
+        </h2>
+        {aside && <p className="text-sm text-text-tertiary">{aside}</p>}
+      </div>
+      <ul className="mt-3 divide-y divide-border-subtle rounded-xl border border-border-default bg-surface">
+        {children}
+      </ul>
+    </section>
   )
 }

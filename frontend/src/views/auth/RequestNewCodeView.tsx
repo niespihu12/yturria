@@ -1,12 +1,14 @@
-import { Link } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
-import type { RequestConfirmationCodeForm } from '../../types'
-import ErrorMessage from '@/components/ErrorMessage'
+import { Link } from 'react-router-dom'
 import { useMutation } from '@tanstack/react-query'
-import { requestConfirmationCode } from '@/api/AuthAPI'
 import { toast } from 'react-toastify'
+import type { RequestConfirmationCodeForm } from '@/types/index'
+import { requestConfirmationCode } from '@/api/AuthAPI'
+import Button from '@/components/ui/Button'
+import FormField, { inputClass } from '@/components/app/shell/FormField'
+import { AuthHeader, authLinkClass } from '@/components/auth/AuthParts'
 
-export default function RegisterView() {
+export default function RequestNewCodeView() {
   const initialValues: RequestConfirmationCodeForm = { email: '' }
   const { register, handleSubmit, formState: { errors } } = useForm({ defaultValues: initialValues })
 
@@ -17,53 +19,42 @@ export default function RegisterView() {
   })
 
   return (
-    <div className="section-enter w-full max-w-sm">
-      <div className="mb-6 text-center">
-        <h1 className="text-xl font-semibold text-black">Solicitar código de confirmación</h1>
-        <p className="mt-1 text-sm text-black/60">
-          Ingresa tu email para recibir un nuevo código
-        </p>
-      </div>
+    <>
+      <AuthHeader
+        title="Solicitar un código nuevo"
+        description="Ingrese su correo y le enviaremos un código para confirmar su cuenta."
+      />
 
-      <form
-        onSubmit={handleSubmit((data) => mutate(data))}
-        className="rounded-2xl border border-[#e4e0f5] bg-white p-8 shadow-sm space-y-5"
-        noValidate
-      >
-        <div className="space-y-1.5">
-          <label className="block text-sm font-medium text-black/80" htmlFor="email">
-            Email
-          </label>
-          <input
-            id="email"
-            type="email"
-            placeholder="tu@email.com"
-            className="w-full rounded-xl border border-[#e4e0f5] bg-white px-3 py-2.5 text-sm text-black placeholder:text-black/40 transition-colors focus:border-[#271173] focus:outline-none"
-            {...register('email', {
-              required: 'El email es obligatorio',
-              pattern: { value: /\S+@\S+\.\S+/, message: 'Email no válido' },
-            })}
-          />
-          {errors.email && <ErrorMessage>{errors.email.message}</ErrorMessage>}
-        </div>
+      <form onSubmit={handleSubmit((data) => mutate(data))} className="mt-8 space-y-5" noValidate>
+        <FormField label="Correo electrónico" error={errors.email?.message}>
+          {(control) => (
+            <input
+              {...control}
+              type="email"
+              autoComplete="email"
+              placeholder="correo@empresa.com"
+              className={inputClass}
+              {...register('email', {
+                required: 'Ingrese su correo electrónico',
+                pattern: {
+                  value: /\S+@\S+\.\S+/,
+                  message: 'Revise el correo; debe tener la forma nombre@empresa.com',
+                },
+              })}
+            />
+          )}
+        </FormField>
 
-        <button
-          type="submit"
-          disabled={isPending}
-          className="w-full rounded-xl bg-[#271173] py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#1f0d5a] disabled:opacity-60"
-        >
-          {isPending ? 'Enviando...' : 'Enviar código'}
-        </button>
+        <Button type="submit" size="lg" className="w-full" isLoading={isPending}>
+          Enviar código
+        </Button>
       </form>
 
-      <nav className="mt-5 flex flex-col gap-3 text-center">
-        <Link to="/auth/login" className="text-sm text-black/60 hover:text-[#271173] transition-colors">
-          ¿Ya tienes cuenta? Iniciar sesión
+      <p className="mt-8 text-sm text-text-secondary">
+        <Link to="/auth/login" className={authLinkClass}>
+          Volver a iniciar sesión
         </Link>
-        <Link to="/auth/forgot-password" className="text-sm text-black/60 hover:text-[#271173] transition-colors">
-          ¿Olvidaste tu contraseña? Reestablecer
-        </Link>
-      </nav>
-    </div>
+      </p>
+    </>
   )
 }

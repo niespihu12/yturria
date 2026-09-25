@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import type {
   UseFormRegister,
   UseFormSetValue,
@@ -15,13 +15,19 @@ import {
   upsertVoiceAgentRuntimeConfig,
 } from '@/api/VoiceRuntimeAPI'
 import type { Voice } from '@/types/agent'
-import {
-  ChatBubbleLeftRightIcon,
-  CpuChipIcon,
-  LanguageIcon,
-  SpeakerWaveIcon,
-} from '@heroicons/react/24/outline'
+import { PlayIcon } from '@heroicons/react/24/outline'
 import { toast } from 'react-toastify'
+import AdvancedSection from '@/components/ui/AdvancedSection'
+import Button from '@/components/ui/Button'
+import { Field, SectionHeading, SliderField, SwitchField } from '../fields'
+import {
+  describeError,
+  errorClass,
+  inputClass,
+  readOnlyInputClass,
+  subsectionTitleClass,
+  textareaClass,
+} from '../agentUi'
 
 type Props = {
   agentId: string
@@ -32,99 +38,21 @@ type Props = {
   isClient?: boolean
 }
 
-const inputClass =
-  'w-full bg-surface border border-border-default text-text-primary rounded-xl px-3 py-2.5 text-sm placeholder:text-text-primary/40 focus:outline-none focus:border-primary-500 transition-colors resize-none'
-
-const labelClass = 'block text-sm font-medium text-text-primary mb-1.5'
-
-const selectClass =
-  'w-full bg-surface border border-border-default text-text-primary rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-primary-500 transition-colors appearance-none'
-
 const LLM_DESCRIPTIONS: Record<string, string> = {
-  'gemini-2.5-flash': 'Rapido y eficiente para tareas generales.',
-  'gemini-2.5-flash-lite': 'Version ligera para respuestas rapidas.',
-  'gpt-5-mini': 'Balance entre precision y velocidad.',
-  'gpt-4.1-mini': 'Respuesta consistente para soporte y operaciones.',
-  'claude-sonnet-4': 'Razonamiento fuerte para conversaciones complejas.',
-  'gpt-oss-120b': 'Modelo open-source hospedado por la plataforma.',
+  'gemini-2.5-flash': 'Rápido y eficiente para tareas generales.',
+  'gemini-2.5-flash-lite': 'Versión ligera para respuestas rápidas.',
+  'gpt-5-mini': 'Equilibrio entre precisión y velocidad.',
+  'gpt-4.1-mini': 'Respuestas consistentes para soporte y operaciones.',
+  'claude-sonnet-4': 'Razonamiento sólido para conversaciones complejas.',
+  'gpt-oss-120b': 'Modelo abierto alojado por la plataforma.',
 }
 
 const TTS_MODEL_OPTIONS = [
-  {
-    value: 'eleven_turbo_v2_5',
-    label: 'Turbo v2.5 · Ultra baja latencia · Recomendado',
-  },
-  {
-    value: 'eleven_flash_v2_5',
-    label: 'Flash v2.5 · ~75ms · Maxima velocidad',
-  },
-  {
-    value: 'eleven_multilingual_v2',
-    label: 'Multilingual v2 · Alta calidad · Multiidioma',
-  },
-  {
-    value: 'eleven_v3',
-    label: 'v3 · Mas expresivo · 70+ idiomas',
-  },
+  { value: 'eleven_turbo_v2_5', label: 'Turbo v2.5 · Latencia muy baja · Recomendado' },
+  { value: 'eleven_flash_v2_5', label: 'Flash v2.5 · ~75 ms · Máxima velocidad' },
+  { value: 'eleven_multilingual_v2', label: 'Multilingual v2 · Alta calidad · Varios idiomas' },
+  { value: 'eleven_v3', label: 'v3 · Más expresivo · Más de 70 idiomas' },
 ]
-
-const TTS_MODEL_DESCRIPTION: Record<string, string> = {
-  eleven_turbo_v2_5: 'Turbo v2.5 · Ultra baja latencia · Recomendado',
-  eleven_flash_v2_5: 'Flash v2.5 · ~75ms · Maxima velocidad',
-  eleven_multilingual_v2: 'Multilingual v2 · Alta calidad · Multiidioma',
-  eleven_v3: 'v3 · Mas expresivo · 70+ idiomas',
-}
-
-const ChevronDown = () => (
-  <svg className="w-4 h-4 text-text-primary/40" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-  </svg>
-)
-
-function SectionHeader({
-  icon: Icon,
-  title,
-  description,
-}: {
-  icon: React.ComponentType<React.SVGProps<SVGSVGElement>>
-  title: string
-  description: string
-}) {
-  return (
-    <div className="mb-5 flex items-start gap-3">
-      <div className="rounded-lg border border-border-default bg-[#f5f3ff] p-2">
-        <Icon className="h-4 w-4 text-primary-600" />
-      </div>
-      <div>
-        <h3 className="text-sm font-semibold text-text-primary">{title}</h3>
-        <p className="mt-1 text-xs text-text-secondary">{description}</p>
-      </div>
-    </div>
-  )
-}
-
-function TogglePill({
-  enabled,
-  onClick,
-}: {
-  enabled: boolean
-  onClick: () => void
-}) {
-  return (
-    <div
-      onClick={onClick}
-      className={`relative h-5 w-10 cursor-pointer rounded-full transition-colors duration-200 ${
-        enabled ? 'bg-primary-600' : 'bg-black/20'
-      }`}
-    >
-      <div
-        className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-surface shadow transition-transform duration-200 ${
-          enabled ? 'translate-x-5' : 'translate-x-0'
-        }`}
-      />
-    </div>
-  )
-}
 
 export default function AgentTab({
   agentId,
@@ -139,8 +67,10 @@ export default function AgentTab({
   const ttsModelField = register('tts_model_id')
   const languageField = register('language')
   const llmField = register('llm')
+  const promptId = useId()
+  const whatsappId = useId()
 
-  const { data: voicesData, isLoading: loadingVoices } = useQuery({
+  const { data: voicesData, isLoading: loadingVoices, isError: voicesError } = useQuery({
     queryKey: ['voices'],
     queryFn: getVoices,
   })
@@ -184,10 +114,11 @@ export default function AgentTab({
   const { mutate: saveRuntimeConfig, isPending: isSavingRuntimeConfig } = useMutation({
     mutationFn: () => upsertVoiceAgentRuntimeConfig(agentId, runtimeForm),
     onSuccess: () => {
-      toast.success('Configuracion de escalacion actualizada')
+      toast.success('Transferencia a una persona actualizada')
       queryClient.invalidateQueries({ queryKey: ['voice-runtime-config', agentId] })
     },
-    onError: (error: Error) => toast.error(error.message),
+    onError: (error: Error) =>
+      toast.error(describeError(error, 'No pudimos guardar la transferencia. Intente de nuevo.')),
   })
 
   const voices = useMemo<Voice[]>(() => voicesData?.voices ?? [], [voicesData])
@@ -208,17 +139,8 @@ export default function AgentTab({
   const autoLanguageDetection = watch('auto_language_detection') ?? true
   const callRecordingEnabled = watch('call_recording_enabled') ?? false
 
-  const selectedVoice = useMemo(
-    () => voices.find((voice) => voice.voice_id === selectedVoiceId),
-    [voices, selectedVoiceId]
-  )
-
   const llmDescription =
-    LLM_DESCRIPTIONS[selectedLlm] ?? 'Modelo configurable para conversaciones del agente'
-
-  const selectedTtsDescription =
-    TTS_MODEL_DESCRIPTION[selectedTtsModel] ??
-    'Modelo de voz configurable para el agente.'
+    LLM_DESCRIPTIONS[selectedLlm] ?? 'Modelo de IA que redacta las respuestas del agente.'
 
   const handleVoicePreview = async () => {
     const voiceId = watch('voice_id')
@@ -230,237 +152,320 @@ export default function AgentTab({
       const previewUrl = data.preview_url
 
       if (!previewUrl) {
-        throw new Error('Esta voz no tiene preview disponible.')
+        throw new Error('Esta voz no tiene una muestra disponible.')
       }
 
       const audio = new Audio(previewUrl)
       await audio.play()
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'No se pudo reproducir el preview')
+      toast.error(describeError(error, 'No pudimos reproducir la muestra de voz.'))
     } finally {
       setPreviewing(false)
     }
   }
 
+  const promptField = (
+    <div>
+      <div className="flex items-baseline justify-between gap-3">
+        <label htmlFor={promptId} className={isClient ? 'sr-only' : 'block text-sm font-medium text-text-primary'}>
+          Instrucciones del agente
+        </label>
+        <span className="ml-auto text-xs text-text-tertiary tabular-nums">{promptLength} caracteres</span>
+      </div>
+      {!isClient && (
+        <p id={`${promptId}-help`} className="mt-0.5 text-xs leading-relaxed text-text-tertiary">
+          Describa cómo debe hablar el agente, qué puede resolver y cuándo debe pasar la llamada a
+          una persona del equipo.
+        </p>
+      )}
+      <textarea
+        id={promptId}
+        rows={isClient ? 8 : 12}
+        placeholder="Usted es el asistente de voz de… Su objetivo es…"
+        aria-describedby={!isClient ? `${promptId}-help` : undefined}
+        className={`mt-2 ${textareaClass} ${isClient ? readOnlyInputClass : ''}`}
+        readOnly={isClient}
+        {...register('prompt')}
+      />
+      {errors.prompt && <p className={errorClass}>{errors.prompt.message}</p>}
+    </div>
+  )
+
   return (
-    <div className="w-full space-y-8">
-      <section>
-        <SectionHeader
-          icon={CpuChipIcon}
+    <div className="w-full space-y-10">
+      <section aria-labelledby={`${promptId}-behavior`} className="space-y-6">
+        <SectionHeading
+          id={`${promptId}-behavior`}
           title="Comportamiento"
-          description="Define personalidad, saludo inicial y comportamiento base del agente."
+          description="Lo que el agente dice al contestar y la forma en que atiende cada llamada."
         />
 
-        <div className="space-y-5">
-          <div>
-            <label className={labelClass}>
-              Mensaje del sistema
-              <span className="ml-1.5 text-xs text-text-muted font-normal">
-                Define la personalidad y contexto del agente
-              </span>
-            </label>
-            <textarea
-              rows={10}
-              placeholder="Eres un asistente de voz amigable y profesional. Tu objetivo es..."
-              className={`${inputClass} ${
-                isClient ? 'cursor-not-allowed bg-[#fafafa] text-text-secondary' : ''
-              }`}
-              readOnly={isClient}
-              {...register('prompt')}
-            />
-            {isClient && (
-              <p className="mt-1 text-xs text-text-muted">
-                Este campo está bloqueado por política para cliente final.
-              </p>
-            )}
-            <p className="mt-1 text-right text-xs text-text-primary/40">{promptLength} caracteres</p>
-            {errors.prompt && (
-              <p className="text-red-500 text-xs mt-1">{errors.prompt.message}</p>
-            )}
-          </div>
+        {isClient ? (
+          <AdvancedSection
+            title="Instrucciones del agente"
+            description="Guía que sigue el agente en cada llamada. Solo un administrador puede modificarla."
+          >
+            {promptField}
+          </AdvancedSection>
+        ) : (
+          promptField
+        )}
 
-          <div>
-            <label className={labelClass}>
-              Primer mensaje
-              <span className="ml-1.5 text-xs text-text-muted font-normal">
-                Lo primero que dira el agente al iniciar la conversacion
-              </span>
-            </label>
+        <Field
+          label="Saludo inicial"
+          help={
+            isClient
+              ? 'Lo primero que escucha quien llama. Solo un administrador puede modificarlo.'
+              : 'Lo primero que escucha quien llama.'
+          }
+        >
+          {(control) => (
             <textarea
+              {...control}
               rows={3}
-              placeholder="Hola, en que puedo ayudarte hoy?"
-              className={`${inputClass} ${
-                isClient ? 'cursor-not-allowed bg-[#fafafa] text-text-secondary' : ''
-              }`}
+              placeholder="Hola, gracias por llamar. ¿En qué puedo ayudarle?"
+              className={`${textareaClass} ${isClient ? readOnlyInputClass : ''}`}
               readOnly={isClient}
               {...register('first_message')}
             />
-            {isClient && (
-              <p className="mt-1 text-xs text-text-muted">
-                Este saludo está bloqueado por política para cliente final.
-              </p>
-            )}
-          </div>
+          )}
+        </Field>
+      </section>
 
-          <div className="space-y-4 rounded-xl border border-border-default bg-[#f8f7ff] p-4">
-            <div>
-              <p className="text-sm font-medium text-text-primary">Escalacion y WhatsApp</p>
-              <p className="mt-1 text-xs text-text-secondary">
-                Permite que este agente escale por llamada o por WhatsApp segun tu configuracion.
-              </p>
-            </div>
+      <section aria-labelledby={`${promptId}-handoff`} className="space-y-6 border-t border-border-default pt-8">
+        <SectionHeading
+          id={`${promptId}-handoff`}
+          title="Transferencia a una persona"
+          description="Cuando quien llama pide hablar con alguien del equipo, el agente lo transfiere por el canal que usted elija."
+        />
 
-            <label className="inline-flex items-center gap-2 rounded-lg bg-surface px-3 py-2 text-sm text-text-primary">
-              <input
-                type="checkbox"
-                checked={runtimeForm.whatsapp_enabled}
+        <div className="flex items-start gap-3">
+          <input
+            id={whatsappId}
+            type="checkbox"
+            checked={runtimeForm.whatsapp_enabled}
+            onChange={(event) =>
+              setRuntimeForm((prev) => ({
+                ...prev,
+                whatsapp_enabled: event.target.checked,
+              }))
+            }
+            className="mt-0.5 h-4 w-4 shrink-0 accent-primary-600"
+          />
+          <label htmlFor={whatsappId} className="text-sm text-text-primary">
+            Permitir la transferencia por WhatsApp
+          </label>
+        </div>
+
+        <div className="grid gap-5 md:grid-cols-2">
+          <Field label="Canal principal">
+            {(control) => (
+              <select
+                {...control}
+                className={inputClass}
+                value={runtimeForm.default_escalation_channel}
                 onChange={(event) =>
                   setRuntimeForm((prev) => ({
                     ...prev,
-                    whatsapp_enabled: event.target.checked,
+                    default_escalation_channel:
+                      event.target.value === 'whatsapp' ? 'whatsapp' : 'phone',
+                  }))
+                }
+              >
+                <option value="phone">Llamada telefónica</option>
+                <option value="whatsapp">WhatsApp</option>
+              </select>
+            )}
+          </Field>
+
+          <Field label="Número para transferir llamadas" help="Incluya el indicativo del país, por ejemplo +57.">
+            {(control) => (
+              <input
+                {...control}
+                type="tel"
+                inputMode="tel"
+                autoComplete="off"
+                className={`${inputClass} tabular-nums`}
+                placeholder="+573001234567"
+                value={runtimeForm.escalation_phone_number}
+                onChange={(event) =>
+                  setRuntimeForm((prev) => ({
+                    ...prev,
+                    escalation_phone_number: event.target.value,
                   }))
                 }
               />
-              Habilitar escalacion via WhatsApp
-            </label>
+            )}
+          </Field>
+        </div>
 
-            <div className="grid gap-4 md:grid-cols-2">
-              <label className="flex flex-col gap-1.5 text-sm font-medium text-text-primary">
-                Canal de escalacion por defecto
-                <select
-                  className={selectClass}
-                  value={runtimeForm.default_escalation_channel}
-                  onChange={(event) =>
-                    setRuntimeForm((prev) => ({
-                      ...prev,
-                      default_escalation_channel:
-                        event.target.value === 'whatsapp' ? 'whatsapp' : 'phone',
-                    }))
-                  }
-                >
-                  <option value="phone">Llamada telefonica</option>
-                  <option value="whatsapp">WhatsApp</option>
-                </select>
-              </label>
-
-              <label className="flex flex-col gap-1.5 text-sm font-medium text-text-primary">
-                Numero de transferencia (phone)
-                <input
-                  type="text"
-                  className={inputClass}
-                  placeholder="+573001234567"
-                  value={runtimeForm.escalation_phone_number}
-                  onChange={(event) =>
-                    setRuntimeForm((prev) => ({
-                      ...prev,
-                      escalation_phone_number: event.target.value,
-                    }))
-                  }
-                />
-              </label>
-            </div>
-
-            <div className="flex justify-end">
-              <button
-                type="button"
-                onClick={() => saveRuntimeConfig()}
-                disabled={isSavingRuntimeConfig || !hasRuntimeChanges}
-                className="inline-flex items-center gap-2 rounded-xl bg-primary-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-primary-700 disabled:opacity-50"
-              >
-                {isSavingRuntimeConfig ? 'Guardando...' : 'Guardar escalacion'}
-              </button>
-            </div>
-          </div>
-
-          {!isClient && (
-            <div className="flex items-center justify-between gap-4 rounded-xl border border-border-default bg-surface p-4">
-              <div>
-                <p className="text-sm font-medium text-text-primary">Ignorar personalidad por defecto</p>
-                <p className="mt-1 text-xs text-text-tertiary">
-                  El agente no adoptara la personalidad amigable predeterminada de la plataforma
-                </p>
-              </div>
-              <TogglePill
-                enabled={Boolean(ignorePersonality)}
-                onClick={() =>
-                  setValue('ignore_default_personality', !ignorePersonality, {
-                    shouldDirty: true,
-                  })
-                }
-              />
-            </div>
-          )}
+        <div className="flex justify-end">
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => saveRuntimeConfig()}
+            isLoading={isSavingRuntimeConfig}
+            disabled={!hasRuntimeChanges}
+          >
+            {isSavingRuntimeConfig ? 'Guardando…' : 'Guardar transferencia'}
+          </Button>
         </div>
       </section>
 
-      <section className="border-t border-border-default pt-8">
-        <SectionHeader
-          icon={SpeakerWaveIcon}
-          title="Voz"
-          description="Configura la voz, su modelo TTS y los parametros finos de expresividad."
+      <section aria-labelledby={`${promptId}-voice`} className="space-y-6 border-t border-border-default pt-8">
+        <SectionHeading
+          id={`${promptId}-voice`}
+          title="Voz e idioma"
+          description="Cómo suena el agente y en qué idioma atiende."
         />
 
-        <div className="space-y-6">
-          <div>
-            <p className="mb-2 text-sm font-medium text-text-primary">Seleccion de voz</p>
-            <div className="flex items-start gap-3">
-              <div className="relative flex-1">
+        <Field
+          label="Voz"
+          help={
+            voicesError
+              ? 'No pudimos cargar el catálogo de voces. El servicio de voz no está disponible en este momento.'
+              : undefined
+          }
+        >
+          {(control) => (
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+              <select
+                {...control}
+                className={`${inputClass} sm:flex-1`}
+                disabled={loadingVoices}
+                name={voiceField.name}
+                ref={voiceField.ref}
+                onBlur={voiceField.onBlur}
+                value={selectedVoiceId ?? ''}
+                onChange={(e) => {
+                  voiceField.onChange(e)
+                  setValue('voice_id', e.target.value, { shouldDirty: true })
+                }}
+              >
+                <option value="">{loadingVoices ? 'Cargando voces…' : 'Elija una voz'}</option>
+                {voices.map((v) => (
+                  <option key={v.voice_id} value={v.voice_id}>
+                    {v.name}
+                    {v.category ? ` · ${v.category}` : ''}
+                  </option>
+                ))}
+              </select>
+              <Button
+                type="button"
+                variant="outline"
+                className="sm:min-w-40"
+                disabled={!selectedVoiceId}
+                isLoading={previewing}
+                onClick={handleVoicePreview}
+                leftIcon={<PlayIcon className="h-4 w-4" aria-hidden="true" />}
+              >
+                {previewing ? 'Reproduciendo…' : 'Escuchar muestra'}
+              </Button>
+            </div>
+          )}
+        </Field>
+
+        <Field
+          label="Idioma"
+          help={
+            autoLanguageDetection
+              ? isClient
+                ? 'El agente detecta automáticamente el idioma de quien llama.'
+                : 'El agente detecta el idioma automáticamente. Desactive la detección en la configuración avanzada para fijar uno.'
+              : undefined
+          }
+        >
+          {(control) => (
+            <select
+              {...control}
+              className={`${inputClass} md:max-w-sm`}
+              disabled={Boolean(autoLanguageDetection)}
+              name={languageField.name}
+              ref={languageField.ref}
+              onBlur={languageField.onBlur}
+              value={watch('language') ?? 'es'}
+              onChange={(e) => {
+                languageField.onChange(e)
+                setValue('language', e.target.value, { shouldDirty: true })
+              }}
+            >
+              {SUPPORTED_LANGUAGES.map((lang) => (
+                <option key={lang.value} value={lang.value}>
+                  {lang.label}
+                </option>
+              ))}
+            </select>
+          )}
+        </Field>
+      </section>
+
+      {!isClient && (
+        <AdvancedSection
+          defaultOpen
+          description="Modelo de IA, motor de voz y tiempos de la conversación."
+        >
+          <div className="space-y-5">
+            <h3 className={subsectionTitleClass}>Modelo de IA</h3>
+            <Field label="Modelo" help={llmDescription}>
+              {(control) => (
                 <select
-                  className={selectClass}
-                  disabled={loadingVoices}
-                  name={voiceField.name}
-                  ref={voiceField.ref}
-                  onBlur={voiceField.onBlur}
-                  value={selectedVoiceId ?? ''}
+                  {...control}
+                  className={`${inputClass} md:max-w-sm`}
+                  name={llmField.name}
+                  ref={llmField.ref}
+                  onBlur={llmField.onBlur}
+                  value={selectedLlm ?? 'gemini-2.5-flash'}
                   onChange={(e) => {
-                    voiceField.onChange(e)
-                    setValue('voice_id', e.target.value, { shouldDirty: true })
+                    llmField.onChange(e)
+                    setValue('llm', e.target.value, { shouldDirty: true })
                   }}
                 >
-                  <option value="">
-                    {loadingVoices ? 'Cargando voces...' : 'Seleccionar voz'}
-                  </option>
-                  {voices.map((v) => (
-                    <option key={v.voice_id} value={v.voice_id}>
-                      {v.name}
-                      {v.category ? ` · ${v.category}` : ''}
+                  {SUPPORTED_LLMS.map((llm) => (
+                    <option key={llm.value} value={llm.value}>
+                      {llm.label}
                     </option>
                   ))}
                 </select>
-                <div className="pointer-events-none absolute inset-y-0 right-3 flex items-center">
-                  <ChevronDown />
-                </div>
-              </div>
-              <button
-                type="button"
-                disabled={!selectedVoiceId || previewing}
-                onClick={handleVoicePreview}
-                className="inline-flex h-10.5 min-w-35 items-center justify-center gap-2 rounded-xl border border-[#271173]/30 bg-surface px-3 text-sm font-medium text-primary-600 transition-colors hover:bg-primary-50/60 disabled:cursor-not-allowed disabled:opacity-55"
-              >
-                {previewing ? (
-                  <>
-                    <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-[#271173]/30 border-t-[#271173]" />
-                    Reproduciendo...
-                  </>
-                ) : (
-                  'Previsualizar'
-                )}
-              </button>
-            </div>
-            {selectedVoice && (
-              <div className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-border-default bg-[#f5f3ff] px-2.5 py-1 text-xs text-text-primary/70">
-                <SpeakerWaveIcon className="h-3 w-3 text-primary-600" />
-                <span>{selectedVoice.name}</span>
-              </div>
-            )}
+              )}
+            </Field>
+
+            <SliderField
+              label="Creatividad de las respuestas"
+              description="Valores altos dan respuestas más variadas; valores bajos, más precisas."
+              displayValue={llmTemperature.toFixed(2)}
+              minLabel="Precisa"
+              maxLabel="Creativa"
+              min={0}
+              max={1}
+              step={0.05}
+              {...register('llm_temperature', { valueAsNumber: true })}
+            />
+
+            <Field
+              label="Longitud máxima de respuesta"
+              help="Límite de extensión de cada respuesta, medido en tokens del modelo. Use -1 para no limitarla."
+            >
+              {(control) => (
+                <input
+                  {...control}
+                  type="number"
+                  min={-1}
+                  max={8192}
+                  step={256}
+                  className={`${inputClass} tabular-nums md:max-w-xs`}
+                  {...register('max_tokens', { valueAsNumber: true })}
+                />
+              )}
+            </Field>
           </div>
 
-          {!isClient && (
-            <div>
-              <label className={labelClass}>Modelo TTS</label>
-              <div className="relative">
+          <div className="space-y-5 border-t border-border-default pt-5">
+            <h3 className={subsectionTitleClass}>Motor de voz</h3>
+            <Field label="Modelo de voz">
+              {(control) => (
                 <select
-                  className={selectClass}
+                  {...control}
+                  className={`${inputClass} md:max-w-md`}
                   name={ttsModelField.name}
                   ref={ttsModelField.ref}
                   onBlur={ttsModelField.onBlur}
@@ -476,297 +481,107 @@ export default function AgentTab({
                     </option>
                   ))}
                 </select>
-                <div className="pointer-events-none absolute inset-y-0 right-3 flex items-center">
-                  <ChevronDown />
-                </div>
-              </div>
-              <div className="mt-2 inline-flex rounded-full bg-primary-50 px-2 py-1 text-xs text-primary-600">
-                {selectedTtsDescription}
-              </div>
-            </div>
-          )}
+              )}
+            </Field>
 
-          {!isClient && (
-          <div className="space-y-5 rounded-xl border border-border-default bg-surface p-4">
-            <p className="text-sm font-medium text-text-primary">Parametros de voz</p>
-
-            <div>
-              <div className="mb-2 flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-text-primary">Estabilidad</p>
-                  <p className="text-xs text-text-tertiary">Mayor = mas uniforme, menos expresivo</p>
-                </div>
-                <span className="min-w-12 rounded-lg bg-primary-50 px-2.5 py-1 text-center text-sm font-semibold text-primary-600">
-                  {stability.toFixed(2)}
-                </span>
-              </div>
-              <input
-                type="range"
+            <div className="grid gap-6 md:grid-cols-2">
+              <SliderField
+                label="Estabilidad"
+                description="Más alta: voz más uniforme y menos expresiva."
+                displayValue={stability.toFixed(2)}
+                minLabel="Variable"
+                maxLabel="Estable"
                 min={0}
                 max={1}
                 step={0.01}
-                className="w-full h-1.5 rounded-full appearance-none bg-[#e4e0f5] [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary-600 [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:shadow-md"
                 {...register('stability', { valueAsNumber: true })}
               />
-              <div className="mt-1 flex justify-between text-xs text-text-primary/40">
-                <span>Variable</span>
-                <span>Estable</span>
-              </div>
-            </div>
-
-            <div>
-              <div className="mb-2 flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-text-primary">Claridad y similitud</p>
-                  <p className="text-xs text-text-tertiary">Que tanto adherirse a la voz original</p>
-                </div>
-                <span className="min-w-12 rounded-lg bg-primary-50 px-2.5 py-1 text-center text-sm font-semibold text-primary-600">
-                  {similarityBoost.toFixed(2)}
-                </span>
-              </div>
-              <input
-                type="range"
+              <SliderField
+                label="Fidelidad a la voz original"
+                description="Qué tanto se parece a la voz de referencia."
+                displayValue={similarityBoost.toFixed(2)}
+                minLabel="Libre"
+                maxLabel="Fiel"
                 min={0}
                 max={1}
                 step={0.01}
-                className="w-full h-1.5 rounded-full appearance-none bg-[#e4e0f5] [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary-600 [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:shadow-md"
                 {...register('similarity_boost', { valueAsNumber: true })}
               />
-              <div className="mt-1 flex justify-between text-xs text-text-primary/40">
-                <span>Libre</span>
-                <span>Fiel</span>
-              </div>
-            </div>
-
-            <div>
-              <div className="mb-2 flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-text-primary">Exageracion de estilo</p>
-                  <p className="text-xs text-text-tertiary">Amplifica el estilo del hablante</p>
-                </div>
-                <span className="min-w-12 rounded-lg bg-primary-50 px-2.5 py-1 text-center text-sm font-semibold text-primary-600">
-                  {style.toFixed(2)}
-                </span>
-              </div>
-              <input
-                type="range"
+              <SliderField
+                label="Intensidad del estilo"
+                description="Acentúa el estilo propio de la voz."
+                displayValue={style.toFixed(2)}
+                minLabel="Neutra"
+                maxLabel="Marcada"
                 min={0}
                 max={1}
                 step={0.01}
-                className="w-full h-1.5 rounded-full appearance-none bg-[#e4e0f5] [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary-600 [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:shadow-md"
                 {...register('style', { valueAsNumber: true })}
               />
-              <div className="mt-1 flex justify-between text-xs text-text-primary/40">
-                <span>Neutro</span>
-                <span>Exagerado</span>
-              </div>
-            </div>
-
-            <div>
-              <div className="mb-2 flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-text-primary">Velocidad de habla</p>
-                  <p className="text-xs text-text-tertiary">Velocidad del agente al hablar</p>
-                </div>
-                <span className="min-w-12 rounded-lg bg-primary-50 px-2.5 py-1 text-center text-sm font-semibold text-primary-600">
-                  {speed.toFixed(2)}
-                </span>
-              </div>
-              <input
-                type="range"
+              <SliderField
+                label="Velocidad al hablar"
+                displayValue={`${speed.toFixed(2)}×`}
+                minLabel="Lenta"
+                maxLabel="Rápida"
                 min={0.7}
                 max={1.2}
                 step={0.05}
-                className="w-full h-1.5 rounded-full appearance-none bg-[#e4e0f5] [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary-600 [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:shadow-md"
                 {...register('speed', { valueAsNumber: true })}
               />
-              <div className="mt-1 flex justify-between text-xs text-text-primary/40">
-                <span>Lento</span>
-                <span>Rapido</span>
-              </div>
             </div>
-
           </div>
-          )}
-        </div>
-      </section>
 
-      <section className="border-t border-border-default pt-8">
-        <SectionHeader
-          icon={LanguageIcon}
-          title="Idioma y LLM"
-          description="Configura idioma principal, modelo de lenguaje y parametros de generacion."
-        />
-
-        <div className="space-y-5">
-          <div className={isClient ? '' : 'grid grid-cols-1 gap-4 md:grid-cols-2'}>
-            <div>
-              <label className={labelClass}>Idioma</label>
-              <div className="relative">
-                <select
-                  className={`${selectClass} ${autoLanguageDetection ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  disabled={Boolean(autoLanguageDetection)}
-                  name={languageField.name}
-                  ref={languageField.ref}
-                  onBlur={languageField.onBlur}
-                  value={watch('language') ?? 'es'}
-                  onChange={(e) => {
-                    languageField.onChange(e)
-                    setValue('language', e.target.value, { shouldDirty: true })
-                  }}
-                >
-                  {SUPPORTED_LANGUAGES.map((lang) => (
-                    <option key={lang.value} value={lang.value}>
-                      {lang.label}
-                    </option>
-                  ))}
-                </select>
-                <div className="pointer-events-none absolute inset-y-0 right-3 flex items-center">
-                  <ChevronDown />
-                </div>
-              </div>
-              {autoLanguageDetection && !isClient && (
-                <p className="mt-1 text-xs text-text-muted">
-                  Desactiva la deteccion automatica para fijar un idioma.
-                </p>
+          <div className="space-y-5 border-t border-border-default pt-5">
+            <h3 className={subsectionTitleClass}>Conversación</h3>
+            <SwitchField
+              label="Detección automática de idioma"
+              description="El agente responde en el idioma de quien llama."
+              checked={Boolean(autoLanguageDetection)}
+              onChange={(next) =>
+                setValue('auto_language_detection', next, {
+                  shouldDirty: true,
+                })
+              }
+            />
+            <Field
+              label="Espera de silencio antes de responder"
+              help="En milisegundos. Entre 200 y 3000; valores bajos hacen que el agente responda antes."
+            >
+              {(control) => (
+                <input
+                  {...control}
+                  type="number"
+                  min={200}
+                  max={3000}
+                  step={100}
+                  className={`${inputClass} tabular-nums md:max-w-xs`}
+                  {...register('silence_end_timeout_ms', { valueAsNumber: true })}
+                />
               )}
-            </div>
-
-            {!isClient && (
-              <div>
-                <label className={labelClass}>Modelo de lenguaje (LLM)</label>
-                <div className="relative">
-                  <select
-                    className={selectClass}
-                    name={llmField.name}
-                    ref={llmField.ref}
-                    onBlur={llmField.onBlur}
-                    value={selectedLlm ?? 'gemini-2.5-flash'}
-                    onChange={(e) => {
-                      llmField.onChange(e)
-                      setValue('llm', e.target.value, { shouldDirty: true })
-                    }}
-                  >
-                    {SUPPORTED_LLMS.map((llm) => (
-                      <option key={llm.value} value={llm.value}>
-                        {llm.label}
-                      </option>
-                    ))}
-                  </select>
-                  <div className="pointer-events-none absolute inset-y-0 right-3 flex items-center">
-                    <ChevronDown />
-                  </div>
-                </div>
-                <p className="mt-1.5 text-xs text-text-tertiary">{llmDescription}</p>
-              </div>
-            )}
-          </div>
-
-          {!isClient && (
-            <div>
-              <div className="mb-2 flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-text-primary">Temperatura</p>
-                  <p className="text-xs text-text-tertiary">Mayor = respuestas mas creativas y variadas</p>
-                </div>
-                <span className="min-w-12 rounded-lg bg-primary-50 px-2.5 py-1 text-center text-sm font-semibold text-primary-600">
-                  {llmTemperature.toFixed(2)}
-                </span>
-              </div>
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.05}
-                className="w-full h-1.5 rounded-full appearance-none bg-[#e4e0f5] [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary-600 [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:shadow-md"
-                {...register('llm_temperature', { valueAsNumber: true })}
-              />
-              <div className="mt-1 flex justify-between text-xs text-text-primary/40">
-                <span>Preciso</span>
-                <span>Creativo</span>
-              </div>
-            </div>
-          )}
-
-          {!isClient && (
-            <div>
-              <label className={labelClass}>Maximo de tokens</label>
-              <p className="mb-2 text-xs text-text-tertiary">Limite de tokens por respuesta del LLM</p>
-              <input
-                type="number"
-                min={-1}
-                max={8192}
-                step={256}
-                className={inputClass}
-                {...register('max_tokens', { valueAsNumber: true })}
-              />
-            </div>
-          )}
-        </div>
-      </section>
-
-      {!isClient && (
-      <section className="border-t border-border-default pt-8">
-        <SectionHeader
-          icon={ChatBubbleLeftRightIcon}
-          title="Conversacion"
-          description="Ajusta deteccion de idioma, tiempos de respuesta y grabacion de llamadas."
-        />
-
-        <div className="space-y-4">
-          <div className="flex items-center justify-between gap-4 rounded-xl border border-border-default bg-surface p-4">
-            <div>
-              <p className="text-sm font-medium text-text-primary">Deteccion de idioma automatica</p>
-              <p className="mt-1 text-xs text-text-tertiary">
-                El agente detecta el idioma del usuario automaticamente
-              </p>
-            </div>
-            <TogglePill
-              enabled={Boolean(autoLanguageDetection)}
-              onClick={() =>
-                setValue('auto_language_detection', !autoLanguageDetection, {
+            </Field>
+            <SwitchField
+              label="Grabar llamadas"
+              description="Guarda el audio de las conversaciones para revisarlas en Análisis."
+              checked={Boolean(callRecordingEnabled)}
+              onChange={(next) =>
+                setValue('call_recording_enabled', next, {
+                  shouldDirty: true,
+                })
+              }
+            />
+            <SwitchField
+              label="Ignorar la personalidad predeterminada"
+              description="El agente no adopta el tono amable que la plataforma aplica por defecto."
+              checked={Boolean(ignorePersonality)}
+              onChange={(next) =>
+                setValue('ignore_default_personality', next, {
                   shouldDirty: true,
                 })
               }
             />
           </div>
-
-          <div>
-            <label className={labelClass}>Silencio maximo (ms)</label>
-            <p className="mb-2 text-xs text-text-tertiary">
-              Tiempo de silencio tras el cual el agente responde
-            </p>
-            <input
-              type="number"
-              min={200}
-              max={3000}
-              step={100}
-              className={inputClass}
-              {...register('silence_end_timeout_ms', { valueAsNumber: true })}
-            />
-          </div>
-
-          <div className="flex items-center justify-between gap-4 rounded-xl border border-border-default bg-surface p-4">
-            <div>
-              <p className="text-sm font-medium text-text-primary">Grabacion de llamadas</p>
-              <p className="mt-1 text-xs text-text-tertiary">
-                Guarda el audio de las conversaciones en la plataforma
-              </p>
-            </div>
-            <TogglePill
-              enabled={Boolean(callRecordingEnabled)}
-              onClick={() =>
-                setValue('call_recording_enabled', !callRecordingEnabled, {
-                  shouldDirty: true,
-                })
-              }
-            />
-          </div>
-        </div>
-      </section>
+        </AdvancedSection>
       )}
     </div>
   )
 }
-
-

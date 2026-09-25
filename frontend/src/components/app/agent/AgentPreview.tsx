@@ -1,15 +1,14 @@
-﻿import { useRef, useState } from 'react'
+import { useId, useRef, useState } from 'react'
 import { getSignedUrl } from '@/api/VoiceRuntimeAPI'
 import {
+  CloudArrowUpIcon,
   PhoneIcon,
   PhoneXMarkIcon,
   SpeakerWaveIcon,
-  MicrophoneIcon,
-} from '@heroicons/react/24/solid'
-import {
-  ExclamationTriangleIcon,
-  CloudArrowUpIcon,
 } from '@heroicons/react/24/outline'
+import Button from '@/components/ui/Button'
+import { cn } from '@/lib/utils'
+import { describeError } from './agentUi'
 
 type Props = {
   agentId: string
@@ -34,11 +33,32 @@ async function loadVoiceSdk(): Promise<VoiceSdkModule> {
   return (await import('@elevenlabs/client')) as unknown as VoiceSdkModule
 }
 
+const CONNECTION_LOST = 'Se interrumpió la conexión con el agente. Intente de nuevo en unos segundos.'
+
+function describeCallError(error: unknown): string {
+  if (error instanceof DOMException) {
+    if (error.name === 'NotAllowedError' || error.name === 'SecurityError') {
+      return 'Permita el uso del micrófono en su navegador e intente de nuevo.'
+    }
+    if (error.name === 'NotFoundError') {
+      return 'No encontramos un micrófono conectado a este equipo.'
+    }
+  }
+  return describeError(error, 'No pudimos iniciar la llamada de prueba. Intente de nuevo.')
+}
+
 export default function AgentPreview({ agentId, agentName, isDirty, onSave }: Props) {
   const [status, setStatus] = useState<ConvStatus>('idle')
   const [errorMsg, setErrorMsg] = useState('')
   const [isSpeaking, setIsSpeaking] = useState(false)
   const convRef = useRef<VoiceConversationSession | null>(null)
+  const headingId = useId()
+
+  const failWith = (message: string) => {
+    setErrorMsg(message)
+    setStatus('error')
+    convRef.current = null
+  }
 
   const handleCall = async () => {
     try {
@@ -56,10 +76,7 @@ export default function AgentPreview({ agentId, agentName, isDirty, onSave }: Pr
       try {
         signedUrl = await getSignedUrl(agentId)
       } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Error al obtener la URL firmada'
-        setErrorMsg(msg)
-        setStatus('error')
-        convRef.current = null
+        failWith(describeError(err, 'No pudimos preparar la llamada de prueba. Intente de nuevo.'))
         return
       }
 
@@ -73,11 +90,7 @@ export default function AgentPreview({ agentId, agentName, isDirty, onSave }: Pr
           setIsSpeaking(false)
           convRef.current = null
         },
-        onError: (msg: string) => {
-          setErrorMsg(msg ?? 'Error de conexion')
-          setStatus('error')
-          convRef.current = null
-        },
+        onError: () => failWith(CONNECTION_LOST),
         onModeChange: ({ mode }: { mode: string }) => {
           setIsSpeaking(mode === 'speaking')
         },
@@ -85,10 +98,7 @@ export default function AgentPreview({ agentId, agentName, isDirty, onSave }: Pr
 
       convRef.current = conv
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Error al iniciar llamada'
-      setErrorMsg(msg)
-      setStatus('error')
-      convRef.current = null
+      failWith(describeCallError(err))
     }
   }
 
@@ -104,176 +114,136 @@ export default function AgentPreview({ agentId, agentName, isDirty, onSave }: Pr
   const isActive = status === 'active'
   const isBusy = status === 'connecting' || status === 'saving'
 
+  const callLabel =
+    status === 'saving'
+      ? 'Guardando…'
+      : status === 'connecting'
+        ? 'Conectando…'
+        : status === 'error'
+          ? 'Intentar de nuevo'
+          : isDirty
+            ? 'Guardar y llamar'
+            : 'Llamar al agente'
+
   return (
-    <div className="flex h-full min-h-0 w-72 shrink-0 flex-col overflow-hidden border-l border-[#e4e0f5] bg-white">
-      {/* Header */}
-      <div className="px-5 py-4 border-b border-[#e4e0f5]">
-        <p className="text-xs font-semibold uppercase tracking-wider text-black/50">
-          Vista previa
-        </p>
-        <p className="text-sm text-black/85 mt-0.5 truncate font-medium">{agentName}</p>
+    <aside
+      aria-labelledby={headingId}
+      className="flex w-full shrink-0 flex-col border-t border-border-default bg-surface lg:h-full lg:min-h-0 lg:w-72 lg:border-l lg:border-t-0 xl:w-80"
+    >
+      <div className="border-b border-border-subtle px-5 py-4">
+        <h2 id={headingId} className="text-sm font-semibold text-text-primary">
+          Prueba de llamada
+        </h2>
+        <p className="mt-0.5 truncate text-sm text-text-secondary">{agentName}</p>
       </div>
 
-      {/* Unsaved changes banner */}
       {isDirty && !isActive && (
-        <div className="mx-3 mt-3 flex shrink-0 items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
-          <ExclamationTriangleIcon className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-          <p className="text-xs text-amber-700 leading-tight">
-            Cambios sin guardar - se guardaran antes de llamar.
-          </p>
-        </div>
+        <p className="mx-5 mt-4 rounded-lg bg-warning-50 px-3 py-2 text-xs leading-relaxed text-warning-700">
+          Hay cambios sin guardar. Se guardarán antes de iniciar la llamada.
+        </p>
       )}
 
-      {/* Orb */}
-      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-6 px-5">
-        <div className="relative flex items-center justify-center">
-          {isActive && (
-            <>
-              <div
-                className="absolute rounded-full bg-[#271173]/8 animate-ping"
-                style={{ width: 134, height: 134 }}
-              />
-              <div
-                className="absolute rounded-full bg-[#271173]/10 animate-pulse"
-                style={{ width: 110, height: 110 }}
-              />
-            </>
+      <div className="flex flex-col items-center justify-center gap-4 px-5 py-8 lg:min-h-0 lg:flex-1">
+        <div
+          aria-hidden="true"
+          className={cn(
+            'flex h-20 w-20 items-center justify-center rounded-full transition-colors duration-300',
+            isActive
+              ? 'bg-primary-600 text-text-inverse'
+              : isBusy
+                ? 'bg-primary-100 text-primary-700'
+                : 'bg-primary-50 text-primary-600',
           )}
-          <div
-            className={`relative w-24 h-24 rounded-full flex items-center justify-center transition-all duration-500 ${
-              isActive
-                ? 'bg-[#271173] shadow-lg shadow-[#271173]/25'
-                : isBusy
-                ? 'bg-[#271173]/60 animate-pulse'
-                : 'bg-[#ede9ff]'
-            }`}
-          >
-            {isActive ? (
-              <SpeakerWaveIcon
-                className={`w-10 h-10 text-white transition-all duration-300 ${
-                  isSpeaking ? 'scale-110' : 'scale-90 opacity-70'
-                }`}
-              />
-            ) : status === 'saving' ? (
-              <CloudArrowUpIcon className="w-10 h-10 text-[#271173] animate-pulse" />
-            ) : (
-              <PhoneIcon
-                className={`w-10 h-10 transition-colors ${
-                  isBusy ? 'text-[#271173]' : 'text-[#271173]/60'
-                }`}
-              />
-            )}
-          </div>
+        >
+          {isActive ? (
+            <SpeakerWaveIcon
+              className={cn(
+                'h-9 w-9 transition-transform duration-300 motion-reduce:transition-none',
+                isSpeaking ? 'scale-110' : 'scale-95 opacity-80',
+              )}
+            />
+          ) : status === 'saving' ? (
+            <CloudArrowUpIcon className="h-9 w-9" />
+          ) : (
+            <PhoneIcon className="h-9 w-9" />
+          )}
         </div>
 
-        {/* Status label */}
-        <div className="text-center space-y-1">
+        <div role="status" aria-live="polite" className="max-w-60 space-y-1 text-center">
           {status === 'idle' && (
             <>
-              <p className="text-black/80 text-sm font-medium">Listo para llamar</p>
-              <p className="text-black/45 text-xs">
-                {isDirty ? 'Se guardara antes de llamar' : 'Prueba el agente en tiempo real'}
+              <p className="text-sm font-medium text-text-primary">Listo para probar</p>
+              <p className="text-xs leading-relaxed text-text-tertiary">
+                {isDirty
+                  ? 'Guardaremos sus cambios antes de llamar.'
+                  : 'Hable con el agente como lo haría uno de sus clientes.'}
               </p>
             </>
           )}
           {status === 'saving' && (
             <>
-              <p className="text-[#271173] text-sm font-medium">Guardando cambios...</p>
-              <p className="text-black/45 text-xs">Aplicando configuracion</p>
+              <p className="text-sm font-medium text-primary-700">Guardando cambios…</p>
+              <p className="text-xs text-text-tertiary">Un momento, por favor.</p>
             </>
           )}
           {status === 'connecting' && (
             <>
-              <p className="text-[#271173] text-sm font-medium">Conectando...</p>
-              <p className="text-black/45 text-xs">Iniciando sesion de voz</p>
+              <p className="text-sm font-medium text-primary-700">Conectando…</p>
+              <p className="text-xs text-text-tertiary">Preparando la llamada de prueba.</p>
             </>
           )}
           {status === 'active' && (
             <>
-              <p className="text-emerald-600 text-sm font-medium flex items-center gap-1.5 justify-center">
-                <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse inline-block" />
+              <p className="flex items-center justify-center gap-1.5 text-sm font-medium text-success-700">
+                <span aria-hidden="true" className="inline-block h-2 w-2 rounded-full bg-success-500" />
                 En llamada
               </p>
-              <p className="text-black/50 text-xs">
-                {isSpeaking ? 'Agente hablando...' : 'Escuchando...'}
+              <p className="text-xs text-text-tertiary">
+                {isSpeaking ? 'El agente está hablando.' : 'El agente le escucha.'}
               </p>
             </>
           )}
           {status === 'error' && (
             <>
-              <p className="text-red-500 text-sm font-medium flex items-center gap-1.5 justify-center">
-                <ExclamationTriangleIcon className="w-4 h-4" />
-                Error
-              </p>
-              <p className="text-black/50 text-xs max-w-45 text-center leading-relaxed">
-                {errorMsg}
-              </p>
+              <p className="text-sm font-medium text-danger-700">No se pudo iniciar la llamada</p>
+              <p className="text-xs leading-relaxed text-text-secondary">{errorMsg}</p>
             </>
           )}
         </div>
-
-        {/* Mic waveform */}
-        {isActive && (
-          <div className="flex items-center gap-2 bg-[#f5f3ff] border border-[#e4e0f5] rounded-xl px-3 py-2">
-            <MicrophoneIcon className="w-3.5 h-3.5 text-[#271173]" />
-            <div className="flex items-end gap-0.5 h-4">
-              {[...Array(5)].map((_, i) => (
-                <div
-                  key={i}
-                  className="w-1 bg-[#271173] rounded-full animate-pulse"
-                  style={{
-                    height: `${40 + i * 12}%`,
-                    animationDelay: `${i * 120}ms`,
-                    minHeight: '3px',
-                  }}
-                />
-              ))}
-            </div>
-            <span className="text-xs text-black/50">Microfono activo</span>
-          </div>
-        )}
       </div>
 
-      {/* Buttons */}
-      <div className="px-5 py-5 border-t border-[#e4e0f5] space-y-2">
+      <div className="space-y-2 border-t border-border-subtle px-5 py-4">
         {!isActive ? (
-          <button
+          <Button
+            type="button"
+            className="w-full"
             onClick={handleCall}
-            disabled={isBusy}
-            className="w-full flex items-center justify-center gap-2.5 bg-[#271173] hover:bg-[#1f0d5a] text-white py-3 rounded-xl text-sm font-medium transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+            isLoading={isBusy}
+            leftIcon={
+              isDirty ? (
+                <CloudArrowUpIcon className="h-4 w-4" aria-hidden="true" />
+              ) : (
+                <PhoneIcon className="h-4 w-4" aria-hidden="true" />
+              )
+            }
           >
-            {isBusy ? (
-              <>
-                <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-                {status === 'saving' ? 'Guardando...' : 'Conectando...'}
-              </>
-            ) : (
-              <>
-                {isDirty ? (
-                  <CloudArrowUpIcon className="w-4 h-4" />
-                ) : (
-                  <PhoneIcon className="w-4 h-4" />
-                )}
-                {status === 'error'
-                  ? 'Reintentar'
-                  : isDirty
-                  ? 'Guardar y llamar'
-                  : 'Llamar al agente'}
-              </>
-            )}
-          </button>
+            {callLabel}
+          </Button>
         ) : (
-          <button
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full"
             onClick={handleHangup}
-            className="w-full flex items-center justify-center gap-2.5 bg-red-500 hover:bg-red-600 text-white py-3 rounded-xl text-sm font-medium transition-colors"
+            leftIcon={<PhoneXMarkIcon className="h-4 w-4" aria-hidden="true" />}
           >
-            <PhoneXMarkIcon className="w-4 h-4" />
-            Colgar
-          </button>
+            Terminar llamada
+          </Button>
         )}
-        <p className="text-center text-xs text-black/40">Requiere microfono habilitado</p>
+        <p className="text-center text-xs text-text-tertiary">
+          Su navegador le pedirá permiso para usar el micrófono.
+        </p>
       </div>
-    </div>
+    </aside>
   )
 }
-

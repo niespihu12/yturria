@@ -1,14 +1,12 @@
-import { useRef, useState } from 'react'
+import { useId, useRef, useState, type DragEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'react-toastify'
 import {
   ArrowPathIcon,
-  CheckCircleIcon,
   CloudArrowUpIcon,
   DocumentTextIcon,
-  ExclamationCircleIcon,
   TrashIcon,
-  ClockIcon,
+  XMarkIcon,
 } from '@heroicons/react/24/outline'
 import {
   attachKnowledgeBaseDocument,
@@ -19,49 +17,52 @@ import {
   reindexKnowledgeBaseDocument,
 } from '@/api/TextAgentsAPI'
 import type { TextKnowledgeBaseDocument } from '@/types/textAgent'
+import Badge from '@/components/ui/Badge'
+import Button from '@/components/ui/Button'
+import { useConfirm } from '@/components/ui/ConfirmDialog'
+import { useCurrentUser } from '@/hooks/useCurrentUser'
+import { KNOWLEDGE_ACCEPT, KNOWLEDGE_ACCEPT_LABEL, friendlyUploadError } from '../copy'
 
 type Props = {
   agentId: string
   attachedDocuments: TextKnowledgeBaseDocument[]
 }
 
-const ACCEPTED = '.txt,.md,.json,.csv,.html,.xml'
-const ACCEPTED_LABEL = 'TXT · MD · JSON · CSV · HTML · XML'
+type UploadIssue = { key: string; fileName: string; message: string }
 
-function IndexStatusBadge({ status }: { status: TextKnowledgeBaseDocument['index_status'] }) {
+function StatusBadge({ status }: { status: TextKnowledgeBaseDocument['index_status'] }) {
   if (status === 'indexed')
     return (
-      <span className="flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
-        <CheckCircleIcon className="h-3 w-3" />
-        Indexado
-      </span>
+      <Badge variant="success" size="sm">
+        Listo
+      </Badge>
     )
   if (status === 'indexing')
     return (
-      <span className="flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
-        <ClockIcon className="h-3 w-3 animate-pulse" />
-        Indexando...
-      </span>
+      <Badge variant="info" size="sm">
+        Procesando…
+      </Badge>
     )
   return (
-    <span className="flex items-center gap-1 rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-semibold text-rose-700">
-      <ExclamationCircleIcon className="h-3 w-3" />
-      Error
-    </span>
+    <Badge variant="warning" size="sm">
+      No se pudo procesar
+    </Badge>
   )
 }
-
-
 
 export default function TextAgentKnowledgeBaseTab({ agentId, attachedDocuments }: Props) {
   const queryClient = useQueryClient()
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const fileInputId = useId()
   const [isDragging, setIsDragging] = useState(false)
   const [uploading, setUploading] = useState<string[]>([])
+  const [issues, setIssues] = useState<UploadIssue[]>([])
+  const [confirm, confirmDialog] = useConfirm()
+  const { isSuperAdmin } = useCurrentUser()
 
   const attachedIds = new Set(attachedDocuments.map((d) => d.id))
 
-  const { data } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ['text-kb-documents'],
     queryFn: listTextKnowledgeBaseDocuments,
   })
@@ -77,7 +78,7 @@ export default function TextAgentKnowledgeBaseTab({ agentId, attachedDocuments }
     mutationFn: ({ docId, mode }: { docId: string; mode: 'auto' | 'prompt' }) =>
       attachKnowledgeBaseDocument(agentId, docId, mode),
     onSuccess: () => {
-      toast.success('Documento adjuntado al agente')
+      toast.success('Documento actualizado en este agente')
       refresh()
     },
     onError: (e: Error) => toast.error(e.message),
@@ -86,7 +87,7 @@ export default function TextAgentKnowledgeBaseTab({ agentId, attachedDocuments }
   const { mutate: detachDoc } = useMutation({
     mutationFn: (docId: string) => detachKnowledgeBaseDocument(agentId, docId),
     onSuccess: () => {
-      toast.success('Documento retirado del agente')
+      toast.success('El agente ya no usará este documento')
       refresh()
     },
     onError: (e: Error) => toast.error(e.message),
@@ -104,22 +105,22 @@ export default function TextAgentKnowledgeBaseTab({ agentId, attachedDocuments }
   const { mutate: reindex } = useMutation({
     mutationFn: (docId: string) => reindexKnowledgeBaseDocument(docId),
     onSuccess: () => {
-      toast.success('Documento re-indexado')
+      toast.success('Estamos procesando el documento de nuevo')
       refresh()
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => toast.error(friendlyUploadError(e)),
   })
 
   async function uploadFile(file: File) {
-    const key = file.name + Date.now()
+    const key = `${file.name}-${Date.now()}`
     setUploading((prev) => [...prev, key])
     try {
       const doc = await createTextKnowledgeBaseDocumentFromFile(file, file.name)
       await attachKnowledgeBaseDocument(agentId, doc.id, 'auto')
-      toast.success(`"${file.name}" subido e indexado`)
+      toast.success(`«${file.name}» ya está disponible para el agente`)
       refresh()
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Error al subir archivo')
+      setIssues((prev) => [...prev, { key, fileName: file.name, message: friendlyUploadError(e) }])
     } finally {
       setUploading((prev) => prev.filter((k) => k !== key))
     }
@@ -127,157 +128,182 @@ export default function TextAgentKnowledgeBaseTab({ agentId, attachedDocuments }
 
   async function handleFiles(files: FileList | null) {
     if (!files) return
+    setIssues([])
     for (const file of Array.from(files)) {
       await uploadFile(file)
     }
+    if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
-  function onDrop(e: React.DragEvent) {
+  function onDrop(e: DragEvent) {
     e.preventDefault()
     setIsDragging(false)
-    handleFiles(e.dataTransfer.files)
+    void handleFiles(e.dataTransfer.files)
+  }
+
+  const handleDelete = async (doc: TextKnowledgeBaseDocument) => {
+    const accepted = await confirm({
+      title: `¿Eliminar «${doc.name}»?`,
+      description:
+        'El documento se borrará de la biblioteca y ningún agente podrá consultarlo. Esta acción no se puede deshacer.',
+      confirmLabel: 'Eliminar documento',
+      tone: 'danger',
+    })
+    if (accepted) deleteDoc(doc.id)
   }
 
   const isUploading = uploading.length > 0
 
   return (
-    <div className="max-w-4xl space-y-6">
-      {/* Explanation banner */}
-      <div className="rounded-2xl border border-[#e4e0f5] bg-linear-to-br from-[#f5f3ff] to-white p-5">
-        <div className="flex gap-3">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#271173]">
-            <DocumentTextIcon className="h-4 w-4 text-white" />
-          </div>
-          <div>
-            <p className="text-sm font-semibold text-black">Base de conocimiento RAG</p>
-            <p className="mt-1 text-xs leading-relaxed text-black/60">
-              Los documentos subidos se procesan, dividen en fragmentos semánticos y se indexan.
-              Durante el chat, el agente recupera automáticamente el contexto más relevante para
-              cada pregunta.
-            </p>
-          </div>
+    <div className="max-w-3xl space-y-8">
+      <section className="space-y-4">
+        <div>
+          <h2 className="text-base font-semibold text-text-primary">Base de conocimiento</h2>
+          <p className="mt-1 max-w-[65ch] text-sm leading-relaxed text-text-secondary">
+            Suba los documentos con los que el agente debe responder: condiciones de pólizas,
+            preguntas frecuentes, tarifas o procesos. En cada conversación, el agente consulta la
+            parte del documento que responde la pregunta del cliente.
+          </p>
         </div>
-      </div>
 
-      {/* Drop zone */}
-      <div
-        onDragOver={(e) => {
-          e.preventDefault()
-          setIsDragging(true)
-        }}
-        onDragLeave={() => setIsDragging(false)}
-        onDrop={onDrop}
-        onClick={() => fileInputRef.current?.click()}
-        className={`relative flex cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed py-12 text-center transition-colors duration-200 ease-out ${
-          isDragging
-            ? 'border-[#271173] bg-[#ede9ff]'
-            : 'border-[#d4cfee] bg-[#fafafa] hover:border-[#271173] hover:bg-[#f5f3ff]'
-        }`}
-      >
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept={ACCEPTED}
-          multiple
-          className="hidden"
-          onChange={(e) => handleFiles(e.target.files)}
-        />
-
-        {isUploading ? (
-          <>
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#271173]">
-              <ArrowPathIcon className="h-6 w-6 animate-spin text-white" />
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-black">
-                Subiendo y procesando {uploading.length} archivo{uploading.length > 1 ? 's' : ''}...
+        <div
+          onDragOver={(e) => {
+            e.preventDefault()
+            setIsDragging(true)
+          }}
+          onDragLeave={() => setIsDragging(false)}
+          onDrop={onDrop}
+          className={`flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed px-6 py-10 text-center transition-colors duration-200 ease-out ${
+            isDragging ? 'border-primary-600 bg-primary-50' : 'border-border-strong bg-surface'
+          }`}
+        >
+          {isUploading ? (
+            <>
+              <ArrowPathIcon className="h-7 w-7 animate-spin text-primary-600" aria-hidden="true" />
+              <p className="text-sm font-medium text-text-primary" role="status">
+                Cargando {uploading.length} {uploading.length === 1 ? 'archivo' : 'archivos'}…
               </p>
-              <p className="mt-0.5 text-xs text-black/50">El archivo se indexará automáticamente</p>
-            </div>
-          </>
-        ) : (
-          <>
-            <div
-              className={`flex h-12 w-12 items-center justify-center rounded-2xl transition-colors ${
-                isDragging ? 'bg-[#271173]' : 'bg-[#ede9ff]'
-              }`}
-            >
-              <CloudArrowUpIcon
-                className={`h-6 w-6 transition-colors ${isDragging ? 'text-white' : 'text-[#271173]'}`}
+            </>
+          ) : (
+            <>
+              <CloudArrowUpIcon className="h-7 w-7 text-primary-600" aria-hidden="true" />
+              <div>
+                <p className="text-sm font-medium text-text-primary">
+                  Arrastre sus archivos aquí o
+                </p>
+                <p className="mt-1 text-xs text-text-tertiary">{KNOWLEDGE_ACCEPT_LABEL}</p>
+              </div>
+              <label htmlFor={fileInputId} className="sr-only">
+                Seleccionar documentos para la base de conocimiento
+              </label>
+              <input
+                ref={fileInputRef}
+                id={fileInputId}
+                type="file"
+                accept={KNOWLEDGE_ACCEPT}
+                multiple
+                className="sr-only"
+                onChange={(e) => void handleFiles(e.target.files)}
               />
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-black">
-                Arrastra archivos aquí o haz clic para seleccionar
-              </p>
-              <p className="mt-0.5 text-xs text-black/50">{ACCEPTED_LABEL}</p>
-            </div>
-          </>
-        )}
-      </div>
-
-      {/* Documents list */}
-      <div>
-        <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-black">
-            Documentos del workspace
-            {workspaceDocs.length > 0 && (
-              <span className="ml-2 rounded-full bg-[#ede9ff] px-2 py-0.5 text-xs font-semibold text-[#271173]">
-                {workspaceDocs.length}
-              </span>
-            )}
-          </h3>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                Seleccionar archivos
+              </Button>
+            </>
+          )}
         </div>
 
-        {workspaceDocs.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-[#d4cfee] bg-[#fafafa] py-10 text-center">
-            <p className="text-sm text-black/50">No hay documentos todavía. Sube el primero.</p>
+        {issues.length > 0 && (
+          <div role="alert" className="rounded-lg bg-danger-50 px-4 py-3">
+            <div className="flex items-start justify-between gap-3">
+              <ul className="space-y-1 text-sm text-danger-700">
+                {issues.map((issue) => (
+                  <li key={issue.key}>
+                    <span className="font-medium">«{issue.fileName}»:</span> {issue.message}
+                  </li>
+                ))}
+              </ul>
+              <button
+                type="button"
+                onClick={() => setIssues([])}
+                aria-label="Cerrar aviso"
+                className="-mr-1 rounded-md p-1 text-danger-700 transition-colors hover:bg-danger-100"
+              >
+                <XMarkIcon className="h-4 w-4" aria-hidden="true" />
+              </button>
+            </div>
           </div>
-        ) : (
+        )}
+      </section>
+
+      <section className="space-y-3">
+        <h3 className="flex items-baseline gap-2 text-base font-semibold text-text-primary">
+          Documentos disponibles
+          {workspaceDocs.length > 0 && (
+            <span className="text-sm font-normal tabular-nums text-text-tertiary">{workspaceDocs.length}</span>
+          )}
+        </h3>
+
+        {isLoading ? (
           <div className="space-y-2">
+            <div className="skeleton h-16" />
+            <div className="skeleton h-16" />
+          </div>
+        ) : workspaceDocs.length === 0 ? (
+          <p className="rounded-xl border border-dashed border-border-strong px-6 py-8 text-center text-sm text-text-tertiary">
+            Aún no hay documentos. Suba el primero para que el agente responda con su información.
+          </p>
+        ) : (
+          <ul className="divide-y divide-border-subtle rounded-xl border border-border-default bg-surface">
             {workspaceDocs.map((doc) => {
               const attached = attachedIds.has(doc.id)
               const attachedDoc = attachedDocuments.find((d) => d.id === doc.id)
+              const checkboxId = `kb-use-${doc.id}`
 
               return (
-                <div
-                  key={doc.id}
-                  className={`overflow-hidden rounded-xl border bg-white transition-colors ${
-                    attached ? 'border-[#271173]/30' : 'border-[#e4e0f5]'
-                  }`}
-                >
-                  <div className="flex flex-wrap items-start gap-3 px-5 py-4">
-                    <div
-                      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
-                        attached ? 'bg-[#271173]' : 'bg-[#ede9ff]'
-                      }`}
-                    >
-                      <DocumentTextIcon
-                        className={`h-4 w-4 ${attached ? 'text-white' : 'text-[#271173]'}`}
-                      />
-                    </div>
+                <li key={doc.id} className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-start sm:px-5">
+                  <DocumentTextIcon
+                    className={`hidden h-5 w-5 shrink-0 sm:block ${attached ? 'text-primary-600' : 'text-text-muted'}`}
+                    aria-hidden="true"
+                  />
 
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <p className="text-sm font-semibold text-black">{doc.name}</p>
-                        <IndexStatusBadge status={doc.index_status} />
-                        {doc.chunk_count > 0 && (
-                          <span className="text-[10px] text-black/40">
-                            {doc.chunk_count} fragmento{doc.chunk_count !== 1 ? 's' : ''}
-                          </span>
-                        )}
-                      </div>
-                      <p className="mt-0.5 text-xs text-black/40">{doc.source_value}</p>
-                      {doc.content_preview && (
-                        <p className="mt-1 line-clamp-2 text-xs text-black/60">
-                          {doc.content_preview}
-                        </p>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="break-all text-sm font-semibold text-text-primary">{doc.name}</p>
+                      <StatusBadge status={doc.index_status} />
+                      {isSuperAdmin && doc.chunk_count > 0 && (
+                        <span className="text-xs tabular-nums text-text-tertiary">
+                          {doc.chunk_count} {doc.chunk_count === 1 ? 'fragmento' : 'fragmentos'}
+                        </span>
                       )}
                     </div>
+                    {doc.content_preview && (
+                      <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-text-secondary">
+                        {doc.content_preview}
+                      </p>
+                    )}
 
-                    <div className="flex shrink-0 flex-wrap items-center gap-2">
+                    <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+                      <label htmlFor={checkboxId} className="inline-flex cursor-pointer items-center gap-2 text-sm text-text-primary">
+                        <input
+                          id={checkboxId}
+                          type="checkbox"
+                          checked={attached}
+                          onChange={() =>
+                            attached ? detachDoc(doc.id) : attachDoc({ docId: doc.id, mode: 'auto' })
+                          }
+                          className="h-4 w-4 accent-primary-700"
+                        />
+                        Usar en este agente
+                      </label>
+
                       {attached && (
                         <select
+                          aria-label={`Cómo usa el agente «${doc.name}»`}
                           value={attachedDoc?.usage_mode ?? 'auto'}
                           onChange={(e) =>
                             attachDoc({
@@ -285,56 +311,45 @@ export default function TextAgentKnowledgeBaseTab({ agentId, attachedDocuments }
                               mode: e.target.value as 'auto' | 'prompt',
                             })
                           }
-                          className="rounded-lg border border-[#e4e0f5] bg-white px-2 py-1 text-xs text-black focus:border-[#271173] focus:outline-none"
+                          className="h-8 rounded-lg border border-border-default bg-surface px-2 text-xs text-text-primary focus:border-primary-600"
                         >
-                          <option value="auto">Auto RAG</option>
-                          <option value="prompt">En prompt</option>
+                          <option value="auto">Lo consulta cuando lo necesita</option>
+                          <option value="prompt">Lo tiene siempre presente</option>
                         </select>
                       )}
-
-                      {doc.index_status === 'failed' && (
-                        <button
-                          type="button"
-                          onClick={() => reindex(doc.id)}
-                          className="rounded-lg border border-amber-200 p-1.5 text-amber-600 transition-colors hover:bg-amber-50"
-                          title="Re-indexar"
-                        >
-                          <ArrowPathIcon className="h-3.5 w-3.5" />
-                        </button>
-                      )}
-
-                      <button
-                        type="button"
-                        onClick={() =>
-                          attached
-                            ? detachDoc(doc.id)
-                            : attachDoc({ docId: doc.id, mode: 'auto' })
-                        }
-                        className={`rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors ${
-                          attached
-                            ? 'border-[#271173]/30 bg-[#ede9ff] text-[#271173] hover:bg-[#d4cfee]'
-                            : 'border-[#e4e0f5] text-black/60 hover:border-[#271173]/30 hover:bg-[#f5f3ff] hover:text-[#271173]'
-                        }`}
-                      >
-                        {attached ? 'Adjunto ✓' : 'Adjuntar'}
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => deleteDoc(doc.id)}
-                        className="rounded-lg border border-rose-200 p-1.5 text-rose-500 transition-colors hover:bg-rose-50"
-                        title="Eliminar"
-                      >
-                        <TrashIcon className="h-3.5 w-3.5" />
-                      </button>
                     </div>
                   </div>
-                </div>
+
+                  <div className="flex shrink-0 items-center gap-1 sm:self-start">
+                    {doc.index_status === 'failed' && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        leftIcon={<ArrowPathIcon className="h-3.5 w-3.5" aria-hidden="true" />}
+                        onClick={() => reindex(doc.id)}
+                      >
+                        Reintentar
+                      </Button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => void handleDelete(doc)}
+                      aria-label={`Eliminar ${doc.name}`}
+                      title="Eliminar"
+                      className="rounded-lg p-2 text-text-tertiary transition-colors hover:bg-danger-50 hover:text-danger-700"
+                    >
+                      <TrashIcon className="h-4 w-4" aria-hidden="true" />
+                    </button>
+                  </div>
+                </li>
               )
             })}
-          </div>
+          </ul>
         )}
-      </div>
+      </section>
+
+      {confirmDialog}
     </div>
   )
 }

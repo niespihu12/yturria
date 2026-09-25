@@ -97,16 +97,16 @@ def _build_faq_welcome() -> str:
 _TEMPLATE_DEFINITIONS: dict[str, dict[str, Any]] = {
     "sofia": {
         "key": "sofia",
-        "label": "Sofia",
-        "summary": "Asistente comercial con flujo especializado para seguros y escalaciones automaticas.",
+        "label": "Sofía",
+        "summary": "Asistente comercial especializada en seguros, con escalamiento automático a un asesor.",
         "description": (
-            "Ideal para ventas y atencion de seguros. Usa el flujo IA de Sofia, "
-            "captura contexto comercial y puede escalar conversaciones al asesor."
+            "Ideal para ventas y atención de seguros. Conversa con el flujo especializado de Sofía, "
+            "reúne el contexto comercial y pasa la conversación a un asesor cuando hace falta."
         ),
         "highlights": [
-            "Flujo IA especializado",
-            "Escalaciones automaticas",
-            "Preparada para onboarding",
+            "Flujo especializado en seguros",
+            "Escalamiento automático",
+            "Configuración guiada",
         ],
         "recommended": True,
         "capabilities": {
@@ -130,15 +130,15 @@ _TEMPLATE_DEFINITIONS: dict[str, dict[str, Any]] = {
     "recepcionista": {
         "key": "recepcionista",
         "label": "Recepcionista",
-        "summary": "Agenda citas, toma mensajes y responde dudas operativas para cualquier negocio.",
+        "summary": "Agenda citas, toma mensajes y responde dudas del día a día de cualquier negocio.",
         "description": (
-            "Pensada para recepcion y contacto inicial. Atiende horarios, disponibilidad, "
-            "mensajes y solicitudes de cita sin depender del flujo Sofia."
+            "Pensada para recepción y primer contacto. Informa horarios y disponibilidad, "
+            "toma mensajes y agenda citas sin usar el flujo de Sofía."
         ),
         "highlights": [
-            "Ideal para agenda y mensajes",
-            "Sirve para multiples giros",
-            "Mantiene conversaciones cortas",
+            "Agenda y mensajes",
+            "Sirve para cualquier negocio",
+            "Conversaciones cortas",
         ],
         "recommended": False,
         "capabilities": {
@@ -161,16 +161,16 @@ _TEMPLATE_DEFINITIONS: dict[str, dict[str, Any]] = {
     },
     "faq_bot": {
         "key": "faq_bot",
-        "label": "FAQ Bot",
-        "summary": "Responde FAQs desde la base de conocimiento sin escalaciones automaticas.",
+        "label": "Preguntas frecuentes",
+        "summary": "Responde preguntas frecuentes con la base de conocimiento, sin escalamientos automáticos.",
         "description": (
-            "Hecho para autoservicio. Responde con base en documentos y contexto, "
-            "sin inventar respuestas ni activar escalaciones automaticas."
+            "Hecho para autoservicio. Responde con base en sus documentos, "
+            "sin inventar respuestas ni escalar automáticamente."
         ),
         "highlights": [
-            "Enfocado en conocimiento",
-            "Evita inventar respuestas",
-            "Sin escalaciones automaticas",
+            "Basado en sus documentos",
+            "No inventa respuestas",
+            "Sin escalamientos automáticos",
         ],
         "recommended": False,
         "capabilities": {
@@ -193,16 +193,16 @@ _TEMPLATE_DEFINITIONS: dict[str, dict[str, Any]] = {
     },
     "custom": {
         "key": "custom",
-        "label": "Custom",
-        "summary": "Prompt en blanco para configurar el agente desde cero.",
+        "label": "Personalizado",
+        "summary": "Empiece desde cero y configure cada detalle del agente.",
         "description": (
-            "Empieza con una base limpia. Permite editar prompt, primer mensaje, "
-            "modelo y parametros para construir un agente a medida."
+            "Parte de una base limpia: puede editar las instrucciones, el primer mensaje, "
+            "el modelo y los parámetros para crear un agente a la medida."
         ),
         "highlights": [
-            "Prompt editable",
+            "Instrucciones editables",
             "Modelo configurable",
-            "Ideal para casos especiales",
+            "Para casos especiales",
         ],
         "recommended": False,
         "capabilities": {

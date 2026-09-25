@@ -181,21 +181,42 @@ El token se obtiene en la tab **Integración** del agente. Activar `embed_enable
 
 | Variable | Descripción | Ejemplo |
 |---|---|---|
-| `VITE_BACKEND_URL` | URL base del backend | `https://api.yturria.com` |
+| `VITE_API_URL` | URL base de la API (incluye `/api`). En Docker basta `/api` | `http://localhost:8000/api` |
+| `VITE_BRAND` | Marca de la interfaz. Vacío = marca propia; `bolivar` = tema de demostración Seguros Bolívar | `bolivar` |
 
 Copiar `.env.example` a `.env.local` para desarrollo local.
+
+## Marca y sistema de diseño
+
+- **Tokens:** toda la UI usa tokens de `src/styles/design-tokens.css` (colores, radios, sombras,
+  fuentes). No se usan colores hex en componentes. Contexto y convenciones: `../.impeccable.md`.
+- **Temas de marca:** `src/styles/brand-bolivar.css` sobrescribe los tokens bajo
+  `:root[data-brand='bolivar']` (verde `#006B38`, amarillo `#FFD050`, Marcellus + Albert Sans).
+  Los datos de cada marca (nombre, logo, favicon, fuentes) están en `src/brands.json`; el plugin
+  `brandHtml` de `vite.config.mjs` los escribe en `index.html` para evitar parpadeos.
+- **Uso del logo de Seguros Bolívar:** solo en el tema de demostración. Su manual de marca para
+  intermediarios exige autorización de su área de Marca para usarlo en piezas propias.
+- **Componentes base:** `src/components/ui/` (`Button`, `Modal`, `useConfirm`, `AdvancedSection`,
+  `PageHeader`, `Badge`). Los archivos que usan react-hook-form se excluyen del React Compiler
+  (ver `vite.config.mjs`) porque memoizaría `formState`.
 
 ## Desarrollo
 
 ```bash
 npm install
 npm run dev         # Inicia en http://localhost:5173
+VITE_BRAND=bolivar npm run dev   # Mismo servidor con el tema Seguros Bolívar
 npm run build       # Build de producción en dist/
 npm run preview     # Previsualización del build
 npm run lint        # ESLint
+npm run test:e2e    # Pruebas end-to-end (Playwright)
 ```
 
-El backend debe estar corriendo en `VITE_BACKEND_URL` y con CORS habilitado para `localhost:5173`.
+El backend debe estar corriendo en `VITE_API_URL` y con CORS habilitado para `localhost:5173`.
+
+Para una demo con datos de ejemplo sin tocar la base real: `SEED_DEMO_DATA=1 node e2e/start-backend.mjs`
+levanta el backend en `:8002` con SQLite desechable (usuario `cliente@e2e.test`, contraseña
+`E2eClave123!`), y luego `VITE_API_URL=http://localhost:8002/api VITE_BRAND=bolivar npm run dev`.
 
 ## Build de producción
 

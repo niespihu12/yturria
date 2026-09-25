@@ -5,6 +5,9 @@ import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
 import './index.css'
 import Router from './router.tsx'
 import { queryClient } from './lib/queryClient'
+import { applyBrand } from './brand'
+
+applyBrand()
 
 // After a redeploy, an open tab may request a lazy chunk that no longer exists.
 // Reload once to fetch the new build instead of leaving a blank screen.

@@ -1,30 +1,45 @@
 /* ═══════════════════════════════════════════════════════════════════════════
-   YTURRIA DESIGN TOKENS — Insurance Platform Design System
-   Based on UI/UX Pro Max recommendations for Insurance/Fintech
-   Primary: #0369A1 (Security Blue) | Accent: #16A34A (Protected Green)
+   DESIGN TOKENS — tema por defecto de la plataforma (marca AOS).
+   Toda la interfaz consume estos tokens; los temas de marca (p. ej.
+   brand-bolivar.css) solo sobrescriben variables bajo :root[data-brand=…].
+   Nunca usar colores hex directamente en componentes.
    ═══════════════════════════════════════════════════════════════════════════ */
 
 @import "tailwindcss";
 
 @theme {
-  /* ─── Font Family ─────────────────────────────────────────────────────── */
+  /* ─── Tipografía ─────────────────────────────────────────────────────── */
   --font-sans: 'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  /* Títulos de página. Cada marca decide si usa una display propia. */
+  --font-display: var(--font-sans);
   --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
 
-  /* ─── Primary (Security Blue) ─────────────────────────────────────────── */
-  --color-primary-50: #f0f9ff;
-  --color-primary-100: #e0f2fe;
-  --color-primary-200: #bae6fd;
-  --color-primary-300: #7dd3fc;
-  --color-primary-400: #38bdf8;
-  --color-primary-500: #0ea5e9;
-  --color-primary-600: #0369a1;
-  --color-primary-700: #075985;
-  --color-primary-800: #0c4a6e;
-  --color-primary-900: #082f49;
-  --color-primary-950: #042036;
+  /* ─── Primary: morado AOS (700 = color de marca) ─────────────────────── */
+  --color-primary-50: #faf9ff;
+  --color-primary-100: #f5f3ff;
+  --color-primary-200: #ede9ff;
+  --color-primary-300: #d4cfee;
+  --color-primary-400: #8b7fd0;
+  --color-primary-500: #4b1fb8;
+  --color-primary-600: #3a1d9e;
+  --color-primary-700: #271173;
+  --color-primary-800: #1f0d5a;
+  --color-primary-900: #170a42;
+  --color-primary-950: #0f062b;
 
-  /* ─── Accent (Protected Green) ────────────────────────────────────────── */
+  /* ─── Highlight: acento escaso (1 vez por vista) ─────────────────────── */
+  --color-highlight-50: #fffbeb;
+  --color-highlight-100: #fef3c7;
+  --color-highlight-200: #fde68a;
+  --color-highlight-300: #fcd34d;
+  --color-highlight-400: #fbbf24;
+  --color-highlight-500: #f59e0b;
+  --color-highlight-600: #d97706;
+  --color-highlight-700: #b45309;
+  --color-highlight-800: #92400e;
+  --color-highlight-900: #78350f;
+
+  /* ─── Accent: verde de estados positivos ─────────────────────────────── */
   --color-accent-50: #f0fdf4;
   --color-accent-100: #dcfce7;
   --color-accent-200: #bbf7d0;
@@ -37,92 +52,101 @@
   --color-accent-900: #14532d;
   --color-accent-950: #052e16;
 
-  /* ─── Neutral (Slate) ─────────────────────────────────────────────────── */
-  --color-neutral-50: #f8fafc;
-  --color-neutral-100: #f1f5f9;
-  --color-neutral-200: #e2e8f0;
-  --color-neutral-300: #cbd5e1;
-  --color-neutral-400: #94a3b8;
-  --color-neutral-500: #64748b;
-  --color-neutral-600: #475569;
-  --color-neutral-700: #334155;
-  --color-neutral-800: #1e293b;
-  --color-neutral-900: #0f172a;
-  --color-neutral-950: #020617;
+  /* ─── Neutros ────────────────────────────────────────────────────────── */
+  --color-neutral-50: #f8f8fb;
+  --color-neutral-100: #f1f1f6;
+  --color-neutral-200: #e4e4ec;
+  --color-neutral-300: #cdcdda;
+  --color-neutral-400: #9a9aae;
+  --color-neutral-500: #6b6b82;
+  --color-neutral-600: #4d4d63;
+  --color-neutral-700: #37374b;
+  --color-neutral-800: #25253a;
+  --color-neutral-900: #1a1a2f;
+  --color-neutral-950: #0e0e1c;
 
-  /* ─── Semantic Colors ─────────────────────────────────────────────────── */
+  /* ─── Semánticos ─────────────────────────────────────────────────────── */
   --color-success-50: #f0fdf4;
+  --color-success-100: #dcfce7;
+  --color-success-200: #bbf7d0;
   --color-success-500: #22c55e;
   --color-success-600: #16a34a;
   --color-success-700: #15803d;
 
   --color-warning-50: #fffbeb;
+  --color-warning-100: #fef3c7;
+  --color-warning-200: #fde68a;
   --color-warning-500: #f59e0b;
   --color-warning-600: #d97706;
   --color-warning-700: #b45309;
 
   --color-danger-50: #fef2f2;
   --color-danger-100: #fee2e2;
+  --color-danger-200: #fecaca;
   --color-danger-500: #ef4444;
   --color-danger-600: #dc2626;
   --color-danger-700: #b91c1c;
+  --color-danger-800: #991b1b;
 
   --color-info-50: #f0f9ff;
+  --color-info-100: #e0f2fe;
+  --color-info-200: #bae6fd;
   --color-info-500: #0ea5e9;
-  --color-info-600: #0284c7;
+  --color-info-600: #0369a1;
+  --color-info-700: #075985;
 
-  /* ─── Surface Colors ──────────────────────────────────────────────────── */
-  --color-surface: #ffffff;
+  /* ─── Superficies ────────────────────────────────────────────────────── */
+  --color-surface: #fefeff;
   --color-surface-elevated: #ffffff;
-  --color-surface-muted: #f8fafc;
-  --color-surface-overlay: rgba(15, 23, 42, 0.45);
+  --color-surface-muted: #fafafa;
+  --color-surface-overlay: rgb(26 26 47 / 0.45);
 
-  /* ─── Background ──────────────────────────────────────────────────────── */
-  --color-bg-primary: #f0f7ff;
-  --color-bg-secondary: #f8fafc;
-  --color-bg-tertiary: #f1f5f9;
+  /* ─── Fondos ─────────────────────────────────────────────────────────── */
+  --color-bg-primary: #f5f3ff;
+  --color-bg-secondary: #f8f8fb;
+  --color-bg-tertiary: #f1f1f6;
 
-  /* ─── Text Colors ─────────────────────────────────────────────────────── */
-  --color-text-primary: #0f172a;
-  --color-text-secondary: #475569;
-  --color-text-tertiary: #64748b;
-  --color-text-muted: #94a3b8;
-  --color-text-inverse: #ffffff;
-  --color-text-link: #0369a1;
-  --color-text-link-hover: #075985;
+  /* ─── Texto (todos ≥ 4.5:1 sobre superficie, salvo muted) ────────────── */
+  --color-text-primary: #1a1a2f;
+  --color-text-secondary: #45455c;
+  --color-text-tertiary: #5e5e75;
+  --color-text-muted: #6e6e85;
+  --color-text-inverse: #fefeff;
+  --color-text-link: #271173;
+  --color-text-link-hover: #1f0d5a;
 
-  /* ─── Border Colors ───────────────────────────────────────────────────── */
-  --color-border-default: #e2e8f0;
-  --color-border-subtle: #f1f5f9;
-  --color-border-strong: #cbd5e1;
-  --color-border-focus: #0369a1;
+  /* ─── Bordes ─────────────────────────────────────────────────────────── */
+  --color-border-default: #e4e0f5;
+  --color-border-subtle: #f0eef8;
+  --color-border-strong: #d4cfee;
+  --color-border-focus: #3a1d9e;
 
-  /* ─── Shadows ─────────────────────────────────────────────────────────── */
-  --shadow-xs: 0 1px 2px 0 rgb(15 23 42 / 0.04);
-  --shadow-sm: 0 1px 3px 0 rgb(15 23 42 / 0.06), 0 1px 2px -1px rgb(15 23 42 / 0.06);
-  --shadow-md: 0 4px 6px -1px rgb(15 23 42 / 0.06), 0 2px 4px -2px rgb(15 23 42 / 0.06);
-  --shadow-lg: 0 10px 15px -3px rgb(15 23 42 / 0.06), 0 4px 6px -4px rgb(15 23 42 / 0.06);
-  --shadow-xl: 0 20px 25px -5px rgb(15 23 42 / 0.06), 0 8px 10px -6px rgb(15 23 42 / 0.06);
-  --shadow-2xl: 0 25px 50px -12px rgb(15 23 42 / 0.12);
-  --shadow-inner: inset 0 2px 4px 0 rgb(15 23 42 / 0.04);
-  --shadow-focus: 0 0 0 3px rgb(3 105 161 / 0.15);
+  /* ─── Sombras ────────────────────────────────────────────────────────── */
+  --shadow-xs: 0 1px 2px 0 rgb(26 26 47 / 0.04);
+  --shadow-sm: 0 1px 3px 0 rgb(26 26 47 / 0.06), 0 1px 2px -1px rgb(26 26 47 / 0.06);
+  --shadow-md: 0 4px 10px -2px rgb(26 26 47 / 0.08), 0 2px 4px -2px rgb(26 26 47 / 0.05);
+  --shadow-lg: 0 12px 24px -8px rgb(26 26 47 / 0.12), 0 4px 8px -4px rgb(26 26 47 / 0.06);
+  --shadow-xl: 0 20px 36px -12px rgb(26 26 47 / 0.16);
+  --shadow-2xl: 0 28px 56px -16px rgb(26 26 47 / 0.2);
+  --shadow-inner: inset 0 2px 4px 0 rgb(26 26 47 / 0.04);
+  --shadow-focus: 0 0 0 3px rgb(58 29 158 / 0.28);
 
-  /* ─── Border Radius ───────────────────────────────────────────────────── */
-  --radius-xs: 6px;
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
-  --radius-xl: 20px;
-  --radius-2xl: 24px;
-  --radius-3xl: 28px;
+  /* ─── Radios (escala sobria; antes xl/2xl/3xl = 20/24/28px) ──────────── */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+  --radius-3xl: 20px;
   --radius-full: 9999px;
 
-  /* ─── Spacing ─────────────────────────────────────────────────────────── */
+  /* ─── Espaciado extra ────────────────────────────────────────────────── */
   --spacing-18: 4.5rem;
   --spacing-22: 5.5rem;
   --spacing-30: 7.5rem;
 
-  /* ─── Z-Index Scale ───────────────────────────────────────────────────── */
+  /* ─── Z-Index ────────────────────────────────────────────────────────── */
   --z-dropdown: 100;
   --z-sticky: 200;
   --z-fixed: 300;
@@ -133,9 +157,7 @@
   --z-toast: 800;
 }
 
-/* ─── Root CSS Variables for manual use ─────────────────────────────────── */
 :root {
   --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-in-out-strong: cubic-bezier(0.77, 0, 0.175, 1);
-  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 }

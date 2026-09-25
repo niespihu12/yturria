@@ -1,20 +1,12 @@
-import { useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'react-toastify'
-import {
-  SparklesIcon,
-  BellAlertIcon,
-  ClockIcon,
-  UserIcon,
-  PhoneIcon,
-  BuildingOffice2Icon,
-  ChatBubbleLeftEllipsisIcon,
-  ExclamationTriangleIcon,
-  CheckCircleIcon,
-  ArrowPathIcon,
-} from '@heroicons/react/24/outline'
-import { getEscalations, updateEscalation } from '@/api/TextAgentsAPI'
-import type { EscalationStatus, SofiaConfig } from '@/types/textAgent'
+import { useId, useState, type ReactNode } from 'react'
+import { Link } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
+import { ArrowRightIcon, XMarkIcon } from '@heroicons/react/24/outline'
+import { getEscalations } from '@/api/TextAgentsAPI'
+import type { SofiaConfig } from '@/types/textAgent'
+import AdvancedSection from '@/components/ui/AdvancedSection'
+import Button from '@/components/ui/Button'
+import { useCurrentUser } from '@/hooks/useCurrentUser'
 
 type Props = {
   agentId: string
@@ -24,9 +16,16 @@ type Props = {
 }
 
 const inputClass =
-  'w-full rounded-xl border border-[#e4e0f5] bg-white px-3 py-2.5 text-sm text-black placeholder:text-black/50 transition-colors focus:border-[#271173] focus:outline-none'
+  'w-full rounded-lg border border-border-default bg-surface px-3 py-2.5 text-sm text-text-primary placeholder:text-text-tertiary transition-colors focus:border-primary-600'
 
-const labelClass = 'mb-1.5 block text-xs font-semibold uppercase tracking-wide text-black/50'
+const labelClass = 'mb-1.5 block text-sm font-medium text-text-primary'
+const hintClass = 'mt-1.5 text-xs leading-relaxed text-text-tertiary'
+
+const sliderClass =
+  'h-1.5 w-full cursor-pointer appearance-none rounded-full bg-primary-100 accent-primary-700 ' +
+  '[&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none ' +
+  '[&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-surface ' +
+  '[&::-webkit-slider-thumb]:bg-primary-700 [&::-webkit-slider-thumb]:shadow'
 
 const DEFAULT_CONFIG: SofiaConfig = {
   advisor_phone: '',
@@ -46,12 +45,6 @@ const DEFAULT_CONFIG: SofiaConfig = {
   company_context: '',
 }
 
-const STATUS_CONFIG: Record<EscalationStatus, { label: string; color: string; icon: typeof CheckCircleIcon }> = {
-  pending: { label: 'Pendiente', color: 'bg-amber-50 text-amber-700 border-amber-200', icon: ExclamationTriangleIcon },
-  in_progress: { label: 'En progreso', color: 'bg-blue-50 text-blue-700 border-blue-200', icon: ArrowPathIcon },
-  resolved: { label: 'Resuelto', color: 'bg-emerald-50 text-emerald-700 border-emerald-200', icon: CheckCircleIcon },
-}
-
 function parseSofiaConfig(json: string): SofiaConfig {
   try {
     const parsed = JSON.parse(json || '{}')
@@ -65,8 +58,30 @@ function parseSofiaConfig(json: string): SofiaConfig {
   }
 }
 
+function Section({
+  title,
+  description,
+  children,
+}: {
+  title: string
+  description?: string
+  children: ReactNode
+}) {
+  return (
+    <section className="space-y-4 border-t border-border-subtle pt-6">
+      <div>
+        <h3 className="text-base font-semibold text-text-primary">{title}</h3>
+        {description && <p className="mt-1 max-w-[65ch] text-sm text-text-secondary">{description}</p>}
+      </div>
+      {children}
+    </section>
+  )
+}
+
 export default function TextAgentSofiaTab({ agentId, sofiaMode, sofiaConfigJson, onSofiaChange }: Props) {
-  const queryClient = useQueryClient()
+  const { isSuperAdmin } = useCurrentUser()
+  const id = useId()
+  const fieldId = (name: string) => `${id}-${name}`
 
   const [config, setConfig] = useState<SofiaConfig>(() => parseSofiaConfig(sofiaConfigJson))
   const [lastSofiaJson, setLastSofiaJson] = useState(sofiaConfigJson)
@@ -98,357 +113,293 @@ export default function TextAgentSofiaTab({ agentId, sofiaMode, sofiaConfigJson,
     updateConfig({ extra_escalation_phrases: config.extra_escalation_phrases.filter((_: string, i: number) => i !== idx) })
   }
 
-  // ── Escalations ──
-  const { data: escalationsData, isLoading: loadingEscalations } = useQuery({
+  const { data: escalationsData } = useQuery({
     queryKey: ['escalations', agentId],
     queryFn: () => getEscalations(agentId),
     enabled: sofiaMode,
-    refetchInterval: 30_000,
   })
-
-  const escalations = escalationsData?.escalations ?? []
-
-  const { mutate: patchEscalation, isPending: patchingEscalation } = useMutation({
-    mutationFn: (vars: { convId: string; status: EscalationStatus }) =>
-      updateEscalation(agentId, vars.convId, { status: vars.status }),
-    onSuccess: () => {
-      toast.success('Escalación actualizada')
-      queryClient.invalidateQueries({ queryKey: ['escalations', agentId] })
-    },
-    onError: (err: Error) => toast.error(err.message),
-  })
+  const pendingCount = (escalationsData?.escalations ?? []).filter(
+    (escalation) => escalation.escalation_status === 'pending',
+  ).length
 
   return (
     <div className="max-w-3xl space-y-6">
-      {/* Toggle Sofia Mode */}
-      <div className="flex items-center justify-between rounded-2xl border border-[#e4e0f5] bg-gradient-to-r from-[#f5f3ff] to-[#ede9ff] p-5">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#271173] shadow-md">
-            <SparklesIcon className="h-5 w-5 text-white" />
-          </div>
-          <div>
-            <h3 className="text-sm font-semibold text-black">Modo Sofía</h3>
-            <p className="text-xs text-black/50">
-              Activa la secretaria digital con IA para este agente
-            </p>
-          </div>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 id={fieldId('toggle-label')} className="text-base font-semibold text-text-primary">
+            Sofía, asistente de seguros
+          </h2>
+          <p id={fieldId('toggle-hint')} className="mt-1 max-w-[60ch] text-sm text-text-secondary">
+            Atiende a sus clientes con los datos de su empresa y pasa la conversación a un asesor
+            cuando el cliente lo pide o la consulta lo requiere.
+          </p>
         </div>
 
         <button
           type="button"
+          role="switch"
+          aria-checked={sofiaMode}
+          aria-labelledby={fieldId('toggle-label')}
+          aria-describedby={fieldId('toggle-hint')}
           onClick={handleToggle}
-          className={`relative h-7 w-12 rounded-full transition-all duration-300 ${
-            sofiaMode ? 'bg-[#271173]' : 'bg-[#e4e0f5]'
+          className={`relative mt-0.5 inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors duration-200 ${
+            sofiaMode ? 'bg-primary-600' : 'bg-neutral-300'
           }`}
         >
+          <span className="sr-only">{sofiaMode ? 'Activada' : 'Desactivada'}</span>
           <span
-            className={`absolute top-0.5 left-0.5 h-6 w-6 rounded-full bg-white shadow-md transition-transform duration-300 ${
+            aria-hidden="true"
+            className={`absolute left-0.5 h-6 w-6 rounded-full bg-surface shadow transition-transform duration-200 ${
               sofiaMode ? 'translate-x-5' : 'translate-x-0'
             }`}
           />
         </button>
       </div>
 
-      {sofiaMode && (
+      {!sofiaMode ? (
+        <p className="rounded-lg bg-surface-muted px-4 py-3 text-sm text-text-secondary">
+          Sofía está desactivada. Actívela para configurar los datos de su empresa, el asesor que
+          recibe los casos y cuándo pasar una conversación a una persona.
+        </p>
+      ) : (
         <>
-          {/* Business Info */}
-          <div className="space-y-4 rounded-xl border border-[#e4e0f5] bg-white p-5">
-            <h4 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-black/50">
-              <BuildingOffice2Icon className="h-4 w-4" />
-              Perfil del Negocio
-            </h4>
-            <p className="text-xs text-black/40">
-              Vacío = usa el perfil de tenant configurado en el servidor. Rellena para sobrescribir por agente.
-            </p>
-
-            <div className="grid gap-4 sm:grid-cols-2">
+          <Section
+            title="Datos de la empresa"
+            description="Sofía los usa para presentarse y responder en nombre de su empresa. Si deja un campo vacío, usa los datos generales de la cuenta."
+          >
+            <div className="grid gap-4 @lg:grid-cols-2">
               <div>
-                <label className={labelClass}>Nombre de la empresa</label>
+                <label htmlFor={fieldId('company')} className={labelClass}>
+                  Nombre de la empresa
+                </label>
                 <input
+                  id={fieldId('company')}
                   type="text"
                   className={inputClass}
                   value={config.company_name}
                   onChange={(e) => updateConfig({ company_name: e.target.value })}
-                  placeholder="Ej. Yturria Agente de Seguros"
+                  placeholder="Ej: Seguros del Norte"
                 />
               </div>
               <div>
-                <label className={labelClass}>Años en el mercado</label>
+                <label htmlFor={fieldId('years')} className={labelClass}>
+                  Años en el mercado
+                </label>
                 <input
+                  id={fieldId('years')}
                   type="text"
+                  inputMode="numeric"
                   className={inputClass}
                   value={config.company_years ?? ''}
                   onChange={(e) => updateConfig({ company_years: e.target.value })}
-                  placeholder="Ej. 75"
+                  placeholder="Ej: 75"
                 />
               </div>
               <div>
-                <label className={labelClass}>
-                  <ClockIcon className="inline h-3.5 w-3.5 mr-1" />
+                <label htmlFor={fieldId('hours')} className={labelClass}>
                   Horario de atención
                 </label>
                 <input
+                  id={fieldId('hours')}
                   type="text"
                   className={inputClass}
                   value={config.business_hours}
                   onChange={(e) => updateConfig({ business_hours: e.target.value })}
-                  placeholder="Lun-Vie 9:00-18:00"
+                  placeholder="Ej: lunes a viernes, 8:00 a. m. a 6:00 p. m."
                 />
               </div>
               <div>
-                <label className={labelClass}>Aseguradoras con las que trabaja</label>
+                <label htmlFor={fieldId('carriers')} className={labelClass}>
+                  Aseguradoras con las que trabaja
+                </label>
                 <input
+                  id={fieldId('carriers')}
                   type="text"
                   className={inputClass}
                   value={config.carriers}
                   onChange={(e) => updateConfig({ carriers: e.target.value })}
-                  placeholder="GNP, AXA, Chubb, MetLife…"
+                  placeholder="Separe los nombres con comas"
                 />
               </div>
             </div>
 
             <div>
-              <label className={labelClass}>Contexto de la empresa</label>
+              <label htmlFor={fieldId('context')} className={labelClass}>
+                Sobre la empresa
+              </label>
               <textarea
+                id={fieldId('context')}
                 rows={3}
-                className={`${inputClass} resize-none`}
+                className={`${inputClass} resize-y`}
                 value={config.company_context}
                 onChange={(e) => updateConfig({ company_context: e.target.value })}
-                placeholder="Descripción adicional del negocio, especialidades, zonas de operación…"
+                placeholder="Especialidades, ciudades donde opera, tipo de clientes…"
               />
-              <p className="mt-1 text-[11px] text-black/40">
-                Se inyecta en el prompt de Sofía para dar más contexto al agente.
+              <p className={hintClass}>
+                Sofía usa este texto como contexto al conversar. El aviso legal se configura en la
+                pestaña Agente.
               </p>
             </div>
+          </Section>
 
-            <p className="text-[11px] text-black/40 pt-1">
-              El aviso legal se configura en la pestaña <span className="font-semibold">Agente</span> y se muestra exactamente una vez al inicio de cada conversación.
-            </p>
-          </div>
+          <Section
+            title="Asesor que recibe los casos"
+            description="Cuando Sofía pasa una conversación a una persona, avisa a este número de WhatsApp."
+          >
+            <div className="max-w-sm">
+              <label htmlFor={fieldId('advisor')} className={labelClass}>
+                WhatsApp del asesor
+              </label>
+              <input
+                id={fieldId('advisor')}
+                type="tel"
+                className={inputClass}
+                value={config.advisor_phone}
+                onChange={(e) => updateConfig({ advisor_phone: e.target.value })}
+                placeholder="Ej: +57 300 123 4567"
+              />
+            </div>
 
-          {/* Advisor Info */}
-          <div className="space-y-4 rounded-xl border border-[#e4e0f5] bg-white p-5">
-            <h4 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-black/50">
-              <UserIcon className="h-4 w-4" />
-              Asesor Asignado
-            </h4>
-
-            <div className="grid gap-4 sm:grid-cols-2">
+            <AdvancedSection
+              key={isSuperAdmin ? 'admin' : 'client'}
+              defaultOpen={isSuperAdmin}
+              description="Canal de WhatsApp que envía los avisos al asesor."
+            >
               <div>
-                <label className={labelClass}>
-                  <PhoneIcon className="inline h-3.5 w-3.5 mr-1" />
-                  Teléfono WhatsApp del asesor
+                <label htmlFor={fieldId('advisor-channel')} className={labelClass}>
+                  Identificador del canal de WhatsApp para avisos
                 </label>
                 <input
+                  id={fieldId('advisor-channel')}
                   type="text"
-                  className={inputClass}
-                  value={config.advisor_phone}
-                  onChange={(e) => updateConfig({ advisor_phone: e.target.value })}
-                  placeholder="+5218123456789"
-                />
-              </div>
-              <div>
-                <label className={labelClass}>ID de config WhatsApp (para notificaciones)</label>
-                <input
-                  type="text"
-                  className={inputClass}
+                  className={`${inputClass} font-mono`}
                   value={config.advisor_whatsapp_config_id}
                   onChange={(e) => updateConfig({ advisor_whatsapp_config_id: e.target.value })}
-                  placeholder="ID de la config WhatsApp del agente"
+                  placeholder="Identificador de la configuración de WhatsApp"
                 />
-                <p className="mt-1 text-[11px] text-black/40">
-                  Configura WhatsApp en la pestaña correspondiente y pega aquí el ID para enrutar escalaciones.
+                <p className={hintClass}>
+                  Conecte primero WhatsApp en su pestaña y copie aquí el identificador del canal.
+                </p>
+              </div>
+            </AdvancedSection>
+          </Section>
+
+          <Section title="Cómo responde">
+            <div className="grid gap-6 @lg:grid-cols-2">
+              <div>
+                <div className="mb-2 flex items-baseline justify-between gap-3">
+                  <label htmlFor={fieldId('lines')} className="text-sm font-medium text-text-primary">
+                    Máximo de líneas por respuesta
+                  </label>
+                  <span className="text-sm font-semibold tabular-nums text-primary-700">
+                    {config.max_response_lines}
+                  </span>
+                </div>
+                <input
+                  id={fieldId('lines')}
+                  type="range"
+                  min={1}
+                  max={10}
+                  step={1}
+                  value={config.max_response_lines}
+                  onChange={(e) => updateConfig({ max_response_lines: parseInt(e.target.value, 10) })}
+                  className={sliderClass}
+                />
+                <p className={hintClass}>Respuestas cortas se leen mejor en el celular.</p>
+              </div>
+
+              <div>
+                <div className="mb-2 flex items-baseline justify-between gap-3">
+                  <label htmlFor={fieldId('threshold')} className="text-sm font-medium text-text-primary">
+                    Mensajes antes de pasar a un asesor
+                  </label>
+                  <span className="text-sm font-semibold tabular-nums text-primary-700">
+                    {config.escalation_threshold}
+                  </span>
+                </div>
+                <input
+                  id={fieldId('threshold')}
+                  type="range"
+                  min={1}
+                  max={20}
+                  step={1}
+                  value={config.escalation_threshold}
+                  onChange={(e) => updateConfig({ escalation_threshold: parseInt(e.target.value, 10) })}
+                  className={sliderClass}
+                />
+                <p className={hintClass}>
+                  Si la conversación llega a este número de mensajes sin resolverse, Sofía la pasa
+                  al asesor.
                 </p>
               </div>
             </div>
-          </div>
+          </Section>
 
-          {/* Response Settings */}
-          <div className="space-y-4 rounded-xl border border-[#e4e0f5] bg-[#fafafa] p-5">
-            <h4 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-black/50">
-              <ChatBubbleLeftEllipsisIcon className="h-4 w-4" />
-              Configuración de Respuestas
-            </h4>
-
-            <div>
-              <div className="mb-2 flex items-center justify-between">
-                <label className={labelClass}>Máx. líneas por respuesta</label>
-                <span className="rounded-lg bg-[#ede9ff] px-2.5 py-0.5 text-xs font-semibold tabular-nums text-[#271173]">
-                  {config.max_response_lines}
-                </span>
-              </div>
-              <input
-                type="range"
-                min={1}
-                max={10}
-                step={1}
-                value={config.max_response_lines}
-                onChange={(e) => updateConfig({ max_response_lines: parseInt(e.target.value, 10) })}
-                className="w-full h-1.5 rounded-full appearance-none bg-[#e4e0f5] cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[#271173] [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:shadow-md [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white"
-              />
-              <div className="mt-1 flex justify-between text-[10px] text-black/40">
-                <span>1</span><span>10</span>
-              </div>
-            </div>
-
-            <div>
-              <div className="mb-2 flex items-center justify-between">
-                <div>
-                  <label className={labelClass}>Mensajes antes de escalar automáticamente</label>
-                  <p className="text-[10px] text-black/40">
-                    Si el usuario envía este número de mensajes sin resolver, se escala al asesor
-                  </p>
-                </div>
-                <span className="ml-3 shrink-0 rounded-lg bg-[#ede9ff] px-2.5 py-0.5 text-xs font-semibold tabular-nums text-[#271173]">
-                  {config.escalation_threshold}
-                </span>
-              </div>
-              <input
-                type="range"
-                min={1}
-                max={20}
-                step={1}
-                value={config.escalation_threshold}
-                onChange={(e) => updateConfig({ escalation_threshold: parseInt(e.target.value, 10) })}
-                className="w-full h-1.5 rounded-full appearance-none bg-[#e4e0f5] cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[#271173] [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:shadow-md [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white"
-              />
-              <div className="mt-1 flex justify-between text-[10px] text-black/40">
-                <span>1</span><span>20</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Escalation Phrases */}
-          <div className="space-y-4 rounded-xl border border-[#e4e0f5] bg-white p-5">
-            <h4 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-black/50">
-              <BellAlertIcon className="h-4 w-4" />
-              Frases de Escalación
-            </h4>
-            <p className="text-xs text-black/40">
-              Cuando el usuario diga algo similar a estas frases, se notificará al asesor.
-            </p>
-
-            <div className="flex flex-wrap gap-2">
-              {config.extra_escalation_phrases.map((phrase: string, idx: number) => (
-                <span
-                  key={idx}
-                  className="group flex items-center gap-1.5 rounded-lg border border-[#e4e0f5] bg-[#f5f3ff] px-3 py-1.5 text-xs text-[#271173]"
-                >
-                  {phrase}
-                  <button
-                    type="button"
-                    onClick={() => removePhrase(idx)}
-                    className="ml-0.5 text-[#271173]/40 transition-colors hover:text-red-500"
+          <Section
+            title="Frases que llaman a un asesor"
+            description="Cuando el cliente escriba algo parecido a estas frases, Sofía avisará al asesor."
+          >
+            {config.extra_escalation_phrases.length > 0 && (
+              <ul className="flex flex-wrap gap-2">
+                {config.extra_escalation_phrases.map((phrase: string, idx: number) => (
+                  <li
+                    key={`${phrase}-${idx}`}
+                    className="flex items-center gap-1 rounded-lg border border-border-default bg-surface-muted py-1 pl-3 pr-1 text-sm text-text-primary"
                   >
-                    ×
-                  </button>
-                </span>
-              ))}
-            </div>
+                    {phrase}
+                    <button
+                      type="button"
+                      onClick={() => removePhrase(idx)}
+                      aria-label={`Quitar la frase «${phrase}»`}
+                      className="rounded-md p-1 text-text-tertiary transition-colors hover:bg-neutral-200 hover:text-text-primary"
+                    >
+                      <XMarkIcon className="h-3.5 w-3.5" aria-hidden="true" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
 
-            <div className="flex gap-2">
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <label htmlFor={fieldId('phrase')} className="sr-only">
+                Nueva frase
+              </label>
               <input
+                id={fieldId('phrase')}
                 type="text"
                 className={inputClass}
                 value={newPhrase}
                 onChange={(e) => setNewPhrase(e.target.value)}
-                placeholder="Agregar nueva frase..."
-                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addPhrase() } }}
+                placeholder="Ej: quiero hablar con una persona"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    addPhrase()
+                  }
+                }}
               />
-              <button
-                type="button"
-                onClick={addPhrase}
-                disabled={!newPhrase.trim()}
-                className="shrink-0 rounded-xl bg-[#271173] px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-[#1f0d5a] disabled:opacity-40"
+              <Button type="button" variant="secondary" onClick={addPhrase} disabled={!newPhrase.trim()}>
+                Agregar frase
+              </Button>
+            </div>
+          </Section>
+
+          <Section title="Escalamientos">
+            <div className="flex flex-col gap-3 rounded-lg bg-surface-muted px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-text-secondary">
+                {pendingCount > 0
+                  ? `Hay ${pendingCount} ${pendingCount === 1 ? 'caso pendiente' : 'casos pendientes'} de este agente.`
+                  : 'Los casos que Sofía pasa a un asesor llegan a la bandeja de escalamientos.'}
+              </p>
+              <Link
+                to="/escalamientos"
+                className="inline-flex shrink-0 items-center gap-1.5 text-sm font-semibold text-primary-700 hover:text-primary-800"
               >
-                Agregar
-              </button>
+                Abrir la bandeja
+                <ArrowRightIcon className="h-4 w-4" aria-hidden="true" />
+              </Link>
             </div>
-          </div>
-
-          {/* Escalation Dashboard */}
-          <div className="space-y-4 rounded-xl border border-[#e4e0f5] bg-white p-5">
-            <div className="flex items-center justify-between">
-              <h4 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-black/50">
-                <BellAlertIcon className="h-4 w-4" />
-                Escalaciones Activas
-              </h4>
-              {escalations.length > 0 && (
-                <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-100 px-1.5 text-[10px] font-bold text-amber-700">
-                  {escalations.filter((e) => e.escalation_status === 'pending').length}
-                </span>
-              )}
-            </div>
-
-            {loadingEscalations ? (
-              <div className="flex items-center justify-center gap-2 py-8 text-sm text-black/40">
-                <div className="h-4 w-4 animate-spin rounded-full border-2 border-[#271173] border-t-transparent" />
-                Cargando escalaciones...
-              </div>
-            ) : escalations.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-[#e4e0f5] bg-[#fafafa] py-8 text-center text-sm text-black/40">
-                No hay escalaciones activas
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {escalations.map((esc) => {
-                  const cfg = STATUS_CONFIG[esc.escalation_status]
-                  const StatusIcon = cfg.icon
-                  const date = esc.escalated_at_unix_secs
-                    ? new Date(esc.escalated_at_unix_secs * 1000).toLocaleString('es-MX', {
-                        day: '2-digit',
-                        month: 'short',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })
-                    : '—'
-
-                  return (
-                    <div
-                      key={esc.conversation_id}
-                      className="flex items-center justify-between rounded-xl border border-[#e4e0f5] bg-[#fafafa] p-4 transition-colors hover:bg-[#f5f3ff]"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[10px] font-semibold ${cfg.color}`}>
-                            <StatusIcon className="h-3 w-3" />
-                            {cfg.label}
-                          </span>
-                          <span className="text-[10px] text-black/40">{date}</span>
-                        </div>
-                        <p className="mt-1.5 truncate text-xs text-black/70">
-                          {esc.escalation_reason || esc.last_message_preview || 'Sin detalle'}
-                        </p>
-                      </div>
-
-                      <div className="ml-3 flex shrink-0 gap-1.5">
-                        {esc.escalation_status === 'pending' && (
-                          <button
-                            type="button"
-                            disabled={patchingEscalation}
-                            onClick={() => patchEscalation({ convId: esc.conversation_id, status: 'in_progress' })}
-                            className="rounded-lg bg-blue-50 px-3 py-1.5 text-[11px] font-medium text-blue-700 transition-colors hover:bg-blue-100 disabled:opacity-50"
-                          >
-                            Atender
-                          </button>
-                        )}
-                        {(esc.escalation_status === 'pending' || esc.escalation_status === 'in_progress') && (
-                          <button
-                            type="button"
-                            disabled={patchingEscalation}
-                            onClick={() => patchEscalation({ convId: esc.conversation_id, status: 'resolved' })}
-                            className="rounded-lg bg-emerald-50 px-3 py-1.5 text-[11px] font-medium text-emerald-700 transition-colors hover:bg-emerald-100 disabled:opacity-50"
-                          >
-                            Resolver
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </div>
+          </Section>
         </>
       )}
     </div>

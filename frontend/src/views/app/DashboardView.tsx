@@ -1,15 +1,5 @@
-﻿import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import {
-  ArrowPathIcon,
-  ArrowTrendingDownIcon,
-  ArrowTrendingUpIcon,
-  CalendarDaysIcon,
-  CheckCircleIcon,
-  ClockIcon,
-  SparklesIcon,
-  UserGroupIcon,
-} from '@heroicons/react/24/outline'
+import { ArrowPathIcon } from '@heroicons/react/24/outline'
 import {
   getAgents,
   getConversations,
@@ -17,118 +7,16 @@ import {
 } from '@/api/VoiceRuntimeAPI'
 import { getTextAgents, getTextConversations, getUpcomingRenewals } from '@/api/TextAgentsAPI'
 import type { AgentListItem, Conversation, PhoneNumber } from '@/types/agent'
-import type { TextAgentSummary, TextConversation, UpcomingRenewal } from '@/types/textAgent'
+import type { TextAgentSummary } from '@/types/textAgent'
 import { useCurrentUser } from '@/hooks/useCurrentUser'
-import SecretaryDashboard from '@/components/app/dashboard/SecretaryDashboard'
-
-type KpiCard = {
-  label: string
-  value: string
-  delta: string
-  trend: 'up' | 'down' | 'stable'
-  subtitle: string
-}
-
-type HealthMetric = {
-  label: string
-  value: number
-  detail: string
-  tone: string
-}
-
-type TimelineItem = {
-  time: string
-  title: string
-  detail: string
-  tag: string
-}
-
-type ActivityPoint = {
-  kind: 'voice' | 'text'
-  agentId: string
-  timestamp: number
-  status: string
-  channel: string
-  durationSecs?: number
-  messageCount?: number
-}
-
-type DashboardData = {
-  voiceAgents: AgentListItem[]
-  textAgents: TextAgentSummary[]
-  phoneNumbers: PhoneNumber[]
-  voiceConversations: Conversation[]
-  textConversations: TextConversation[]
-  upcomingRenewals: UpcomingRenewal[]
-  loadedAt: number
-}
+import { cn } from '@/lib/utils'
+import PageHeader from '@/components/ui/PageHeader'
+import Button from '@/components/ui/Button'
+import Skeleton from '@/components/ui/Skeleton'
+import SecretaryDashboard, { type DashboardDataset } from '@/components/app/dashboard/SecretaryDashboard'
 
 const VOICE_PAGE_SIZE = 100
 const VOICE_PAGES_LIMIT = 5
-
-function asUnix(value: number | undefined): number {
-  if (typeof value !== 'number' || Number.isNaN(value) || value <= 0) return 0
-  return Math.floor(value)
-}
-
-function formatDuration(totalSeconds: number): string {
-  const safeSeconds = Math.max(0, Math.floor(totalSeconds))
-  const hours = Math.floor(safeSeconds / 3600)
-  const minutes = Math.floor((safeSeconds % 3600) / 60)
-  const seconds = safeSeconds % 60
-
-  if (hours > 0) {
-    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(
-      seconds
-    ).padStart(2, '0')}`
-  }
-
-  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
-}
-
-function formatClock(unix: number): string {
-  if (!unix) return '--:--'
-  return new Date(unix * 1000).toLocaleTimeString('es-CO', {
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
-
-function toPercent(part: number, total: number): number {
-  if (total <= 0) return 0
-  return Math.round((part / total) * 100)
-}
-
-function buildDeltaLabel(current: number, previous: number): string {
-  const delta = current - previous
-  if (delta > 0) return `+${delta} vs ayer`
-  if (delta < 0) return `${delta} vs ayer`
-  return 'Sin cambio vs ayer'
-}
-
-function buildLinePath(values: number[], width: number, height: number, padding: number) {
-  const min = Math.min(...values)
-  const max = Math.max(...values)
-  const range = Math.max(max - min, 1)
-  const step = (width - padding * 2) / Math.max(values.length - 1, 1)
-
-  const points = values.map((value, index) => {
-    const x = padding + step * index
-    const normalized = (value - min) / range
-    const y = height - padding - normalized * (height - padding * 2)
-    return { x, y }
-  })
-
-  const line = points
-    .map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`)
-    .join(' ')
-
-  const area = `${line} L ${points[points.length - 1].x.toFixed(2)} ${(height - padding).toFixed(
-    2
-  )} L ${points[0].x.toFixed(2)} ${(height - padding).toFixed(2)} Z`
-
-  return { points, line, area }
-}
 
 async function getAllVoiceConversations(agentId: string): Promise<Conversation[]> {
   const all: Conversation[] = []
@@ -159,9 +47,14 @@ async function getAllVoiceConversations(agentId: string): Promise<Conversation[]
   return all
 }
 
-async function fetchDashboardData(): Promise<DashboardData> {
+async function fetchDashboardData(): Promise<DashboardDataset> {
   const [voiceAgentsResult, textAgentsResult, phoneNumbersResult] =
     await Promise.allSettled([getAgents(), getTextAgents(), getPhoneNumbers()])
+
+  // Solo es un error si ninguna fuente respondió; una cuenta nueva sin agentes ve el resumen vacío.
+  if ([voiceAgentsResult, textAgentsResult, phoneNumbersResult].every((r) => r.status === 'rejected')) {
+    throw new Error('No fue posible cargar el resumen')
+  }
 
   const voiceAgents: AgentListItem[] =
     voiceAgentsResult.status === 'fulfilled' &&
@@ -178,10 +71,6 @@ async function fetchDashboardData(): Promise<DashboardData> {
     phoneNumbersResult.status === 'fulfilled' && Array.isArray(phoneNumbersResult.value)
       ? phoneNumbersResult.value
       : []
-
-  if (voiceAgents.length === 0 && textAgents.length === 0 && phoneNumbers.length === 0) {
-    throw new Error('No fue posible cargar datos del dashboard')
-  }
 
   const [voiceConversationResults, textConversationResults] = await Promise.all([
     Promise.allSettled(
@@ -221,608 +110,81 @@ async function fetchDashboardData(): Promise<DashboardData> {
   }
 }
 
-export default function DashboardView() {
-  const { user } = useCurrentUser()
-  const isClientView = Boolean(user && user.role !== 'super_admin')
+function describeLoadTime(loadedAt: number): string {
+  const date = new Date(loadedAt)
+  const day = date.toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long' })
+  const time = date.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })
+  return `${day.charAt(0).toUpperCase()}${day.slice(1)} · Actualizado a las ${time}`
+}
 
-  const { data, isLoading, isFetching, isError, error, refetch } = useQuery({
+function DashboardSkeleton() {
+  return (
+    <div className="space-y-10" aria-label="Cargando el resumen">
+      <div className="rounded-xl border border-border-default bg-surface px-6 py-6">
+        <Skeleton height={20} width="45%" />
+        <Skeleton className="mt-3" height={14} width="30%" />
+      </div>
+      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+        <Skeleton height={220} />
+        <Skeleton height={220} />
+      </div>
+    </div>
+  )
+}
+
+export default function DashboardView() {
+  const { isSuperAdmin } = useCurrentUser()
+
+  const { data, isLoading, isFetching, isError, refetch } = useQuery({
     queryKey: ['dashboard-real-data'],
     queryFn: fetchDashboardData,
     refetchInterval: 45_000,
     refetchOnWindowFocus: true,
   })
 
-  const computed = useMemo(() => {
-    if (!data) {
-      return {
-        kpis: [] as KpiCard[],
-        liveSeries: Array.from({ length: 12 }, () => 0),
-        channelLegend: [{ label: 'Sin trafico', pct: 100, color: '#e4e0f5', count: 0 }],
-        channelGradient: 'conic-gradient(#e4e0f5 0 100%)',
-        channelHighlight: { label: 'Sin trafico', pct: 0 },
-        healthMetrics: [] as HealthMetric[],
-        timeline: [] as TimelineItem[],
-        recommendation:
-          'Conecta al menos una fuente de conversaciones para empezar a recibir metricas.',
-        recommendationBadge: 'Sin datos operativos',
-        snapshotSummary: 'Sin datos cargados',
-        loadedAtText: '--:--',
-      }
-    }
-
-    const nowUnix = Math.floor(data.loadedAt / 1000)
-    const todayStartDate = new Date(data.loadedAt)
-    todayStartDate.setHours(0, 0, 0, 0)
-    const todayStart = Math.floor(todayStartDate.getTime() / 1000)
-    const yesterdayStart = todayStart - 86400
-
-    const voiceAgentNames = new Map(
-      data.voiceAgents.map((agent) => [agent.agent_id, agent.name])
-    )
-    const textAgentNames = new Map(
-      data.textAgents.map((agent) => [agent.agent_id, agent.name])
-    )
-
-    const activityPoints: ActivityPoint[] = [
-      ...data.voiceConversations.map((conversation) => ({
-        kind: 'voice' as const,
-        agentId: conversation.agent_id,
-        timestamp: asUnix(conversation.start_time_unix_secs),
-        status: String(conversation.status ?? 'unknown'),
-        channel: 'voice',
-        durationSecs:
-          typeof conversation.call_duration_secs === 'number'
-            ? conversation.call_duration_secs
-            : undefined,
-      })),
-      ...data.textConversations.map((conversation) => ({
-        kind: 'text' as const,
-        agentId: conversation.agent_id,
-        timestamp: asUnix(conversation.start_time_unix_secs),
-        status: String(conversation.status ?? 'unknown'),
-        channel: String(conversation.channel ?? 'web'),
-        messageCount: conversation.message_count,
-      })),
-    ].filter((item) => item.timestamp > 0)
-
-    const totalConversations = activityPoints.length
-    const conversationsToday = activityPoints.filter(
-      (item) => item.timestamp >= todayStart
-    ).length
-    const conversationsYesterday = activityPoints.filter(
-      (item) => item.timestamp >= yesterdayStart && item.timestamp < todayStart
-    ).length
-
-    const activeVoiceStatuses = new Set([
-      'active',
-      'in_progress',
-      'queued',
-      'ringing',
-      'processing',
-    ])
-    const activeVoiceCalls = data.voiceConversations.filter((conversation) =>
-      activeVoiceStatuses.has(String(conversation.status ?? '').toLowerCase())
-    ).length
-
-    const voiceDurations = data.voiceConversations
-      .map((conversation) => conversation.call_duration_secs)
-      .filter((value): value is number => typeof value === 'number' && value > 0)
-
-    const avgVoiceDuration =
-      voiceDurations.length > 0
-        ? voiceDurations.reduce((sum, value) => sum + value, 0) / voiceDurations.length
-        : 0
-
-    const textMessageCounts = data.textConversations
-      .map((conversation) => conversation.message_count)
-      .filter((value): value is number => typeof value === 'number' && value >= 0)
-
-    const avgTextMessages =
-      textMessageCounts.length > 0
-        ? textMessageCounts.reduce((sum, value) => sum + value, 0) / textMessageCounts.length
-        : 0
-
-    const todayDelta = conversationsToday - conversationsYesterday
-    const kpis: KpiCard[] = [
-      {
-        label: 'Conversaciones hoy',
-        value: `${conversationsToday}`,
-        delta: buildDeltaLabel(conversationsToday, conversationsYesterday),
-        trend: todayDelta > 0 ? 'up' : todayDelta < 0 ? 'down' : 'stable',
-        subtitle: `Ayer: ${conversationsYesterday}`,
-      },
-      {
-        label: 'Llamadas activas',
-        value: `${activeVoiceCalls}`,
-        delta: `${data.voiceConversations.length} totales`,
-        trend: activeVoiceCalls > 0 ? 'up' : 'stable',
-        subtitle: 'Estado actual de conversaciones de voz',
-      },
-      {
-        label: 'Duracion media voz',
-        value: formatDuration(avgVoiceDuration),
-        delta: `${voiceDurations.length} con duracion`,
-        trend: 'stable',
-        subtitle: 'Promedio real en llamadas registradas',
-      },
-      {
-        label: 'Mensajes por chat',
-        value: avgTextMessages.toFixed(1),
-        delta: `${data.textConversations.length} conversaciones`,
-        trend: 'stable',
-        subtitle: 'Promedio de mensajes en texto',
-      },
-    ]
-
-    const liveSeries = Array.from({ length: 12 }, () => 0)
-    const windowStart = nowUnix - 11 * 3600
-
-    for (const item of activityPoints) {
-      if (item.timestamp < windowStart) continue
-      const index = Math.min(11, Math.max(0, Math.floor((item.timestamp - windowStart) / 3600)))
-      liveSeries[index] += 1
-    }
-
-    const voiceCount = data.voiceConversations.length
-    const whatsappCount = data.textConversations.filter(
-      (conversation) => conversation.channel === 'whatsapp'
-    ).length
-    const webCount = data.textConversations.filter(
-      (conversation) => conversation.channel === 'web'
-    ).length
-    const otherCount = Math.max(0, data.textConversations.length - whatsappCount - webCount)
-
-    const channelRaw = [
-      { label: 'Voz', count: voiceCount, color: '#271173' },
-      { label: 'WhatsApp', count: whatsappCount, color: '#0ea5e9' },
-      { label: 'Web', count: webCount, color: '#14b8a6' },
-      { label: 'Otros', count: otherCount, color: '#f97316' },
-    ].filter((segment) => segment.count > 0)
-
-    const channelLegend =
-      channelRaw.length === 0
-        ? [{ label: 'Sin trafico', count: 0, pct: 100, color: '#e4e0f5' }]
-        : (() => {
-            const total = channelRaw.reduce((sum, segment) => sum + segment.count, 0)
-            let usedPct = 0
-
-            return channelRaw.map((segment, index) => {
-              const pct =
-                index === channelRaw.length - 1
-                  ? Math.max(0, Number((100 - usedPct).toFixed(1)))
-                  : Number(((segment.count / total) * 100).toFixed(1))
-
-              usedPct += pct
-              return {
-                ...segment,
-                pct,
-              }
-            })
-          })()
-
-    let currentPct = 0
-    const channelGradient =
-      channelLegend.length > 0
-        ? `conic-gradient(${channelLegend
-            .map((segment) => {
-              const from = currentPct
-              const to = Number((currentPct + segment.pct).toFixed(1))
-              currentPct = to
-              return `${segment.color} ${from}% ${to}%`
-            })
-            .join(', ')})`
-        : 'conic-gradient(#e4e0f5 0 100%)'
-
-    const primaryChannel = channelLegend[0] ?? { label: 'Sin trafico', pct: 0 }
-
-    const totalPhones = data.phoneNumbers.length
-    const assignedPhones = data.phoneNumbers.filter(
-      (phoneNumber) => phoneNumber.assigned_agent?.agent_id
-    ).length
-    const inboundReady = data.phoneNumbers.filter(
-      (phoneNumber) => phoneNumber.supports_inbound !== false
-    ).length
-    const outboundReady = data.phoneNumbers.filter(
-      (phoneNumber) => phoneNumber.supports_outbound !== false
-    ).length
-
-    const resolvedStatuses = new Set(['done', 'completed', 'resolved', 'success'])
-    const resolvedConversations = activityPoints.filter((item) =>
-      resolvedStatuses.has(item.status.toLowerCase())
-    ).length
-
-    const healthMetrics: HealthMetric[] = [
-      {
-        label: 'Numeros asignados',
-        value: toPercent(assignedPhones, totalPhones),
-        detail: `${assignedPhones}/${totalPhones}`,
-        tone: 'bg-[#271173]',
-      },
-      {
-        label: 'Inbound disponible',
-        value: toPercent(inboundReady, totalPhones),
-        detail: `${inboundReady}/${totalPhones}`,
-        tone: 'bg-[#0ea5e9]',
-      },
-      {
-        label: 'Outbound disponible',
-        value: toPercent(outboundReady, totalPhones),
-        detail: `${outboundReady}/${totalPhones}`,
-        tone: 'bg-[#14b8a6]',
-      },
-      {
-        label: 'Conversaciones resueltas',
-        value: toPercent(resolvedConversations, totalConversations),
-        detail: `${resolvedConversations}/${totalConversations}`,
-        tone: 'bg-[#f97316]',
-      },
-    ]
-
-    const timeline: TimelineItem[] = activityPoints
-      .slice()
-      .sort((a, b) => b.timestamp - a.timestamp)
-      .slice(0, 4)
-      .map((item) => {
-        const isVoice = item.kind === 'voice'
-        const agentName = isVoice
-          ? voiceAgentNames.get(item.agentId)
-          : textAgentNames.get(item.agentId)
-
-        return {
-          time: formatClock(item.timestamp),
-          title: `${agentName ?? item.agentId} · ${isVoice ? 'Voz' : 'Texto'}`,
-          detail: isVoice
-            ? `Estado: ${item.status}${
-                typeof item.durationSecs === 'number' && item.durationSecs > 0
-                  ? ` · Duracion ${formatDuration(item.durationSecs)}`
-                  : ''
-              }`
-            : `Canal: ${item.channel}${
-                typeof item.messageCount === 'number' ? ` · ${item.messageCount} mensajes` : ''
-              }`,
-          tag: isVoice ? 'Voz' : item.channel,
-        }
-      })
-
-    const assignmentRate = toPercent(assignedPhones, totalPhones)
-    const resolutionRate = toPercent(resolvedConversations, totalConversations)
-
-    const recommendation =
-      assignmentRate < 100
-        ? 'Asigna todos los numeros pendientes a un agente para no perder trafico entrante.'
-        : resolutionRate < 85
-          ? 'Revisa conversaciones no resueltas y ajusta prompt o herramientas para mejorar cierres.'
-          : 'Manten la configuracion actual y monitorea los picos por hora para reaccion temprana.'
-
-    const recommendationBadge =
-      assignmentRate < 100
-        ? `Foco: cobertura de numeros (${assignedPhones}/${totalPhones})`
-        : `Foco: resolucion (${resolvedConversations}/${totalConversations})`
-
-    return {
-      kpis,
-      liveSeries,
-      channelLegend,
-      channelGradient,
-      channelHighlight: {
-        label: primaryChannel.label,
-        pct: primaryChannel.pct,
-      },
-      healthMetrics,
-      timeline,
-      recommendation,
-      recommendationBadge,
-      snapshotSummary: `${data.voiceAgents.length} agentes de voz · ${data.textAgents.length} agentes de texto · ${data.phoneNumbers.length} numeros`,
-      loadedAtText: formatClock(Math.floor(data.loadedAt / 1000)),
-    }
-  }, [data])
-
-  const chart = buildLinePath(computed.liveSeries, 760, 280, 28)
-
   return (
-    <div
-      className="h-full overflow-y-auto no-visible-scrollbar"
-    >
-      <div className="mx-auto w-full max-w-360 space-y-6 px-8 py-8">
-        {!isClientView && (
-          <section className="section-enter relative overflow-hidden rounded-3xl border border-border-default bg-surface p-8 shadow-sm">
-            <div className="pointer-events-none absolute -right-24 -top-24 h-64 w-64 rounded-full bg-primary-600/10 blur-3xl" />
-            <div className="pointer-events-none absolute -bottom-28 left-1/3 h-72 w-72 rounded-full bg-info-500/10 blur-3xl" />
+    <div className="h-full overflow-y-auto">
+      <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+        <PageHeader
+          title="Resumen de hoy"
+          description={
+            data
+              ? describeLoadTime(data.loadedAt)
+              : 'Lo que resolvieron sus agentes y lo que necesita a una persona del equipo.'
+          }
+          actions={
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => refetch()}
+              aria-busy={isFetching}
+              leftIcon={
+                <ArrowPathIcon
+                  aria-hidden="true"
+                  className={cn('h-4 w-4', isFetching && 'animate-spin')}
+                />
+              }
+            >
+              Actualizar
+            </Button>
+          }
+        />
 
-            <div className="relative flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-              <div className="max-w-3xl">
-                <p className="inline-flex items-center gap-1.5 rounded-full border border-primary-200 bg-primary-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-primary-700">
-                  <SparklesIcon className="h-3.5 w-3.5" />
-                  Pulse Control Center
-                </p>
-                <h1 className="mt-4 text-4xl font-semibold leading-tight text-text-primary">
-                  Dashboard operativo con data real,
-                  <span className="text-primary-600"> en voz, texto y telefonia</span>
-                </h1>
-                <p className="mt-3 max-w-2xl text-sm leading-6 text-text-secondary">
-                  {computed.snapshotSummary}. Actualizacion automatica cada 45 segundos para
-                  seguimiento continuo del estado operativo.
-                </p>
-              </div>
-
-              <div className="grid w-full gap-3 sm:grid-cols-2 lg:w-auto lg:grid-cols-1">
-                <button
-                  onClick={() => refetch()}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white transition-all duration-200 ease-out hover:-translate-y-px hover:bg-primary-700 shadow-sm"
-                >
-                  <ArrowPathIcon className={`h-4 w-4 ${isFetching ? 'animate-spin' : ''}`} />
-                  Refrescar metricas
-                </button>
-                <div className="inline-flex items-center justify-center rounded-xl border border-border-default bg-surface px-4 py-2.5 text-sm font-semibold text-text-primary shadow-sm">
-                  Ultima carga: {computed.loadedAtText}
-                </div>
-              </div>
-            </div>
-          </section>
-        )}
-
-        {isLoading && (
-          <section className="rounded-2xl border border-border-default bg-surface p-10 text-center text-sm text-text-secondary shadow-sm">
-            Cargando metricas reales del workspace...
-          </section>
-        )}
-
-        {isError && (
-          <section className="rounded-2xl border border-danger-200 bg-danger-50 p-5 text-sm text-danger-700 shadow-sm">
-            {error instanceof Error
-              ? error.message
-              : 'No fue posible cargar el dashboard con data real.'}
-          </section>
-        )}
-
-        {!isLoading && !isError && (
-          <>
-            {isClientView ? (
-              data ? <SecretaryDashboard data={data} loadedAtText={computed.loadedAtText} /> : null
-            ) : (
-              <>
-            <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              {computed.kpis.map((item, index) => (
-                <article
-                  key={item.label}
-                  className="stagger-item rounded-2xl border border-border-default bg-surface p-5 shadow-sm"
-                  style={{ animationDelay: `${index * 50}ms` }}
-                >
-                  <p className="text-xs uppercase tracking-[0.12em] text-text-muted">
-                    {item.label}
-                  </p>
-                  <p className="mt-3 text-3xl font-semibold text-text-primary">{item.value}</p>
-                  <p className="mt-2 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold text-text-primary ring-1 ring-inset ring-border-default">
-                    {item.trend === 'up' && (
-                      <ArrowTrendingUpIcon className="h-3.5 w-3.5 text-accent-600" />
-                    )}
-                    {item.trend === 'down' && (
-                      <ArrowTrendingDownIcon className="h-3.5 w-3.5 text-danger-600" />
-                    )}
-                    {item.trend === 'stable' && (
-                      <ArrowPathIcon className="h-3.5 w-3.5 text-primary-600" />
-                    )}
-                    {item.delta}
-                  </p>
-                  <p className="mt-2 text-xs text-text-tertiary">{item.subtitle}</p>
-                </article>
-              ))}
-            </section>
-
-            <section className="grid gap-4 xl:grid-cols-3">
-              <article className="stagger-item rounded-2xl border border-border-default bg-surface p-5 shadow-sm xl:col-span-2">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <p className="text-xs uppercase tracking-[0.12em] text-text-muted">
-                      Actividad en tiempo real
-                    </p>
-                    <h2 className="mt-1 text-xl font-semibold text-text-primary">
-                      Conversaciones por hora (ultimas 12 horas)
-                    </h2>
-                  </div>
-                  <span className="rounded-full border border-primary-200 bg-primary-50 px-3 py-1 text-xs font-semibold text-primary-700">
-                    Ventana movil
-                  </span>
-                </div>
-
-                <div className="mt-5 overflow-hidden rounded-xl border border-primary-100 bg-primary-50/30 p-3">
-                  <svg
-                    viewBox="0 0 760 280"
-                    className="h-70 w-full"
-                    role="img"
-                    aria-label="Serie de conversaciones por hora"
-                  >
-                    <defs>
-                      <linearGradient id="pulse-fill" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#0369a1" stopOpacity="0.28" />
-                        <stop offset="100%" stopColor="#0369a1" stopOpacity="0" />
-                      </linearGradient>
-                    </defs>
-
-                    {[0, 1, 2, 3].map((line) => {
-                      const y = 28 + line * 56
-                      return (
-                        <line
-                          key={line}
-                          x1="28"
-                          y1={y}
-                          x2="732"
-                          y2={y}
-                          stroke="#e0e7ff"
-                          strokeWidth="1"
-                          strokeDasharray="6 6"
-                        />
-                      )
-                    })}
-
-                    <path d={chart.area} fill="url(#pulse-fill)" />
-                    <path
-                      d={chart.line}
-                      fill="none"
-                      stroke="#0369a1"
-                      strokeWidth="3"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-
-                    {chart.points.map((point, index) => (
-                      <circle
-                        key={index}
-                        cx={point.x}
-                        cy={point.y}
-                        r={index === chart.points.length - 1 ? 5 : 3.5}
-                        fill={
-                          index === chart.points.length - 1 ? '#f59e0b' : '#0369a1'
-                        }
-                      />
-                    ))}
-                  </svg>
-                </div>
-              </article>
-
-              <article className="stagger-item rounded-2xl border border-border-default bg-surface p-5 shadow-sm">
-                <p className="text-xs uppercase tracking-[0.12em] text-text-muted">
-                  Distribucion de canales
-                </p>
-                <h2 className="mt-1 text-xl font-semibold text-text-primary">Mix de origen real</h2>
-
-                <div className="mt-5 flex items-center justify-center">
-                  <div
-                    className="relative h-48 w-48 rounded-full"
-                    style={{ background: computed.channelGradient }}
-                  >
-                    <div className="absolute inset-5 rounded-full bg-surface" />
-                    <div className="absolute inset-0 flex flex-col items-center justify-center">
-                      <p className="text-3xl font-semibold text-text-primary">
-                        {computed.channelHighlight.pct.toFixed(1)}%
-                      </p>
-                      <p className="text-xs uppercase tracking-[0.12em] text-text-tertiary">
-                        {computed.channelHighlight.label}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="mt-5 space-y-2.5 text-sm">
-                  {computed.channelLegend.map((item) => (
-                    <div
-                      key={item.label}
-                      className="flex items-center justify-between rounded-xl bg-primary-50/40 px-3 py-2"
-                    >
-                      <p className="inline-flex items-center gap-2 text-text-secondary">
-                        <span
-                          className="h-2.5 w-2.5 rounded-full"
-                          style={{ backgroundColor: item.color }}
-                        />
-                        {item.label}
-                      </p>
-                      <span className="font-semibold text-text-primary">
-                        {item.pct.toFixed(1)}% ({item.count})
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </article>
-            </section>
-
-            <section className="grid gap-4 xl:grid-cols-2">
-              <article className="stagger-item rounded-2xl border border-border-default bg-surface p-5 shadow-sm">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-xs uppercase tracking-[0.12em] text-text-muted">
-                      Salud operativa
-                    </p>
-                    <h2 className="mt-1 text-xl font-semibold text-text-primary">
-                      Cobertura y resolucion
-                    </h2>
-                  </div>
-                  <UserGroupIcon className="h-5 w-5 text-primary-600" />
-                </div>
-
-                <div className="mt-5 space-y-3.5">
-                  {computed.healthMetrics.map((item) => (
-                    <div key={item.label}>
-                      <div className="mb-1.5 flex items-center justify-between text-sm">
-                        <p className="font-medium text-text-secondary">{item.label}</p>
-                        <p className="font-semibold text-text-primary">
-                          {item.value}% · {item.detail}
-                        </p>
-                      </div>
-                      <div className="h-2.5 rounded-full bg-primary-100/50">
-                        <div
-                          className={`h-full rounded-full ${item.tone} transition-[width] duration-500 ease-out`}
-                          style={{ width: `${item.value}%` }}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </article>
-
-              <article className="stagger-item rounded-2xl border border-border-default bg-surface p-5 shadow-sm">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-xs uppercase tracking-[0.12em] text-text-muted">
-                      Bitacora operativa
-                    </p>
-                    <h2 className="mt-1 text-xl font-semibold text-text-primary">
-                      Ultima actividad
-                    </h2>
-                  </div>
-                  <CalendarDaysIcon className="h-5 w-5 text-primary-600" />
-                </div>
-
-                <div className="mt-5 space-y-4">
-                  {computed.timeline.length === 0 && (
-                    <div className="rounded-xl border border-primary-100 bg-primary-50/30 p-3.5 text-sm text-text-secondary">
-                      Todavia no hay conversaciones para mostrar en timeline.
-                    </div>
-                  )}
-
-                  {computed.timeline.map((item) => (
-                    <div
-                      key={`${item.time}-${item.title}`}
-                      className="relative rounded-xl border border-primary-100 bg-primary-50/30 p-3.5 transition-all duration-200 hover:border-primary-200 hover:shadow-sm"
-                    >
-                      <div className="mb-1 flex items-center justify-between gap-3">
-                        <p className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.08em] text-primary-700">
-                          <ClockIcon className="h-3.5 w-3.5" />
-                          {item.time}
-                        </p>
-                        <span className="rounded-full bg-surface px-2 py-0.5 text-[11px] font-semibold text-text-tertiary ring-1 ring-border-default">
-                          {item.tag}
-                        </span>
-                      </div>
-                      <p className="text-sm font-semibold text-text-primary">{item.title}</p>
-                      <p className="mt-1 text-xs leading-5 text-text-secondary">{item.detail}</p>
-                    </div>
-                  ))}
-                </div>
-              </article>
-            </section>
-
-            <section className="stagger-item rounded-2xl border border-border-default bg-surface p-5 shadow-sm">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs uppercase tracking-[0.12em] text-text-muted">
-                    Recomendacion inmediata
-                  </p>
-                  <h2 className="mt-1 text-xl font-semibold text-text-primary">
-                    {computed.recommendation}
-                  </h2>
-                </div>
-                <p className="inline-flex items-center gap-1.5 rounded-full bg-accent-50 px-3 py-1 text-xs font-semibold text-accent-700 ring-1 ring-accent-200">
-                  <CheckCircleIcon className="h-4 w-4" />
-                  {computed.recommendationBadge}
-                </p>
-              </div>
-            </section>
-              </>
-            )}
-          </>
-        )}
+        {data ? (
+          <SecretaryDashboard data={data} isSuperAdmin={isSuperAdmin} />
+        ) : isLoading ? (
+          <DashboardSkeleton />
+        ) : isError ? (
+          <div className="flex flex-col items-start gap-3 rounded-xl border border-border-default bg-surface px-6 py-6">
+            <p className="text-sm text-text-primary">
+              No pudimos cargar el resumen. Revise su conexión e intente de nuevo.
+            </p>
+            <Button variant="outline" size="sm" onClick={() => refetch()}>
+              Reintentar
+            </Button>
+          </div>
+        ) : null}
       </div>
     </div>
   )
 }
-

@@ -1,22 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useForm, useWatch } from 'react-hook-form'
 import { toast } from 'react-toastify'
-import {
-  BookOpenIcon,
-  CalendarDaysIcon,
-  ChartBarIcon,
-  ChatBubbleLeftRightIcon,
-  CheckIcon,
-  ChevronLeftIcon,
-  DevicePhoneMobileIcon,
-  GlobeAltIcon,
-  KeyIcon,
-  PencilIcon,
-  SparklesIcon,
-  WrenchScrewdriverIcon,
-} from '@heroicons/react/24/outline'
+import { ChevronLeftIcon, ChevronRightIcon, PencilIcon } from '@heroicons/react/24/outline'
 import { getTextAgent, listProviderConfigs, updateTextAgent } from '@/api/TextAgentsAPI'
 import OnboardingWizard from '@/components/app/onboarding/OnboardingWizard'
 import TextAgentPreview from '@/components/app/text-agent/TextAgentPreview'
@@ -30,6 +17,9 @@ import TextAgentSofiaTab from '@/components/app/text-agent/tabs/TextAgentSofiaTa
 import TextAgentToolsTab from '@/components/app/text-agent/tabs/TextAgentToolsTab'
 import TextAgentWhatsAppTab from '@/components/app/text-agent/tabs/TextAgentWhatsAppTab'
 import { useCurrentUser } from '@/hooks/useCurrentUser'
+import Badge from '@/components/ui/Badge'
+import Button from '@/components/ui/Button'
+import { getTemplateCopy } from '@/components/app/text-agent/copy'
 import {
   TEXT_PROVIDER_MODELS,
   type TextAgentFormValues,
@@ -37,18 +27,19 @@ import {
   type TextProvider,
 } from '@/types/textAgent'
 
+// Primero lo que el equipo de negocio usa a diario; al final, lo técnico.
 const BASE_TABS = [
-  { id: 'config', label: 'Agente', icon: ChatBubbleLeftRightIcon },
-  { id: 'tools', label: 'Herramientas', icon: WrenchScrewdriverIcon },
-  { id: 'knowledge', label: 'Conocimiento', icon: BookOpenIcon },
-  { id: 'sofia', label: 'Sofia IA', icon: SparklesIcon },
-  { id: 'appointments', label: 'Citas', icon: CalendarDaysIcon },
-  { id: 'whatsapp', label: 'Canal WhatsApp', icon: DevicePhoneMobileIcon },
-  { id: 'integration', label: 'Integracion', icon: GlobeAltIcon },
-  { id: 'analysis', label: 'Analisis', icon: ChartBarIcon },
+  { id: 'config', label: 'Agente' },
+  { id: 'sofia', label: 'Sofía' },
+  { id: 'knowledge', label: 'Conocimiento' },
+  { id: 'appointments', label: 'Citas' },
+  { id: 'analysis', label: 'Conversaciones' },
+  { id: 'whatsapp', label: 'WhatsApp' },
+  { id: 'integration', label: 'Sitio web' },
+  { id: 'tools', label: 'Herramientas' },
 ] as const
 
-const KEYS_TAB = { id: 'keys', label: 'API Keys', icon: KeyIcon } as const
+const KEYS_TAB = { id: 'keys', label: 'Claves de IA' } as const
 const CORE_CLIENT_TAB_IDS: Array<(typeof BASE_TABS)[number]['id']> = [
   'config',
   'whatsapp',
@@ -112,8 +103,10 @@ export default function TextAgentDetailView() {
   const templateCapabilities = agent?.template_capabilities ?? EMPTY_TEMPLATE_CAPABILITIES
 
   const tabs = useMemo(() => {
-    const visible = isClient ? buildClientVisibleTabs(templateCapabilities) : [...BASE_TABS]
-    return requiresUserKeys && !isClient ? [visible[0], KEYS_TAB, ...visible.slice(1)] : [...visible]
+    const visible: Array<{ id: TabId; label: string }> = isClient
+      ? buildClientVisibleTabs(templateCapabilities)
+      : [...BASE_TABS]
+    return requiresUserKeys && !isClient ? [...visible, KEYS_TAB] : visible
   }, [isClient, requiresUserKeys, templateCapabilities])
 
   const resolvedActiveTab = useMemo<TabId>(() => {
@@ -226,110 +219,209 @@ export default function TextAgentDetailView() {
     Boolean(agent?.agent_id) &&
     !localStorage.getItem(`onboarding-wizard:done:${agent?.agent_id ?? ''}`)
 
+  const tabRefs = useRef<Partial<Record<TabId, HTMLButtonElement | null>>>({})
+  const tabListRef = useRef<HTMLDivElement | null>(null)
+  const [tabOverflow, setTabOverflow] = useState({ left: false, right: false })
+
+  const updateTabOverflow = useCallback(() => {
+    const list = tabListRef.current
+    if (!list) return
+    const left = list.scrollLeft > 4
+    const right = list.scrollLeft + list.clientWidth < list.scrollWidth - 4
+    setTabOverflow((prev) => (prev.left === left && prev.right === right ? prev : { left, right }))
+  }, [])
+
+  // Con pantallas estrechas las pestañas se desplazan; las flechas indican que hay más.
+  const attachTabList = useCallback(
+    (list: HTMLDivElement | null) => {
+      tabListRef.current = list
+      if (!list) return
+      const observer = new ResizeObserver(updateTabOverflow)
+      observer.observe(list)
+      return () => observer.disconnect()
+    },
+    [updateTabOverflow],
+  )
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(updateTabOverflow)
+    return () => cancelAnimationFrame(frame)
+  }, [tabs, updateTabOverflow])
+
+  const scrollTabs = (direction: 1 | -1) => {
+    tabListRef.current?.scrollBy({ left: direction * 200, behavior: 'smooth' })
+  }
+
+  const selectTab = (tabId: TabId, focus = false) => {
+    setActiveTab(tabId)
+    const element = tabRefs.current[tabId]
+    element?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    if (focus) element?.focus()
+  }
+
+  const handleTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+    const index = tabs.findIndex((tab) => tab.id === resolvedActiveTab)
+    let next = -1
+    if (event.key === 'ArrowRight') next = (index + 1) % tabs.length
+    else if (event.key === 'ArrowLeft') next = (index - 1 + tabs.length) % tabs.length
+    else if (event.key === 'Home') next = 0
+    else if (event.key === 'End') next = tabs.length - 1
+    if (next < 0) return
+    event.preventDefault()
+    selectTab(tabs[next].id, true)
+  }
+
   if (isLoading) {
     return (
-      <div className="flex h-full items-center justify-center gap-2 text-text-secondary">
-        <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary-600 border-t-transparent" />
-        Cargando agente...
+      <div className="flex h-full items-center justify-center gap-2 text-sm text-text-secondary">
+        <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary-600 border-t-transparent" />
+        Cargando agente…
       </div>
     )
   }
 
   if (isError || !agent) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3">
-        <p className="text-text-secondary">No se pudo cargar el agente de texto.</p>
-        <button
-          onClick={() => navigate('/agentes_texto')}
-          className="text-sm text-primary-600 transition-colors hover:text-primary-700"
-        >
-          Volver
-        </button>
+      <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+        <p className="text-sm text-text-secondary">No pudimos cargar este agente. Es posible que ya no exista.</p>
+        <Button variant="outline" size="sm" onClick={() => navigate('/agentes_texto')}>
+          Volver a agentes de texto
+        </Button>
       </div>
     )
   }
 
+  const templateCopy = getTemplateCopy(agent.template_key, {
+    label: agent.template_label,
+    summary: agent.template_summary,
+  })
+  const displayName = watchedName || agent.name
+
   return (
     <>
-      <form onSubmit={handleSubmit((values) => save(values))} className="flex h-full">
-        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          <div className="flex shrink-0 items-center justify-between border-b border-border-default px-8 py-4">
-            <div className="flex items-center gap-4">
+      <form
+        onSubmit={handleSubmit((values) => save(values))}
+        className="flex h-full flex-col overflow-y-auto lg:flex-row lg:overflow-hidden"
+      >
+        <div className="flex min-w-0 flex-1 flex-col lg:overflow-hidden">
+          <header className="flex shrink-0 flex-wrap items-start justify-between gap-3 px-4 pt-5 sm:px-8 sm:pt-6">
+            <div className="flex min-w-0 items-start gap-2">
               <button
                 type="button"
                 onClick={() => navigate('/agentes_texto')}
-                className="rounded-lg p-1 text-text-tertiary transition-colors hover:bg-primary-50/60 hover:text-primary-600"
+                aria-label="Volver a agentes de texto"
+                className="-ml-2 mt-0.5 rounded-lg p-1.5 text-text-tertiary transition-colors hover:bg-neutral-100 hover:text-text-primary"
               >
-                <ChevronLeftIcon className="h-5 w-5" />
+                <ChevronLeftIcon className="h-5 w-5" aria-hidden="true" />
               </button>
 
-              <div>
-                <div className="flex items-center gap-2">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
                   {editingName ? (
                     <input
                       autoFocus
+                      aria-label="Nombre del agente"
                       onKeyDown={(event) => {
-                        if (event.key === 'Enter') setEditingName(false)
+                        if (event.key === 'Enter') {
+                          event.preventDefault()
+                          setEditingName(false)
+                        }
+                        if (event.key === 'Escape') setEditingName(false)
                       }}
-                      className="rounded-lg border border-[#271173]/30 bg-primary-50 px-3 py-1.5 text-sm font-semibold text-text-primary focus:border-primary-500 focus:outline-none"
+                      className="h-9 min-w-0 rounded-lg border border-primary-300 bg-surface px-3 text-base font-semibold text-text-primary focus:border-primary-600"
                       {...register('name', {
                         required: true,
                         onBlur: () => setEditingName(false),
                       })}
                     />
                   ) : (
-                    <h1 className="text-lg font-semibold text-text-primary">{watchedName || agent.name}</h1>
+                    <h1 className="min-w-0 truncate font-display text-xl leading-tight text-primary-800 sm:text-2xl">
+                      {displayName}
+                    </h1>
                   )}
 
-                  <button
-                    type="button"
-                    onClick={() => setEditingName((prev) => !prev)}
-                    className="rounded-md p-1 text-text-muted transition-colors hover:text-text-secondary"
-                  >
-                    <PencilIcon className="h-3.5 w-3.5" />
-                  </button>
+                  {!editingName && (
+                    <button
+                      type="button"
+                      onClick={() => setEditingName(true)}
+                      aria-label="Cambiar el nombre del agente"
+                      title="Cambiar nombre"
+                      className="rounded-md p-1.5 text-text-tertiary transition-colors hover:bg-neutral-100 hover:text-text-primary"
+                    >
+                      <PencilIcon className="h-4 w-4" aria-hidden="true" />
+                    </button>
+                  )}
 
-                  <span className="rounded-full border border-primary-200 bg-primary-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-primary-600">
-                    {agent.template_label}
-                  </span>
+                  <Badge size="sm">{templateCopy.label}</Badge>
                 </div>
-                <p className="mt-1 max-w-2xl text-xs text-text-tertiary">{agent.template_summary}</p>
+                {templateCopy.summary && (
+                  <p className="mt-1 max-w-2xl text-sm text-text-secondary">{templateCopy.summary}</p>
+                )}
               </div>
             </div>
 
             {isDirty && (
+              <div className="flex items-center gap-3">
+                <span className="hidden text-xs text-text-tertiary sm:inline">Cambios sin guardar</span>
+                <Button type="submit" isLoading={isSaving}>
+                  {isSaving ? 'Guardando…' : 'Guardar cambios'}
+                </Button>
+              </div>
+            )}
+          </header>
+
+          <div className="relative mt-4 shrink-0 border-b border-border-default px-4 sm:px-8">
+            {tabOverflow.left && (
               <button
-                type="submit"
-                disabled={isSaving}
-                className="flex items-center gap-2 rounded-xl bg-primary-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-primary-700 disabled:opacity-60"
+                type="button"
+                tabIndex={-1}
+                aria-hidden="true"
+                onClick={() => scrollTabs(-1)}
+                className="absolute inset-y-0 left-0 z-10 flex w-9 items-center justify-center border-r border-border-subtle bg-bg-secondary text-text-tertiary hover:text-text-primary"
               >
-                {isSaving ? (
-                  <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
-                ) : (
-                  <CheckIcon className="h-4 w-4" />
-                )}
-                {isSaving ? 'Guardando...' : 'Guardar cambios'}
+                <ChevronLeftIcon className="h-4 w-4" />
               </button>
             )}
-          </div>
-
-          <div className="shrink-0 border-b border-border-default px-8">
-            <div className="flex gap-0 overflow-x-auto">
+            {tabOverflow.right && (
+              <button
+                type="button"
+                tabIndex={-1}
+                aria-hidden="true"
+                onClick={() => scrollTabs(1)}
+                className="absolute inset-y-0 right-0 z-10 flex w-9 items-center justify-center border-l border-border-subtle bg-bg-secondary text-text-tertiary hover:text-text-primary"
+              >
+                <ChevronRightIcon className="h-4 w-4" />
+              </button>
+            )}
+            <div
+              ref={attachTabList}
+              role="tablist"
+              aria-label="Secciones del agente"
+              onScroll={updateTabOverflow}
+              className="no-visible-scrollbar -mb-px flex gap-1 overflow-x-auto scroll-px-9"
+            >
               {tabs.map((tab) => {
-                const Icon = tab.icon
                 const active = resolvedActiveTab === tab.id
                 return (
                   <button
                     key={tab.id}
+                    ref={(element) => {
+                      tabRefs.current[tab.id] = element
+                    }}
+                    id={`text-agent-tab-${tab.id}`}
                     type="button"
-                    onClick={() => setActiveTab(tab.id as TabId)}
-                    className={`flex items-center gap-1.5 border-b-2 px-4 py-3.5 text-sm font-medium whitespace-nowrap transition-all ${
+                    role="tab"
+                    aria-selected={active}
+                    aria-controls="text-agent-tabpanel"
+                    tabIndex={active ? 0 : -1}
+                    onClick={() => selectTab(tab.id)}
+                    onKeyDown={handleTabKeyDown}
+                    className={`shrink-0 whitespace-nowrap border-b-2 px-3 py-3 text-sm font-medium transition-colors ${
                       active
-                        ? 'border-primary-600 text-primary-600'
-                        : 'border-transparent text-text-tertiary hover:text-text-primary'
+                        ? 'border-primary-600 text-primary-700'
+                        : 'border-transparent text-text-secondary hover:border-border-strong hover:text-text-primary'
                     }`}
                   >
-                    <Icon className="h-4 w-4" />
                     {tab.label}
                   </button>
                 )
@@ -337,7 +429,13 @@ export default function TextAgentDetailView() {
             </div>
           </div>
 
-          <div key={resolvedActiveTab} className="section-enter flex-1 overflow-y-auto px-8 py-6">
+          <div
+            key={resolvedActiveTab}
+            id="text-agent-tabpanel"
+            role="tabpanel"
+            aria-labelledby={`text-agent-tab-${resolvedActiveTab}`}
+            className="section-enter @container px-4 py-6 sm:px-8 lg:flex-1 lg:overflow-y-auto"
+          >
             {resolvedActiveTab === 'config' && (
               <TextAgentConfigTab
                 register={register}
@@ -393,7 +491,7 @@ export default function TextAgentDetailView() {
 
         <TextAgentPreview
           agentId={id!}
-          agentName={watchedName || agent.name}
+          agentName={displayName}
           welcomeMessage={previewWelcomeMessage}
           isDirty={isDirty}
           onSave={handleSaveForPreview}

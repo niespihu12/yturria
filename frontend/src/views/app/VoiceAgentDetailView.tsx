@@ -1,17 +1,9 @@
-﻿import { useEffect, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+﻿import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useForm, useWatch } from 'react-hook-form'
 import { toast } from 'react-toastify'
-import {
-  ChevronLeftIcon,
-  CheckIcon,
-  CpuChipIcon,
-  BookOpenIcon,
-  ChartBarIcon,
-  WrenchScrewdriverIcon,
-  PencilIcon,
-} from '@heroicons/react/24/outline'
+import { ChevronLeftIcon, CheckIcon, PencilIcon } from '@heroicons/react/24/outline'
 import { getAgent, updateAgent } from '@/api/VoiceRuntimeAPI'
 import type { AgentDetail, AgentFormValues, KnowledgeBaseItem } from '@/types/agent'
 import AgentTab from '@/components/app/agent/tabs/AgentTab'
@@ -19,13 +11,16 @@ import KnowledgeBaseTab from '@/components/app/agent/tabs/KnowledgeBaseTab'
 import AnalysisTab from '@/components/app/agent/tabs/AnalysisTab'
 import ToolsTab from '@/components/app/agent/tabs/ToolsTab'
 import AgentPreview from '@/components/app/agent/AgentPreview'
+import { describeError } from '@/components/app/agent/agentUi'
+import Button from '@/components/ui/Button'
 import { useCurrentUser } from '@/hooks/useCurrentUser'
+import { cn } from '@/lib/utils'
 
 const TABS = [
-  { id: 'agent', label: 'Agente', icon: CpuChipIcon },
-  { id: 'knowledge', label: 'Bases de conocimiento', icon: BookOpenIcon },
-  { id: 'analysis', label: 'Analisis', icon: ChartBarIcon },
-  { id: 'tools', label: 'Herramientas', icon: WrenchScrewdriverIcon },
+  { id: 'agent', label: 'Agente' },
+  { id: 'knowledge', label: 'Base de conocimiento' },
+  { id: 'analysis', label: 'Análisis' },
+  { id: 'tools', label: 'Herramientas' },
 ] as const
 
 type TabId = (typeof TABS)[number]['id']
@@ -405,7 +400,7 @@ function getSystemToolsConfigError(
         (item) => typeof item.agent_id === 'string' && item.agent_id.trim().length > 0
       )
       if (!hasValidAgentTransfer) {
-        return 'La herramienta "Transferir a un agente" requiere al menos un agent_id de destino.'
+        return 'Para guardar «Transferir a un agente», indique al menos un agente de destino en Herramientas.'
       }
     }
 
@@ -415,7 +410,7 @@ function getSystemToolsConfigError(
       )
 
       if (!validTransfers.length) {
-        return 'La herramienta "Transferir a un numero" requiere al menos un numero de destino.'
+        return 'Para guardar «Transferir a un número», indique al menos un número de destino en Herramientas.'
       }
 
       const hasInvalidPhone = validTransfers.some(
@@ -425,7 +420,7 @@ function getSystemToolsConfigError(
       )
 
       if (hasInvalidPhone) {
-        return 'Los numeros de transferencia deben estar en formato E.164 (ej: +573001234567).'
+        return 'Escriba los números de transferencia con el indicativo del país, por ejemplo +573001234567.'
       }
     }
   }
@@ -618,7 +613,6 @@ function buildUpdatePayload(
 
 // Inner component: only mounts after agent data is available -> no flash
 function VoiceAgentForm({ id, initialAgent }: { id: string; initialAgent: AgentDetail }) {
-  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const { isClient } = useCurrentUser()
   const [activeTab, setActiveTab] = useState<TabId>('agent')
@@ -810,7 +804,8 @@ function VoiceAgentForm({ id, initialAgent }: { id: string; initialAgent: AgentD
 
       queryClient.invalidateQueries({ queryKey: ['agent', id] })
     },
-    onError: (error: Error) => toast.error(error.message),
+    onError: (error: Error) =>
+      toast.error(describeError(error, 'No pudimos guardar los cambios. Intente de nuevo.')),
   })
 
   const handleSaveForPreview = async () => {
@@ -857,87 +852,119 @@ function VoiceAgentForm({ id, initialAgent }: { id: string; initialAgent: AgentD
   const knowledgeBase: KnowledgeBaseItem[] =
     (agent?.conversation_config.agent.prompt.knowledge_base as KnowledgeBaseItem[]) ?? []
 
+  const tabsId = useId()
+  const tabRefs = useRef<Partial<Record<TabId, HTMLButtonElement | null>>>({})
+
+  const handleTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+    let nextIndex: number | null = null
+    if (event.key === 'ArrowRight') nextIndex = (index + 1) % TABS.length
+    else if (event.key === 'ArrowLeft') nextIndex = (index - 1 + TABS.length) % TABS.length
+    else if (event.key === 'Home') nextIndex = 0
+    else if (event.key === 'End') nextIndex = TABS.length - 1
+    if (nextIndex === null) return
+
+    event.preventDefault()
+    const nextTab = TABS[nextIndex].id
+    setActiveTab(nextTab)
+    tabRefs.current[nextTab]?.focus()
+  }
+
+  const agentName = watchedName || agent.name
+
   return (
     <form
       onSubmit={handleSubmit((v) => save(v))}
-      className="flex h-full min-h-0 w-full min-w-0 overflow-hidden"
+      className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden"
     >
-      {/* Left: Main content */}
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        {/* Top bar */}
-        <div className="px-8 py-4 border-b border-border-default bg-surface flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-4">
-            <button
-              type="button"
-              onClick={() => navigate('/agentes_voz')}
-              className="rounded-lg p-1.5 text-text-tertiary transition-colors hover:bg-primary-50/60 hover:text-primary-600"
-            >
-              <ChevronLeftIcon className="w-5 h-5" />
-            </button>
+      <div className="flex min-w-0 flex-1 flex-col lg:min-h-0">
+        <div className="sticky top-0 z-20 shrink-0 border-b border-border-default bg-surface">
+          <div className="flex flex-wrap items-center justify-between gap-3 px-4 pt-4 sm:px-8">
+            <div className="flex min-w-0 items-center gap-1.5">
+              <Link
+                to="/agentes_voz"
+                aria-label="Volver a agentes de voz"
+                className="-ml-1.5 shrink-0 rounded-lg p-1.5 text-text-tertiary transition-colors hover:bg-primary-50 hover:text-primary-700"
+              >
+                <ChevronLeftIcon className="h-5 w-5" aria-hidden="true" />
+              </Link>
 
-            <div className="flex items-center gap-2">
               {editingName ? (
                 <input
                   autoFocus
-                  onKeyDown={(e) => e.key === 'Enter' && setEditingName(false)}
-                  className="bg-primary-50 border border-[#271173]/30 text-text-primary rounded-xl px-3 py-1.5 text-sm font-semibold focus:outline-none focus:border-primary-500"
+                  aria-label="Nombre del agente"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      setEditingName(false)
+                    }
+                  }}
+                  className="min-w-0 rounded-lg border border-primary-500 bg-surface px-3 py-1.5 text-base font-semibold text-text-primary"
                   {...register('name', {
                     required: true,
                     onBlur: () => setEditingName(false),
                   })}
                 />
               ) : (
-                <h1 className="text-text-primary font-semibold text-lg">{watchedName || agent.name}</h1>
+                <h1 className="min-w-0 truncate font-display text-xl leading-tight text-primary-800 sm:text-2xl">
+                  {agentName}
+                </h1>
               )}
               <button
                 type="button"
                 onClick={() => setEditingName((p) => !p)}
-                className="rounded p-1 text-text-muted transition-colors hover:text-text-secondary"
+                aria-label={editingName ? 'Terminar de editar el nombre' : 'Cambiar el nombre del agente'}
+                className="shrink-0 rounded-lg p-1.5 text-text-tertiary transition-colors hover:bg-neutral-100 hover:text-text-primary"
               >
-                <PencilIcon className="w-3.5 h-3.5" />
+                <PencilIcon className="h-4 w-4" aria-hidden="true" />
               </button>
+            </div>
+
+            <div className="flex items-center gap-3">
+              {hasPendingChanges && !isSaving && (
+                <span className="text-sm text-text-tertiary">Cambios sin guardar</span>
+              )}
+              <Button
+                type="submit"
+                isLoading={isSaving}
+                disabled={!hasPendingChanges}
+                leftIcon={<CheckIcon className="h-4 w-4" aria-hidden="true" />}
+              >
+                {isSaving ? 'Guardando…' : 'Guardar cambios'}
+              </Button>
             </div>
           </div>
 
-          <button
-            type="submit"
-            disabled={isSaving || !hasPendingChanges}
-            className={`flex items-center gap-2 bg-primary-600 hover:bg-primary-700 disabled:opacity-60 text-white px-4 py-2 rounded-xl text-sm font-semibold ${
-              hasPendingChanges ? 'opacity-100' : 'opacity-0 pointer-events-none'
-            }`}
-            style={{ transition: 'opacity 180ms ease, background-color 180ms ease' }}
+          <div
+            role="tablist"
+            aria-label="Secciones del agente"
+            className="no-visible-scrollbar mt-2 flex overflow-x-auto px-4 sm:px-8"
           >
-            {isSaving ? (
-              <div className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-            ) : (
-              <CheckIcon className="w-4 h-4" />
-            )}
-            {isSaving ? 'Guardando...' : 'Guardar cambios'}
-          </button>
-        </div>
-
-        {/* Tabs */}
-        <div className="px-8 border-b border-border-default bg-surface shrink-0">
-          <div className="flex gap-0">
-            {TABS.map((tab) => {
-              const Icon = tab.icon
+            {TABS.map((tab, index) => {
               const active = activeTab === tab.id
               return (
                 <button
                   key={tab.id}
+                  ref={(node) => {
+                    tabRefs.current[tab.id] = node
+                  }}
+                  id={`${tabsId}-tab-${tab.id}`}
                   type="button"
+                  role="tab"
+                  aria-selected={active}
+                  aria-controls={`${tabsId}-panel`}
+                  tabIndex={active ? 0 : -1}
                   disabled={isSaving}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center gap-2 px-4 py-3.5 text-sm font-medium border-b-2 transition-colors disabled:cursor-not-allowed disabled:opacity-55 ${
+                  onKeyDown={(event) => handleTabKeyDown(event, index)}
+                  className={cn(
+                    'shrink-0 whitespace-nowrap border-b-2 px-3 py-3 text-sm font-medium transition-colors first:-ml-3 xl:px-4 xl:first:-ml-4',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-500',
+                    'disabled:cursor-not-allowed disabled:opacity-60',
                     active
-                      ? 'border-primary-600 text-primary-600'
-                      : 'border-transparent text-text-tertiary hover:text-text-primary'
-                  }`}
-                >
-                  <Icon className="w-4 h-4" />
-                  {active && hasPendingChanges && (
-                    <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
+                      ? 'border-primary-600 text-primary-700'
+                      : 'border-transparent text-text-tertiary hover:text-text-primary',
                   )}
+                >
                   {tab.label}
                 </button>
               )
@@ -945,10 +972,14 @@ function VoiceAgentForm({ id, initialAgent }: { id: string; initialAgent: AgentD
           </div>
         </div>
 
-        {/* Tab content */}
-        <div className="min-h-0 flex flex-1 items-stretch overflow-hidden px-8 py-6">
-          {activeTab === 'agent' && (
-            <div className="no-visible-scrollbar h-full min-h-0 w-full overflow-y-auto pr-2">
+        <div
+          id={`${tabsId}-panel`}
+          role="tabpanel"
+          aria-labelledby={`${tabsId}-tab-${activeTab}`}
+          className="px-4 py-6 sm:px-8 sm:py-8 lg:min-h-0 lg:flex-1 lg:overflow-y-auto"
+        >
+          <div className="mx-auto w-full max-w-5xl">
+            {activeTab === 'agent' && (
               <AgentTab
                 agentId={id}
                 register={register}
@@ -957,10 +988,8 @@ function VoiceAgentForm({ id, initialAgent }: { id: string; initialAgent: AgentD
                 errors={errors}
                 isClient={isClient}
               />
-            </div>
-          )}
-          {activeTab === 'knowledge' && (
-            <div className="no-visible-scrollbar min-h-0 w-full overflow-y-auto pr-2">
+            )}
+            {activeTab === 'knowledge' && (
               <KnowledgeBaseTab
                 agentId={id}
                 agent={agent}
@@ -968,20 +997,16 @@ function VoiceAgentForm({ id, initialAgent }: { id: string; initialAgent: AgentD
                 onUpdate={() => queryClient.invalidateQueries({ queryKey: ['agent', id] })}
                 isClient={isClient}
               />
-            </div>
-          )}
-          {activeTab === 'analysis' && (
-            <div className="no-visible-scrollbar min-h-0 w-full overflow-y-auto pr-2">
+            )}
+            {activeTab === 'analysis' && (
               <AnalysisTab
                 agentId={id}
                 agent={agent}
                 onUpdate={() => queryClient.invalidateQueries({ queryKey: ['agent', id] })}
                 isClient={isClient}
               />
-            </div>
-          )}
-          {activeTab === 'tools' && (
-            <div className="no-visible-scrollbar min-h-0 w-full overflow-y-auto pr-2">
+            )}
+            {activeTab === 'tools' && (
               <ToolsTab
                 agent={agent}
                 enabledSystemTools={enabledSystemTools}
@@ -992,15 +1017,14 @@ function VoiceAgentForm({ id, initialAgent }: { id: string; initialAgent: AgentD
                 onWorkspaceToolToggle={handleWorkspaceToolToggle}
                 isClient={isClient}
               />
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Right: Preview panel */}
       <AgentPreview
         agentId={id}
-        agentName={watchedName || agent.name}
+        agentName={agentName}
         isDirty={hasPendingChanges}
         onSave={handleSaveForPreview}
       />
@@ -1008,12 +1032,12 @@ function VoiceAgentForm({ id, initialAgent }: { id: string; initialAgent: AgentD
   )
 }
 
-// Outer component: handles loading/error, renders form only when data is ready
+// Inner form mounts only when the agent and the user role are known.
 export default function VoiceAgentDetailView() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
 
-  const { data: agent, isLoading, isError } = useQuery({
+  const { data: agent, isLoading, isError, error } = useQuery({
     queryKey: ['agent', id],
     queryFn: () => getAgent(id!),
     enabled: !!id,
@@ -1024,28 +1048,36 @@ export default function VoiceAgentDetailView() {
 
   if (isLoading || isUserLoading) {
     return (
-      <div className="flex items-center justify-center h-full text-text-secondary gap-2.5">
-        <div className="w-5 h-5 border-2 border-primary-600 border-t-transparent rounded-full animate-spin" />
-        Cargando agente...
+      <div role="status" className="flex h-full items-center justify-center gap-2.5 text-sm text-text-secondary">
+        <span
+          aria-hidden="true"
+          className="h-5 w-5 animate-spin rounded-full border-2 border-primary-600 border-t-transparent"
+        />
+        Cargando agente…
       </div>
     )
   }
 
   if (isError || !agent || !user) {
     return (
-      <div className="flex flex-col items-center justify-center h-full gap-3">
-        <p className="text-text-secondary">No se pudo cargar el agente.</p>
-        <button
-          onClick={() => navigate('/agentes_voz')}
-          className="text-primary-600 hover:text-primary-700 text-sm transition-colors"
-        >
-          ← Volver
-        </button>
+      <div className="flex h-full items-center justify-center px-4">
+        <div className="max-w-md text-center">
+          <h1 className="text-lg font-semibold text-text-primary">No pudimos abrir este agente</h1>
+          <p className="mt-2 text-sm leading-relaxed text-text-secondary">
+            {describeError(error, 'Es posible que ya no exista o que no tenga acceso a él.')}
+          </p>
+          <Button
+            variant="outline"
+            className="mt-5"
+            leftIcon={<ChevronLeftIcon className="h-4 w-4" aria-hidden="true" />}
+            onClick={() => navigate('/agentes_voz')}
+          >
+            Volver a agentes de voz
+          </Button>
+        </div>
       </div>
     )
   }
 
   return <VoiceAgentForm id={id!} initialAgent={agent} />
 }
-
-
