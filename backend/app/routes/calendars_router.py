@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
+import time
+from datetime import datetime, timedelta, timezone
+from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi.responses import RedirectResponse
 from sqlmodel import Session, select
 
 from app.controllers.deps.auth import CurrentUser
@@ -12,10 +17,12 @@ from app.models.UserCalendarConnection import UserCalendarConnection
 from app.services.google_calendar_oauth import (
     build_auth_url,
     exchange_code,
+    generate_pkce_verifier,
+    list_events,
     list_user_calendars,
     sync_appointment_via_oauth,
 )
-from app.utils.crypto import encrypt_secret
+from app.utils.crypto import decrypt_secret, encrypt_secret
 from app.utils.roles import is_super_admin_user
 
 logger = logging.getLogger(__name__)
@@ -24,33 +31,92 @@ calendars_router = APIRouter(prefix="/calendars", tags=["Calendars"])
 
 FRONTEND_URL = (
     os.getenv("FRONTEND_PUBLIC_URL") or os.getenv("FRONTEND_URL") or "http://localhost:5173"
-).strip().rstrip("/")
+).split(",")[0].strip().rstrip("/")
+
+DEFAULT_REDIRECT_PATH = "/citas"
+OAUTH_STATE_TTL_SECONDS = 600
+
+
+def _safe_redirect_path(value: str | None) -> str:
+    """Solo rutas relativas del frontend: evita open redirect ('//evil.com', '/\\evil.com')."""
+    path = str(value or "").strip()
+    if (
+        not path.startswith("/")
+        or path.startswith("//")
+        or "\\" in path
+        or any(ord(ch) < 32 for ch in path)
+    ):
+        return DEFAULT_REDIRECT_PATH
+    return path
+
+
+def _frontend_redirect(path: str, **params: str) -> RedirectResponse:
+    query = "&".join(f"{key}={quote(str(value), safe='')}" for key, value in params.items())
+    separator = "&" if "?" in path else "?"
+    return RedirectResponse(url=f"{FRONTEND_URL}{path}{separator}{query}")
+
+
+def _encode_oauth_state(user_id: str, code_verifier: str, redirect_after: str) -> str:
+    # Cifrado + autenticado (Fernet): el callback no puede ser manipulado y el
+    # code_verifier PKCE no queda expuesto en la URL.
+    payload = {
+        "uid": user_id,
+        "cv": code_verifier,
+        "r": redirect_after,
+        "exp": int(time.time()) + OAUTH_STATE_TTL_SECONDS,
+    }
+    return encrypt_secret(json.dumps(payload, separators=(",", ":")))
+
+
+def _decode_oauth_state(state: str) -> dict | None:
+    if not state:
+        return None
+    try:
+        payload = json.loads(decrypt_secret(state))
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if not isinstance(payload.get("exp"), int) or payload["exp"] < int(time.time()):
+        return None
+    if not str(payload.get("uid") or "").strip() or not str(payload.get("cv") or "").strip():
+        return None
+    return payload
+
+
+def _parse_unix_or_400(value: int, field_name: str) -> datetime:
+    try:
+        return datetime.fromtimestamp(value, tz=timezone.utc)
+    except (OverflowError, OSError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{field_name} fuera de rango",
+        ) from exc
 
 
 @calendars_router.get("/google/auth")
 async def google_auth(
     current_user: CurrentUser,
-    redirect_after: str = Query(default="/citas"),
+    redirect_after: str = Query(default=DEFAULT_REDIRECT_PATH),
 ):
     """Inicia el flujo OAuth con Google Calendar usando PKCE."""
     try:
-        # Generamos el code_verifier y lo incluimos en el state
-        # Formato: user_id:redirect_after:code_verifier
-        state_payload = f"{current_user.id}:{redirect_after}"
-        auth_url, code_verifier = build_auth_url(state=state_payload)
-        state_with_verifier = f"{current_user.id}:{redirect_after}:{code_verifier}"
-        auth_url, _ = build_auth_url(state=state_with_verifier, code_verifier=code_verifier)
+        code_verifier = generate_pkce_verifier()
+        state = _encode_oauth_state(
+            current_user.id, code_verifier, _safe_redirect_path(redirect_after)
+        )
+        auth_url, _ = build_auth_url(state=state, code_verifier=code_verifier)
         return {"auth_url": auth_url}
     except Exception as exc:
         logger.exception("Error iniciando OAuth de Google Calendar")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=str(exc),
+            detail="No se pudo iniciar la conexion con Google Calendar",
         ) from exc
 
 
 @calendars_router.get("/google/callback")
-async def google_callback(
+def google_callback(
     request: Request,
     session: SessionDep,
     code: str = Query(default=""),
@@ -58,8 +124,19 @@ async def google_callback(
     error: str = Query(default=""),
 ):
     """Callback de Google OAuth. Guarda los tokens y redirige al frontend."""
+    state_payload = _decode_oauth_state(state)
+
     if error:
-        return {"status": "error", "message": f"Google OAuth error: {error}"}
+        redirect_path = (
+            _safe_redirect_path(state_payload.get("r")) if state_payload else DEFAULT_REDIRECT_PATH
+        )
+        return _frontend_redirect(redirect_path, calendar_error=error[:100])
+
+    if not state_payload:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Estado invalido o expirado. Vuelve a conectar tu calendario.",
+        )
 
     if not code:
         raise HTTPException(
@@ -67,15 +144,9 @@ async def google_callback(
             detail="Codigo de autorizacion requerido",
         )
 
-    # Parse state to get user_id, redirect path and code_verifier
-    user_id = ""
-    redirect_path = "/citas"
-    code_verifier = ""
-    if state and ":" in state:
-        parts = state.split(":", maxsplit=2)
-        user_id = parts[0]
-        redirect_path = parts[1] if len(parts) > 1 else "/citas"
-        code_verifier = parts[2] if len(parts) > 2 else ""
+    user_id = str(state_payload["uid"])
+    code_verifier = str(state_payload["cv"])
+    redirect_path = _safe_redirect_path(state_payload.get("r"))
 
     try:
         token_data = exchange_code(code=code, code_verifier=code_verifier)
@@ -83,32 +154,31 @@ async def google_callback(
         logger.exception("Error intercambiando codigo OAuth")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Error intercambiando codigo: {exc}",
+            detail="No se pudo completar la conexion con Google Calendar",
         ) from exc
-
-    if not user_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Estado invalido",
-        )
 
     access_token = token_data.get("access_token", "")
     refresh_token = token_data.get("refresh_token", "")
     expires_at = token_data.get("expires_at")
 
-    # Desactivar cualquier conexion previa como default
-    existing_defaults = session.exec(
+    # Reconexion: desactivar las conexiones previas (y descartar sus tokens) para no
+    # dejar refresh tokens vigentes en filas huerfanas.
+    previous_connections = session.exec(
         select(UserCalendarConnection).where(
             UserCalendarConnection.user_id == user_id,
             UserCalendarConnection.provider == "google",
-            UserCalendarConnection.is_default == True,
+            UserCalendarConnection.active == True,
         )
     ).all()
-    for ed in existing_defaults:
-        ed.is_default = False
-        session.add(ed)
+    now = datetime.utcnow()
+    for previous in previous_connections:
+        previous.active = False
+        previous.is_default = False
+        previous.access_token_encrypted = ""
+        previous.refresh_token_encrypted = ""
+        previous.updated_at = now
+        session.add(previous)
 
-    # Crear nueva conexion
     conn = UserCalendarConnection(
         user_id=user_id,
         provider="google",
@@ -123,11 +193,36 @@ async def google_callback(
     session.add(conn)
     session.commit()
 
-    # Redirect to frontend
-    redirect_url = f"{FRONTEND_URL}{redirect_path}?calendar_connected=1"
-    from fastapi.responses import RedirectResponse
+    return _frontend_redirect(redirect_path, calendar_connected="1")
 
-    return RedirectResponse(url=redirect_url)
+
+@calendars_router.get("/google/events")
+def google_events(
+    current_user: CurrentUser,
+    session: SessionDep,
+    from_unix: int = Query(default=0),
+    to_unix: int = Query(default=0),
+):
+    """Lista los eventos del Google Calendar conectado del usuario en el rango dado."""
+    conn = session.exec(
+        select(UserCalendarConnection).where(
+            UserCalendarConnection.user_id == current_user.id,
+            UserCalendarConnection.provider == "google",
+            UserCalendarConnection.active == True,
+            UserCalendarConnection.is_default == True,
+        )
+    ).first()
+
+    if not conn:
+        return {"events": []}
+
+    now = datetime.now(timezone.utc)
+    time_min = _parse_unix_or_400(from_unix, "from_unix") if from_unix > 0 else now - timedelta(days=31)
+    time_max = _parse_unix_or_400(to_unix, "to_unix") if to_unix > 0 else now + timedelta(days=62)
+
+    events = list_events(conn, time_min, time_max)
+    session.commit()  # persiste el refresh de token (o la desactivacion por invalid_grant)
+    return {"events": events}
 
 
 @calendars_router.get("")
@@ -159,7 +254,7 @@ async def list_connections(
 
 
 @calendars_router.get("/{connection_id}/calendars")
-async def list_available_calendars(
+def list_available_calendars(
     connection_id: str,
     current_user: CurrentUser,
     session: SessionDep,
@@ -173,6 +268,7 @@ async def list_available_calendars(
         )
 
     calendars = list_user_calendars(conn)
+    session.commit()
     return {"calendars": calendars}
 
 
@@ -215,7 +311,11 @@ async def update_connection(
     session.add(conn)
     session.commit()
     session.refresh(conn)
-    return {"connection": conn.model_dump()}
+    return {
+        "connection": conn.model_dump(
+            exclude={"access_token_encrypted", "refresh_token_encrypted"}
+        )
+    }
 
 
 @calendars_router.delete("/{connection_id}")
@@ -226,12 +326,11 @@ async def delete_connection(
 ):
     """Desconecta un calendario."""
     conn = session.get(UserCalendarConnection, connection_id)
-    if not conn or conn.user_id != current_user.id:
-        if not is_super_admin_user(current_user):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Conexion no encontrada",
-            )
+    if not conn or (conn.user_id != current_user.id and not is_super_admin_user(current_user)):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conexion no encontrada",
+        )
 
     session.delete(conn)
     session.commit()

@@ -204,45 +204,45 @@ export default function TextAgentsView() {
 
         <div className="mb-5 flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
           <div>
-            <h2 className="text-lg font-semibold text-black">Listado</h2>
-            <p className="mt-1 text-sm text-black/60">
+            <h2 className="text-lg font-semibold text-text-primary">Listado</h2>
+            <p className="mt-1 text-sm text-text-secondary">
               {scopedUserId
                 ? 'Vista filtrada por usuario para supervision del super admin.'
                 : 'Cada agente conserva su plantilla para ajustar tabs, permisos y onboarding.'}
             </p>
           </div>
           {!canCreate && !isSuperAdmin && (
-            <p className="text-sm font-medium text-black/55">
+            <p className="text-sm font-medium text-text-tertiary">
               Ya alcanzaste el limite de {clientAgentLimit} agentes para esta cuenta.
             </p>
           )}
         </div>
 
-        <div className="overflow-hidden rounded-3xl border border-[#e4e0f5] bg-white shadow-sm">
+        <div className="overflow-hidden rounded-3xl border border-border-default bg-surface shadow-sm">
           {isLoading ? (
-            <div className="flex h-48 items-center justify-center text-black/60">
+            <div className="flex h-48 items-center justify-center text-text-secondary">
               <div className="flex items-center gap-2.5">
-                <div className="h-4 w-4 animate-spin rounded-full border-2 border-[#271173] border-t-transparent" />
+                <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary-600 border-t-transparent" />
                 Cargando agentes de texto...
               </div>
             </div>
           ) : isError ? (
-            <div className="flex h-48 items-center justify-center px-6 text-center text-black/60">
+            <div className="flex h-48 items-center justify-center px-6 text-center text-text-secondary">
               Error al cargar agentes de texto. Verifica tu sesion e intenta nuevamente.
             </div>
           ) : agents.length === 0 ? (
             <div className="flex h-56 flex-col items-center justify-center gap-3 px-6 text-center">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#ede9ff]">
-                <ChatBubbleLeftRightIcon className="h-6 w-6 text-[#271173]" />
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary-50">
+                <ChatBubbleLeftRightIcon className="h-6 w-6 text-primary-600" />
               </div>
-              <p className="max-w-md text-sm text-black/60">
+              <p className="max-w-md text-sm text-text-secondary">
                 Todavia no tienes agentes de texto. Empieza con una plantilla y luego ajusta los
                 canales y el conocimiento segun tu negocio.
               </p>
               {canCreate && (
                 <button
                   onClick={() => setShowModal(true)}
-                  className="text-sm font-medium text-[#271173] transition-colors hover:text-[#1f0d5a]"
+                  className="text-sm font-medium text-primary-600 transition-colors hover:text-primary-700"
                 >
                   Crear tu primer agente
                 </button>
@@ -251,41 +251,41 @@ export default function TextAgentsView() {
           ) : (
             <table className="w-full">
               <thead>
-                <tr className="border-b border-[#e4e0f5]">
-                  <th className="px-6 py-3.5 text-left text-xs font-medium uppercase tracking-wider text-black/50">
+                <tr className="border-b border-border-default bg-bg-secondary/50">
+                  <th className="px-6 py-3.5 text-left text-xs font-semibold uppercase tracking-wider text-text-tertiary">
                     Nombre
                   </th>
-                  <th className="px-6 py-3.5 text-left text-xs font-medium uppercase tracking-wider text-black/50">
+                  <th className="px-6 py-3.5 text-left text-xs font-semibold uppercase tracking-wider text-text-tertiary">
                     Provider
                   </th>
-                  <th className="px-6 py-3.5 text-left text-xs font-medium uppercase tracking-wider text-black/50">
+                  <th className="px-6 py-3.5 text-left text-xs font-semibold uppercase tracking-wider text-text-tertiary">
                     Propietario
                   </th>
-                  <th className="px-6 py-3.5 text-left text-xs font-medium uppercase tracking-wider text-black/50">
+                  <th className="px-6 py-3.5 text-left text-xs font-semibold uppercase tracking-wider text-text-tertiary">
                     Actualizado
                   </th>
-                  <th className="px-6 py-3.5 text-right text-xs font-medium uppercase tracking-wider text-black/50">
+                  <th className="px-6 py-3.5 text-right text-xs font-semibold uppercase tracking-wider text-text-tertiary">
                     Acciones
                   </th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-[#e4e0f5]">
+              <tbody className="divide-y divide-border-default">
                 {agents.map((agent) => {
                   const accent = getTemplateAccent(agent.template_key)
                   return (
                     <tr
                       key={agent.agent_id}
                       onClick={() => navigate(`/agentes_texto/${agent.agent_id}`)}
-                      className="group cursor-pointer transition-colors duration-100 hover:bg-[#f8f6ff]"
+                      className="group cursor-pointer transition-all duration-150 hover:bg-primary-50/60"
                     >
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">
-                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[#ede9ff]">
-                            <ChatBubbleLeftRightIcon className="h-4 w-4 text-[#271173]" />
+                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary-50 ring-1 ring-primary-100">
+                            <ChatBubbleLeftRightIcon className="h-4 w-4 text-primary-600" />
                           </div>
                           <div className="min-w-0">
                             <div className="flex items-center gap-2">
-                              <span className="truncate text-sm font-medium text-black transition-colors group-hover:text-[#271173]">
+                              <span className="truncate text-sm font-semibold text-text-primary transition-colors group-hover:text-primary-700">
                                 {agent.name}
                               </span>
                               <span
@@ -295,25 +295,25 @@ export default function TextAgentsView() {
                                 {agent.template_label}
                               </span>
                             </div>
-                            <p className="mt-1 truncate text-xs text-black/45">
+                            <p className="mt-1 truncate text-xs text-text-tertiary">
                               {agent.template_summary}
                             </p>
                           </div>
                         </div>
                       </td>
-                      <td className="px-6 py-4 text-sm text-black/60">{agent.provider}</td>
-                      <td className="px-6 py-4 text-sm text-black/60">{agent.owner_email ?? '-'}</td>
-                      <td className="px-6 py-4 text-sm text-black/60">
+                      <td className="px-6 py-4 text-sm text-text-secondary">{agent.provider}</td>
+                      <td className="px-6 py-4 text-sm text-text-secondary">{agent.owner_email ?? '-'}</td>
+                      <td className="px-6 py-4 text-sm text-text-secondary">
                         {formatDate(agent.updated_at_unix_secs)}
                       </td>
                       <td className="px-6 py-4">
-                        <div className="flex items-center justify-end gap-2">
+                        <div className="flex items-center justify-end gap-1">
                           <button
                             onClick={(event) => {
                               event.stopPropagation()
                               navigate(`/agentes_texto/${agent.agent_id}`)
                             }}
-                            className="rounded-lg p-1.5 text-black/50 transition-colors hover:bg-[#ede9ff] hover:text-[#271173]"
+                            className="rounded-lg p-2 text-text-tertiary transition-all duration-200 hover:bg-primary-50 hover:text-primary-700"
                             title="Editar"
                           >
                             <PencilSquareIcon className="h-4 w-4" />
@@ -321,7 +321,7 @@ export default function TextAgentsView() {
                           <button
                             onClick={(event) => handleDelete(agent.agent_id, event)}
                             disabled={deletingId === agent.agent_id}
-                            className="rounded-lg p-1.5 text-black/50 transition-colors hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50"
+                            className="rounded-lg p-2 text-text-tertiary transition-all duration-200 hover:bg-danger-50 hover:text-danger-600 disabled:opacity-50"
                             title="Eliminar"
                           >
                             <TrashIcon className="h-4 w-4" />
@@ -337,16 +337,16 @@ export default function TextAgentsView() {
         </div>
 
         {showModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4 backdrop-blur-sm">
-            <div className="w-full max-w-5xl overflow-hidden rounded-[30px] border border-[#ddd3ff] bg-white shadow-2xl">
-              <div className="border-b border-[#ece6ff] bg-[radial-gradient(circle_at_top_left,_rgba(86,32,196,0.16),_transparent_48%),linear-gradient(135deg,#fbf8ff_0%,#ffffff_52%,#fffaf0_100%)] px-6 py-5">
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-surface-overlay p-4 backdrop-blur-md">
+            <div className="modal-content flex flex-col w-full max-w-5xl max-h-[90vh] rounded-3xl border border-border-default bg-surface shadow-2xl">
+              <div className="border-b border-border-default bg-gradient-to-br from-primary-50 via-surface to-bg-secondary px-6 py-5 shrink-0">
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.24em] text-[#5d36c7]">
+                    <p className="text-xs font-semibold uppercase tracking-[0.24em] text-primary-700">
                       Crear agente
                     </p>
-                    <h2 className="mt-2 text-2xl font-bold text-black">Elige una plantilla</h2>
-                    <p className="mt-2 max-w-2xl text-sm text-black/60">
+                    <h2 className="mt-2 text-2xl font-bold text-text-primary">Elige una plantilla</h2>
+                    <p className="mt-2 max-w-2xl text-sm text-text-secondary">
                       Cada plantilla define el comportamiento inicial del agente y tambien que
                       opciones veras despues en la configuracion.
                     </p>
@@ -354,29 +354,30 @@ export default function TextAgentsView() {
 
                   <button
                     onClick={closeModal}
-                    className="rounded-xl p-2 text-black/45 transition-colors hover:bg-white hover:text-black"
+                    className="rounded-xl p-2 text-text-muted transition-all duration-200 hover:bg-neutral-100 hover:text-text-primary"
                   >
                     <XMarkIcon className="h-5 w-5" />
                   </button>
                 </div>
               </div>
 
+              <div className="overflow-y-auto flex-1 min-h-0 rounded-b-3xl">
               <form onSubmit={handleSubmit((values) => create(values))} className="grid gap-0 lg:grid-cols-[1.55fr_0.95fr]">
-                <div className="border-b border-[#ece6ff] p-6 lg:border-b-0 lg:border-r">
+                <div className="border-b border-border-default p-6 lg:border-b-0 lg:border-r border-r-border-default">
                   <input
                     type="hidden"
                     {...register('template_key', { required: 'Selecciona una plantilla' })}
                   />
 
                   {loadingTemplates ? (
-                    <div className="flex min-h-[260px] items-center justify-center text-sm text-black/55">
+                    <div className="flex min-h-[260px] items-center justify-center text-sm text-text-tertiary">
                       <div className="flex items-center gap-2">
-                        <div className="h-4 w-4 animate-spin rounded-full border-2 border-[#271173] border-t-transparent" />
+                        <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary-600 border-t-transparent" />
                         Cargando plantillas...
                       </div>
                     </div>
                   ) : templatesError ? (
-                    <div className="rounded-3xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">
+                    <div className="rounded-3xl border border-danger-200 bg-danger-50 px-5 py-4 text-sm text-danger-700">
                       No fue posible cargar las plantillas de agentes. Cierra el modal e intenta de nuevo.
                     </div>
                   ) : (
@@ -395,25 +396,25 @@ export default function TextAgentsView() {
                                   shouldTouch: true,
                                   shouldValidate: true,
                                 })}
-                              className={`group rounded-[26px] border p-5 text-left transition-all ${
+                              className={`group rounded-2xl border p-5 text-left transition-all duration-200 ${
                                 isSelected
-                                  ? `${accent.border} ${accent.surface} shadow-[0_16px_40px_rgba(54,21,133,0.12)]`
-                                  : 'border-[#ece6ff] bg-white hover:border-[#d8ccff] hover:bg-[#fbf8ff]'
+                                  ? `${accent.border} ${accent.surface} shadow-lg ring-1 ring-inset ring-primary-200`
+                                  : 'border-border-default bg-surface hover:border-primary-300 hover:bg-primary-50/40'
                               }`}
                             >
                               <div className="flex items-start justify-between gap-3">
-                                <div>
+                                <div className="flex-1 min-w-0">
                                   <div className="flex items-center gap-2">
                                     <span className={`h-2.5 w-2.5 rounded-full ${accent.dot}`} />
-                                    <h3 className="text-base font-semibold text-black">{template.label}</h3>
+                                    <h3 className="text-base font-semibold text-text-primary">{template.label}</h3>
                                   </div>
-                                  <p className="mt-2 text-sm leading-6 text-black/65">
+                                  <p className="mt-2 text-sm leading-relaxed text-text-secondary">
                                     {template.summary}
                                   </p>
                                 </div>
 
                                 {template.recommended && (
-                                  <span className="rounded-full bg-black px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-white">
+                                  <span className="shrink-0 rounded-full bg-primary-600 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-white shadow-sm">
                                     recomendado
                                   </span>
                                 )}
@@ -430,7 +431,7 @@ export default function TextAgentsView() {
                                 ))}
                               </div>
 
-                              <div className="mt-4 text-xs text-black/45">
+                              <div className="mt-4 text-xs text-text-tertiary">
                                 {template.description}
                               </div>
                             </button>
@@ -439,18 +440,18 @@ export default function TextAgentsView() {
                       </div>
 
                       {errors.template_key && (
-                        <p className="text-xs text-red-500">{errors.template_key.message}</p>
+                        <p className="text-xs text-danger-600">{errors.template_key.message}</p>
                       )}
                     </div>
                   )}
                 </div>
 
-                <div className="flex flex-col justify-between bg-[#fcfbff] p-6">
+                <div className="flex flex-col justify-between bg-bg-secondary p-6">
                   <div className="space-y-5">
-                    <div className="rounded-[24px] border border-[#ece6ff] bg-white p-5">
+                    <div className="rounded-2xl border border-border-default bg-surface p-5 shadow-sm">
                       <div className="flex items-center gap-2">
-                        <SparklesIcon className="h-4 w-4 text-[#5a2cc7]" />
-                        <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#5a2cc7]">
+                        <SparklesIcon className="h-4 w-4 text-primary-600" />
+                        <p className="text-xs font-semibold uppercase tracking-[0.22em] text-primary-700">
                           Seleccion actual
                         </p>
                       </div>
@@ -458,8 +459,8 @@ export default function TextAgentsView() {
                       {selectedTemplate ? (
                         <div className="mt-3 space-y-3">
                           <div>
-                            <h3 className="text-lg font-semibold text-black">{selectedTemplate.label}</h3>
-                            <p className="mt-1 text-sm text-black/60">{selectedTemplate.description}</p>
+                            <h3 className="text-lg font-semibold text-text-primary">{selectedTemplate.label}</h3>
+                            <p className="mt-1 text-sm text-text-secondary">{selectedTemplate.description}</p>
                           </div>
                           <div className="flex flex-wrap gap-2">
                             {selectedTemplate.highlights.map((highlight) => (
@@ -473,29 +474,29 @@ export default function TextAgentsView() {
                           </div>
                         </div>
                       ) : (
-                        <p className="mt-3 text-sm text-black/55">
+                        <p className="mt-3 text-sm text-text-tertiary">
                           Elige una plantilla para ver su enfoque antes de crear el agente.
                         </p>
                       )}
                     </div>
 
                     <div>
-                      <label className="mb-1.5 block text-sm font-medium text-black/80">Nombre</label>
+                      <label className="mb-1.5 block text-sm font-medium text-text-primary">Nombre</label>
                       <input
                         type="text"
                         placeholder="Ej: Agente comercial principal"
-                        className="w-full rounded-xl border border-[#e4e0f5] bg-white px-3 py-2.5 text-sm text-black placeholder:text-black/40 transition-colors focus:border-[#271173] focus:outline-none"
+                        className="w-full rounded-xl border border-border-default bg-surface px-3 py-2.5 text-sm text-text-primary placeholder:text-text-muted transition-all duration-200 focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 focus:outline-none"
                         {...register('name', { required: 'El nombre es requerido' })}
                       />
                       {errors.name && (
-                        <p className="mt-1 text-xs text-red-500">{errors.name.message}</p>
+                        <p className="mt-1 text-xs text-danger-600">{errors.name.message}</p>
                       )}
                     </div>
 
                     <div>
-                      <label className="mb-1.5 block text-sm font-medium text-black/80">Proveedor</label>
+                      <label className="mb-1.5 block text-sm font-medium text-text-primary">Proveedor</label>
                       <select
-                        className="w-full rounded-xl border border-[#e4e0f5] bg-white px-3 py-2.5 text-sm text-black transition-colors focus:border-[#271173] focus:outline-none"
+                        className="w-full rounded-xl border border-border-default bg-surface px-3 py-2.5 text-sm text-text-primary transition-all duration-200 focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 focus:outline-none"
                         {...register('provider')}
                       >
                         {TEXT_PROVIDER_OPTIONS.map((provider) => (
@@ -504,7 +505,7 @@ export default function TextAgentsView() {
                           </option>
                         ))}
                       </select>
-                      <p className="mt-1 text-xs text-black/45">
+                      <p className="mt-1 text-xs text-text-tertiary">
                         El modelo inicial se ajusta automaticamente segun el proveedor y la plantilla.
                       </p>
                     </div>
@@ -514,14 +515,14 @@ export default function TextAgentsView() {
                     <button
                       type="button"
                       onClick={closeModal}
-                      className="flex-1 rounded-xl bg-[#f2effd] px-4 py-2.5 text-sm font-medium text-black/80 transition-colors hover:bg-[#e9e3ff]"
+                      className="flex-1 rounded-xl bg-neutral-100 px-4 py-2.5 text-sm font-medium text-text-secondary transition-all duration-200 hover:bg-neutral-200 hover:text-text-primary"
                     >
                       Cancelar
                     </button>
                     <button
                       type="submit"
                       disabled={isCreating || loadingTemplates || templatesError}
-                      className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-[#271173] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#1f0d5a] disabled:opacity-60"
+                      className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white transition-all duration-200 hover:bg-primary-700 hover:-translate-y-px shadow-sm disabled:opacity-60 disabled:hover:translate-y-0"
                     >
                       {isCreating && (
                         <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
@@ -531,6 +532,7 @@ export default function TextAgentsView() {
                   </div>
                 </div>
               </form>
+              </div>
             </div>
           </div>
         )}

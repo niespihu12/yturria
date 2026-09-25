@@ -19,12 +19,15 @@ import type {
   UpdateCurrentUserPasswordForm,
   UserProfileForm,
 } from '@/types/index'
+import { useNavigate } from 'react-router-dom'
+import { clearSession } from '@/lib/session'
 
 const inputClass =
-  'rounded-xl border border-[#e4e0f5] bg-white px-3 py-2.5 text-sm text-black placeholder:text-black/40 transition-colors focus:border-[#271173] focus:outline-none'
+  'rounded-xl border border-border-default bg-surface px-3 py-2.5 text-sm text-text-primary placeholder:text-text-muted transition-all duration-200 focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 focus:outline-none'
 
 export default function SettingsView() {
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const [mfaPassword, setMfaPassword] = useState('')
 
   const { data: user, isLoading, isError } = useQuery({
@@ -56,7 +59,6 @@ export default function SettingsView() {
     register: registerPassword,
     handleSubmit: handlePasswordSubmit,
     getValues: getPasswordValues,
-    reset: resetPassword,
     formState: { errors: passwordErrors, isDirty: isPasswordDirty },
   } = useForm<UpdateCurrentUserPasswordForm>({
     defaultValues: {
@@ -77,12 +79,13 @@ export default function SettingsView() {
 
   const { mutate: savePassword, isPending: isSavingPassword } = useMutation({
     mutationFn: updateCurrentUserPassword,
-    onSuccess: (message: string) => {
-      toast.success(message)
-      resetPassword({
-        current_password: '',
-        password: '',
-        password_confirmation: '',
+    onSuccess: () => {
+      // Changing the password revokes every session (including this one) on the backend.
+      clearSession()
+      // The app layout (and its toast container) unmounts here; the login view shows the notice.
+      navigate('/auth/login', {
+        replace: true,
+        state: { notice: 'Password actualizado. Inicia sesion de nuevo con tu nuevo password.' },
       })
     },
     onError: (error: Error) => toast.error(error.message),
@@ -106,7 +109,7 @@ export default function SettingsView() {
 
   if (isLoading) {
     return (
-      <div className="flex h-full items-center justify-center gap-2.5 text-black/60">
+      <div className="flex h-full items-center justify-center gap-2.5 text-text-secondary">
         <div className="h-5 w-5 animate-spin rounded-full border-2 border-[#271173] border-t-transparent" />
         Cargando configuracion...
       </div>
@@ -116,7 +119,7 @@ export default function SettingsView() {
   if (isError || !user) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3">
-        <p className="text-black/60">No se pudo cargar tu configuracion.</p>
+        <p className="text-text-secondary">No se pudo cargar tu configuracion.</p>
       </div>
     )
   }
@@ -125,15 +128,15 @@ export default function SettingsView() {
     <div className="h-full overflow-y-auto">
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-8 py-8">
       <div className="section-enter">
-        <h1 className="text-2xl font-semibold text-black">Configuracion</h1>
-        <p className="mt-1 text-sm text-black/60">
+        <h1 className="text-2xl font-semibold text-text-primary">Configuracion</h1>
+        <p className="mt-1 text-sm text-text-secondary">
           Administra tu perfil, tu acceso y las medidas de seguridad de tu cuenta.
         </p>
       </div>
 
-      <section className="rounded-2xl border border-[#e4e0f5] bg-white p-6 shadow-sm">
-        <div className="mb-5 flex items-center gap-2.5 text-black">
-          <UserCircleIcon className="h-5 w-5 text-[#271173]" />
+      <section className="rounded-2xl border border-border-default bg-surface p-6 shadow-sm">
+        <div className="mb-5 flex items-center gap-2.5 text-text-primary">
+          <UserCircleIcon className="h-5 w-5 text-primary-600" />
           <h2 className="text-lg font-semibold">Perfil</h2>
         </div>
 
@@ -142,7 +145,7 @@ export default function SettingsView() {
           className="grid gap-4 md:grid-cols-2"
           noValidate
         >
-          <label className="flex flex-col gap-1.5 text-sm font-medium text-black/80">
+          <label className="flex flex-col gap-1.5 text-sm font-medium text-text-primary">
             Nombre
             <input
               type="text"
@@ -157,7 +160,7 @@ export default function SettingsView() {
             )}
           </label>
 
-          <label className="flex flex-col gap-1.5 text-sm font-medium text-black/80">
+          <label className="flex flex-col gap-1.5 text-sm font-medium text-text-primary">
             Email
             <input
               type="email"
@@ -180,7 +183,7 @@ export default function SettingsView() {
             <button
               type="submit"
               disabled={isSavingProfile || !isProfileDirty}
-              className="inline-flex items-center gap-2 rounded-xl bg-[#271173] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#1f0d5a] disabled:opacity-50"
+              className="inline-flex items-center gap-2 rounded-xl bg-primary-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-primary-700 disabled:opacity-50"
             >
               {isSavingProfile ? (
                 <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
@@ -194,9 +197,9 @@ export default function SettingsView() {
       </section>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <section className="rounded-2xl border border-[#e4e0f5] bg-white p-6 shadow-sm">
-          <div className="mb-5 flex items-center gap-2.5 text-black">
-            <KeyIcon className="h-5 w-5 text-[#271173]" />
+        <section className="rounded-2xl border border-border-default bg-surface p-6 shadow-sm">
+          <div className="mb-5 flex items-center gap-2.5 text-text-primary">
+            <KeyIcon className="h-5 w-5 text-primary-600" />
             <h2 className="text-lg font-semibold">Password</h2>
           </div>
 
@@ -205,7 +208,7 @@ export default function SettingsView() {
             className="space-y-4"
             noValidate
           >
-            <label className="flex flex-col gap-1.5 text-sm font-medium text-black/80">
+            <label className="flex flex-col gap-1.5 text-sm font-medium text-text-primary">
               Password actual
               <input
                 type="password"
@@ -222,7 +225,7 @@ export default function SettingsView() {
               )}
             </label>
 
-            <label className="flex flex-col gap-1.5 text-sm font-medium text-black/80">
+            <label className="flex flex-col gap-1.5 text-sm font-medium text-text-primary">
               Nuevo password
               <input
                 type="password"
@@ -241,7 +244,7 @@ export default function SettingsView() {
               )}
             </label>
 
-            <label className="flex flex-col gap-1.5 text-sm font-medium text-black/80">
+            <label className="flex flex-col gap-1.5 text-sm font-medium text-text-primary">
               Confirmar nuevo password
               <input
                 type="password"
@@ -264,7 +267,7 @@ export default function SettingsView() {
               <button
                 type="submit"
                 disabled={isSavingPassword || !isPasswordDirty}
-                className="inline-flex items-center gap-2 rounded-xl bg-[#271173] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#1f0d5a] disabled:opacity-50"
+                className="inline-flex items-center gap-2 rounded-xl bg-primary-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-primary-700 disabled:opacity-50"
               >
                 {isSavingPassword ? (
                   <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
@@ -277,22 +280,22 @@ export default function SettingsView() {
           </form>
         </section>
 
-        <section className="rounded-2xl border border-[#e4e0f5] bg-white p-6 shadow-sm">
-          <div className="mb-5 flex items-center gap-2.5 text-black">
-            <ShieldCheckIcon className="h-5 w-5 text-[#271173]" />
+        <section className="rounded-2xl border border-border-default bg-surface p-6 shadow-sm">
+          <div className="mb-5 flex items-center gap-2.5 text-text-primary">
+            <ShieldCheckIcon className="h-5 w-5 text-primary-600" />
             <h2 className="text-lg font-semibold">Seguridad</h2>
           </div>
 
-          <div className="rounded-xl border border-[#e4e0f5] bg-[#f5f3ff] p-4">
-            <p className="text-sm text-black/80">
+          <div className="rounded-xl border border-border-default bg-[#f5f3ff] p-4">
+            <p className="text-sm text-text-primary">
               Estado MFA:{' '}
               <span
-                className={user.mfa_enabled ? 'font-semibold text-emerald-600' : 'font-semibold text-amber-600'}
+                className={user.mfa_enabled ? 'font-semibold text-accent-600' : 'font-semibold text-amber-600'}
               >
                 {user.mfa_enabled ? 'Activado' : 'Desactivado'}
               </span>
             </p>
-            <p className="mt-2 text-xs text-black/50">
+            <p className="mt-2 text-xs text-text-tertiary">
               MFA por correo solicita un codigo adicional al iniciar sesion.
             </p>
 
@@ -309,7 +312,7 @@ export default function SettingsView() {
                 type="button"
                 onClick={() => toggleMfa(mfaPassword.trim())}
                 disabled={isTogglingMfa || !mfaPassword.trim()}
-                className="inline-flex w-full items-center justify-center rounded-xl border border-[#271173]/25 bg-[#ede9ff] px-4 py-2 text-sm font-semibold text-[#271173] transition-colors hover:bg-[#e0d9ff] disabled:opacity-50"
+                className="inline-flex w-full items-center justify-center rounded-xl border border-[#271173]/25 bg-primary-50 px-4 py-2 text-sm font-semibold text-primary-600 transition-colors hover:bg-[#e0d9ff] disabled:opacity-50"
               >
                 {isTogglingMfa
                   ? 'Procesando...'

@@ -228,8 +228,8 @@ export default function TextAgentDetailView() {
 
   if (isLoading) {
     return (
-      <div className="flex h-full items-center justify-center gap-2 text-black/60">
-        <div className="h-5 w-5 animate-spin rounded-full border-2 border-[#271173] border-t-transparent" />
+      <div className="flex h-full items-center justify-center gap-2 text-text-secondary">
+        <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary-600 border-t-transparent" />
         Cargando agente...
       </div>
     )
@@ -238,10 +238,10 @@ export default function TextAgentDetailView() {
   if (isError || !agent) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3">
-        <p className="text-black/60">No se pudo cargar el agente de texto.</p>
+        <p className="text-text-secondary">No se pudo cargar el agente de texto.</p>
         <button
           onClick={() => navigate('/agentes_texto')}
-          className="text-sm text-[#271173] transition-colors hover:text-[#1f0d5a]"
+          className="text-sm text-primary-600 transition-colors hover:text-primary-700"
         >
           Volver
         </button>
@@ -253,12 +253,12 @@ export default function TextAgentDetailView() {
     <>
       <form onSubmit={handleSubmit((values) => save(values))} className="flex h-full">
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          <div className="flex shrink-0 items-center justify-between border-b border-[#e4e0f5] px-8 py-4">
+          <div className="flex shrink-0 items-center justify-between border-b border-border-default px-8 py-4">
             <div className="flex items-center gap-4">
               <button
                 type="button"
                 onClick={() => navigate('/agentes_texto')}
-                className="rounded-lg p-1 text-black/50 transition-colors hover:bg-[#f5f3ff] hover:text-[#271173]"
+                className="rounded-lg p-1 text-text-tertiary transition-colors hover:bg-primary-50/60 hover:text-primary-600"
               >
                 <ChevronLeftIcon className="h-5 w-5" />
               </button>
@@ -271,29 +271,29 @@ export default function TextAgentDetailView() {
                       onKeyDown={(event) => {
                         if (event.key === 'Enter') setEditingName(false)
                       }}
-                      className="rounded-lg border border-[#271173]/30 bg-[#f5f3ff] px-3 py-1.5 text-sm font-semibold text-black focus:border-[#271173] focus:outline-none"
+                      className="rounded-lg border border-[#271173]/30 bg-primary-50 px-3 py-1.5 text-sm font-semibold text-text-primary focus:border-primary-500 focus:outline-none"
                       {...register('name', {
                         required: true,
                         onBlur: () => setEditingName(false),
                       })}
                     />
                   ) : (
-                    <h1 className="text-lg font-semibold text-black">{watchedName || agent.name}</h1>
+                    <h1 className="text-lg font-semibold text-text-primary">{watchedName || agent.name}</h1>
                   )}
 
                   <button
                     type="button"
                     onClick={() => setEditingName((prev) => !prev)}
-                    className="rounded-md p-1 text-black/40 transition-colors hover:text-black/70"
+                    className="rounded-md p-1 text-text-muted transition-colors hover:text-text-secondary"
                   >
                     <PencilIcon className="h-3.5 w-3.5" />
                   </button>
 
-                  <span className="rounded-full border border-[#d9d1ff] bg-[#f6f1ff] px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#271173]">
+                  <span className="rounded-full border border-primary-200 bg-primary-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-primary-600">
                     {agent.template_label}
                   </span>
                 </div>
-                <p className="mt-1 max-w-2xl text-xs text-black/50">{agent.template_summary}</p>
+                <p className="mt-1 max-w-2xl text-xs text-text-tertiary">{agent.template_summary}</p>
               </div>
             </div>
 
@@ -301,7 +301,7 @@ export default function TextAgentDetailView() {
               <button
                 type="submit"
                 disabled={isSaving}
-                className="flex items-center gap-2 rounded-xl bg-[#271173] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#1f0d5a] disabled:opacity-60"
+                className="flex items-center gap-2 rounded-xl bg-primary-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-primary-700 disabled:opacity-60"
               >
                 {isSaving ? (
                   <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
@@ -313,7 +313,7 @@ export default function TextAgentDetailView() {
             )}
           </div>
 
-          <div className="shrink-0 border-b border-[#e4e0f5] px-8">
+          <div className="shrink-0 border-b border-border-default px-8">
             <div className="flex gap-0 overflow-x-auto">
               {tabs.map((tab) => {
                 const Icon = tab.icon
@@ -325,8 +325,8 @@ export default function TextAgentDetailView() {
                     onClick={() => setActiveTab(tab.id as TabId)}
                     className={`flex items-center gap-1.5 border-b-2 px-4 py-3.5 text-sm font-medium whitespace-nowrap transition-all ${
                       active
-                        ? 'border-[#271173] text-[#271173]'
-                        : 'border-transparent text-black/50 hover:text-black/80'
+                        ? 'border-primary-600 text-primary-600'
+                        : 'border-transparent text-text-tertiary hover:text-text-primary'
                     }`}
                   >
                     <Icon className="h-4 w-4" />

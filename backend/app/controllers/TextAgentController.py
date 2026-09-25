@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import io
+import ipaddress
 import json
 import logging
 import os
 import re
 import secrets
+import socket
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import urlparse
@@ -12,7 +15,9 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 from fastapi import HTTPException, UploadFile, status
-from sqlalchemy.exc import DataError
+from fastapi.concurrency import run_in_threadpool
+from sqlalchemy import func
+from sqlalchemy.exc import DataError, IntegrityError
 from sqlmodel import delete, select
 
 from app.controllers.deps.auth import CurrentUser
@@ -44,6 +49,7 @@ from app.utils.text_agent_templates import (
 )
 from app.utils.roles import is_super_admin_user, role_as_value
 from app.services.google_calendar import sync_google_calendar_for_appointment
+from app.services.appointment_service import is_time_slot_available
 from app.services.renewal_scheduler import run_due_renewal_reminders
 from app.services.sofia_graph import run_sofia
 from app.services.sofia_prompts import ADVISOR_NOTIFICATION_TEMPLATE
@@ -83,7 +89,7 @@ FRONTEND_PUBLIC_URL = (
     os.getenv("FRONTEND_PUBLIC_URL")
     or os.getenv("FRONTEND_URL")
     or "http://localhost:5173"
-).strip().rstrip("/")
+).split(",")[0].strip().rstrip("/")
 TOOL_CALL_TAG_START = "<tool_call>"
 TOOL_CALL_TAG_END = "</tool_call>"
 
@@ -95,6 +101,23 @@ except ValueError:
     TOOL_EXECUTION_TIMEOUT_SECONDS = 20
 
 TOOL_EXECUTION_TIMEOUT_SECONDS = max(3, min(120, TOOL_EXECUTION_TIMEOUT_SECONDS))
+
+try:
+    HISTORY_MESSAGE_LIMIT = int(str(os.getenv("TEXT_AGENT_HISTORY_LIMIT", "30")).strip() or "30")
+except ValueError:
+    HISTORY_MESSAGE_LIMIT = 30
+HISTORY_MESSAGE_LIMIT = max(2, min(200, HISTORY_MESSAGE_LIMIT))
+
+MAX_CHAT_MESSAGE_CHARS = 4000
+MAX_TOOL_FIELD_CHARS = 255
+KB_MAX_FILE_BYTES = 5 * 1024 * 1024
+KB_TEXT_EXTENSIONS = {".txt", ".md", ".csv", ".json", ".html", ".htm", ".xml"}
+KB_ALLOWED_EXTENSIONS = KB_TEXT_EXTENSIONS | {".pdf"}
+ACTIVE_APPOINTMENT_STATUSES = ("scheduled", "confirmed")
+_SENSITIVE_HEADER_RE = re.compile(
+    r"auth|token|key|secret|cookie|passw|session|signature|credential",
+    re.IGNORECASE,
+)
 
 _CHUNK_SIZE = 500
 _CHUNK_OVERLAP = 80
@@ -141,7 +164,13 @@ def _parse_optional_datetime(value: Any) -> datetime | None:
     if isinstance(value, (int, float)):
         if value <= 0:
             return None
-        return datetime.utcfromtimestamp(int(value))
+        try:
+            return datetime.utcfromtimestamp(int(value))
+        except (OverflowError, OSError, ValueError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Fecha invalida: unix timestamp fuera de rango",
+            ) from exc
 
     raw = str(value).strip()
     if not raw:
@@ -158,7 +187,134 @@ def _parse_optional_datetime(value: Any) -> datetime | None:
             detail="renewal_date debe ser ISO8601 o unix timestamp",
         ) from exc
 
-    return parsed.replace(tzinfo=None) if parsed.tzinfo else parsed
+    # Si trae offset (ej. -05:00), convertir a UTC antes de guardar como naive UTC.
+    if parsed.tzinfo:
+        return parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    return parsed
+
+
+def _parse_number_field(
+    payload: dict[str, Any],
+    key: str,
+    *,
+    default: float,
+    cast: type = float,
+) -> float:
+    raw = payload.get(key)
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return cast(default)
+    if isinstance(raw, bool):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{key} debe ser numerico",
+        )
+    try:
+        value = float(raw)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{key} debe ser numerico",
+        ) from exc
+    if value != value or value in (float("inf"), float("-inf")):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{key} debe ser numerico",
+        )
+    return cast(value)
+
+
+def _validate_chat_message(payload: dict[str, Any]) -> str:
+    user_message = str(payload.get("message") or "").strip()
+    if not user_message:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="message es requerido",
+        )
+    if len(user_message) > MAX_CHAT_MESSAGE_CHARS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"El mensaje excede el maximo de {MAX_CHAT_MESSAGE_CHARS} caracteres",
+        )
+    return user_message
+
+
+def _load_recent_history(session: SessionDep, conversation_id: str) -> list[dict[str, str]]:
+    """Ultimos HISTORY_MESSAGE_LIMIT mensajes (user/assistant) en orden cronologico."""
+    rows = session.exec(
+        select(TextMessage)
+        .where(
+            TextMessage.conversation_id == conversation_id,
+            TextMessage.deleted_at == None,
+            TextMessage.role.in_(["user", "assistant"]),
+        )
+        .order_by(TextMessage.created_at.desc())
+        .limit(HISTORY_MESSAGE_LIMIT)
+    ).all()
+    return [{"role": row.role, "content": row.content} for row in reversed(rows)]
+
+
+def _has_prior_assistant_message(session: SessionDep, conversation_id: str) -> bool:
+    return (
+        session.exec(
+            select(TextMessage.id).where(
+                TextMessage.conversation_id == conversation_id,
+                TextMessage.deleted_at == None,
+                TextMessage.role == "assistant",
+            ).limit(1)
+        ).first()
+        is not None
+    )
+
+
+def _count_user_messages(session: SessionDep, conversation_id: str) -> int:
+    return int(
+        session.exec(
+            select(func.count(TextMessage.id)).where(
+                TextMessage.conversation_id == conversation_id,
+                TextMessage.deleted_at == None,
+                TextMessage.role == "user",
+            )
+        ).one()
+        or 0
+    )
+
+
+def _latest_messages_by_conversation(
+    session: SessionDep,
+    conversation_ids: list[str],
+    *,
+    role: str | None = None,
+) -> dict[str, TextMessage]:
+    """Ultimo mensaje (no borrado) de cada conversacion con una sola consulta agregada."""
+    if not conversation_ids:
+        return {}
+
+    filters = [
+        TextMessage.conversation_id.in_(conversation_ids),
+        TextMessage.deleted_at == None,
+    ]
+    if role:
+        filters.append(TextMessage.role == role)
+
+    latest = (
+        select(
+            TextMessage.conversation_id.label("conversation_id"),
+            func.max(TextMessage.created_at).label("max_created_at"),
+        )
+        .where(*filters)
+        .group_by(TextMessage.conversation_id)
+        .subquery()
+    )
+    rows = session.exec(
+        select(TextMessage)
+        .join(
+            latest,
+            (TextMessage.conversation_id == latest.c.conversation_id)
+            & (TextMessage.created_at == latest.c.max_created_at),
+        )
+        .where(*filters)
+    ).all()
+    return {row.conversation_id: row for row in rows}
 
 
 def _normalize_sofia_config_json_value(raw_value: Any) -> str:
@@ -198,12 +354,12 @@ def _validate_sofia_config_escalation_threshold(sofia_config_json: str) -> None:
         val = int(val)
     except (TypeError, ValueError):
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="escalation_threshold debe ser un entero",
         )
     if not (1 <= val <= 20):
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="escalation_threshold debe estar entre 1 y 20",
         )
 
@@ -544,11 +700,49 @@ def _serialize_provider_config(config: TextProviderConfig | None, provider: str)
     }
 
 
-def _serialize_tool(tool: TextAgentTool) -> dict[str, Any]:
+def _mask_header_value(name: str, value: Any) -> str:
+    text_value = str(value if value is not None else "")
+    if _SENSITIVE_HEADER_RE.search(str(name or "")):
+        return mask_secret(text_value)
+    return text_value
+
+
+def _load_tool_headers(tool: TextAgentTool) -> dict[str, str]:
     try:
-        parsed_headers = json.loads(tool.headers_json)
+        parsed = json.loads(tool.headers_json or "{}")
     except (json.JSONDecodeError, TypeError):
-        parsed_headers = {}
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    return {str(k): str(v) for k, v in parsed.items()}
+
+
+def _merge_masked_headers(
+    incoming: dict[str, Any],
+    existing: dict[str, str],
+) -> dict[str, str]:
+    """Si el cliente reenvia un header enmascarado, conserva el valor real guardado."""
+    merged: dict[str, str] = {}
+    for key, value in incoming.items():
+        name = str(key)
+        text_value = str(value if value is not None else "")
+        previous = existing.get(name)
+        if (
+            previous is not None
+            and _SENSITIVE_HEADER_RE.search(name)
+            and text_value == mask_secret(previous)
+        ):
+            merged[name] = previous
+        else:
+            merged[name] = text_value
+    return merged
+
+
+def _serialize_tool(tool: TextAgentTool) -> dict[str, Any]:
+    parsed_headers = {
+        name: _mask_header_value(name, value)
+        for name, value in _load_tool_headers(tool).items()
+    }
 
     try:
         parameters_schema = json.loads(tool.parameters_schema_json or "{}")
@@ -855,6 +1049,83 @@ def _index_document(
     return len(chunks)
 
 
+def _reindex_document_safely(doc: TextKnowledgeBaseDocument, session: SessionDep) -> None:
+    doc_id = doc.id
+    try:
+        count = _index_document(doc, session)
+        doc.chunk_count = count
+        doc.index_status = "indexed"
+        doc.updated_at = _utcnow()
+        session.add(doc)
+        session.commit()
+        session.refresh(doc)
+    except Exception:
+        # Tras un flush fallido la sesión queda inválida: rollback antes de tocar `doc`.
+        session.rollback()
+        logger.exception("No se pudo indexar el documento %s", doc_id)
+        doc.index_status = "failed"
+        doc.updated_at = _utcnow()
+        session.add(doc)
+        session.commit()
+        session.refresh(doc)
+
+
+def _decode_text_file(raw: bytes) -> str | None:
+    """Decodifica un archivo de texto; None si parece binario."""
+    if b"\x00" in raw:
+        return None
+    for encoding in ("utf-8-sig", "cp1252"):
+        try:
+            return raw.decode(encoding).strip()
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("latin-1").strip()
+
+
+def _read_pdf_pages_text(raw: bytes) -> list[str]:
+    from pypdf import PdfReader
+
+    reader = PdfReader(io.BytesIO(raw))
+    if reader.is_encrypted:
+        try:
+            decrypted = reader.decrypt("")
+        except Exception:
+            decrypted = 0
+        if not decrypted:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="El PDF esta protegido con contraseña. Sube una version sin proteccion.",
+            )
+    return [page.extract_text() or "" for page in reader.pages]
+
+
+def _extract_pdf_text(raw: bytes) -> str:
+    """Texto de un PDF; 400 si esta cifrado, dañado o no tiene texto (p. ej. escaneado)."""
+    try:
+        pages = _read_pdf_pages_text(raw)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.info("PDF ilegible en base de conocimiento", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No se pudo leer el PDF. Verifica que el archivo no este dañado.",
+        ) from exc
+
+    text_content = "\n\n".join(
+        page.replace("\x00", "").strip() for page in pages if page and page.strip()
+    ).strip()
+    if not text_content:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "El PDF no contiene texto extraible (puede ser un documento escaneado). "
+                "Sube un PDF con texto seleccionable o un archivo de texto."
+            ),
+        )
+    return text_content
+
+
 def _score_chunk(query_terms: set[str], chunk_content: str) -> float:
     words = chunk_content.lower().split()
     word_set = set(words)
@@ -917,6 +1188,28 @@ def _retrieve_rag_context(
     return "Contexto de base de conocimiento:\n" + "\n\n---\n\n".join(lines)
 
 
+_SPANISH_WEEKDAYS = ["lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "domingo"]
+_SPANISH_MONTHS = [
+    "enero", "febrero", "marzo", "abril", "mayo", "junio",
+    "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+]
+
+
+def _build_datetime_context_block(timezone_name: str = DEFAULT_APPOINTMENT_TIMEZONE) -> str:
+    """Bloque con la fecha/hora actual para que el modelo no invente fechas."""
+    local_now = _utc_naive_to_local_naive(_utcnow(), timezone_name)
+    fecha = (
+        f"{_SPANISH_WEEKDAYS[local_now.weekday()]} {local_now.day} de "
+        f"{_SPANISH_MONTHS[local_now.month - 1]} de {local_now.year}"
+    )
+    return (
+        f"Fecha y hora actual: {fecha}, {local_now.strftime('%H:%M')} (zona horaria {timezone_name}).\n"
+        f"El ano en curso es {local_now.year}. Cuando el cliente diga 'hoy', 'manana', 'el lunes', etc., "
+        "calcula la fecha SIEMPRE a partir de esta fecha actual y usa el ano en curso. "
+        "Las citas son a futuro: nunca uses fechas de anos anteriores ni fechas que ya pasaron."
+    )
+
+
 def _build_tools_description(tools: list[TextAgentTool]) -> str:
     active = [t for t in tools if t.enabled]
     if not active:
@@ -939,9 +1232,7 @@ def _build_tools_description(tools: list[TextAgentTool]) -> str:
         if len(compact_schema) > 480:
             compact_schema = compact_schema[:480] + "..."
 
-        lines.append(
-            f"- {tool.name}: {tool.description or 'Sin descripcion'} [{tool.http_method} {tool.endpoint_url}]"
-        )
+        lines.append(f"- {tool.name}: {tool.description or 'Sin descripcion'}")
         if compact_schema and compact_schema != "{}":
             lines.append(f"  parametros_schema: {compact_schema}")
     return "\n".join(lines)
@@ -973,20 +1264,69 @@ def _parse_json_object(raw: str) -> dict[str, Any] | None:
     return data if isinstance(data, dict) else None
 
 
+def _find_first_json_object(text: str) -> str | None:
+    """Devuelve el primer objeto JSON balanceado {...} dentro del texto.
+
+    Ignora llaves dentro de cadenas. Tolera texto antes/despues del objeto.
+    """
+    depth = 0
+    start_idx = -1
+    in_string = False
+    escape = False
+    for i, ch in enumerate(text):
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch == "{":
+            if depth == 0:
+                start_idx = i
+            depth += 1
+        elif ch == "}" and depth > 0:
+            depth -= 1
+            if depth == 0 and start_idx != -1:
+                return text[start_idx : i + 1]
+    return None
+
+
 def _extract_tool_call(content: str) -> tuple[str, dict[str, Any]] | None:
     text = str(content or "")
     payload: dict[str, Any] | None = None
 
+    # 1) Bloque <tool_call>...</tool_call> (con o sin etiqueta de cierre).
     start = text.find(TOOL_CALL_TAG_START)
-    end = text.find(TOOL_CALL_TAG_END, start + len(TOOL_CALL_TAG_START))
-    if start != -1 and end != -1 and end > start:
-        fragment = text[start + len(TOOL_CALL_TAG_START):end].strip()
+    if start != -1:
+        end = text.find(TOOL_CALL_TAG_END, start + len(TOOL_CALL_TAG_START))
+        fragment = (
+            text[start + len(TOOL_CALL_TAG_START):end]
+            if end != -1
+            else text[start + len(TOOL_CALL_TAG_START):]
+        ).strip()
         payload = _parse_json_object(fragment)
+        if payload is None:
+            obj = _find_first_json_object(fragment)
+            if obj:
+                payload = _parse_json_object(obj)
 
+    # 2) JSON puro (toda la respuesta es el objeto).
     if payload is None:
         stripped = text.strip()
         if stripped.startswith("{") and stripped.endswith("}"):
             payload = _parse_json_object(stripped)
+
+    # 3) JSON embebido en cualquier parte (el modelo agrego texto antes/despues).
+    if payload is None:
+        obj = _find_first_json_object(text)
+        if obj:
+            candidate = _parse_json_object(obj)
+            if isinstance(candidate, dict) and (candidate.get("tool") or candidate.get("tool_name")):
+                payload = candidate
 
     if not payload:
         return None
@@ -1067,6 +1407,112 @@ def _allowed_tool_hosts() -> set[str]:
     return {item.strip().lower() for item in raw.split(",") if item.strip()}
 
 
+def _resolve_host_ips(hostname: str, port: int | None) -> list[str]:
+    infos = socket.getaddrinfo(hostname, port or 443, proto=socket.IPPROTO_TCP)
+    return sorted({str(info[4][0]) for info in infos})
+
+
+def _is_public_ip(raw_ip: str) -> bool:
+    try:
+        ip = ipaddress.ip_address(str(raw_ip).split("%", 1)[0])
+    except ValueError:
+        return False
+    mapped = getattr(ip, "ipv4_mapped", None)
+    if mapped is not None:
+        ip = mapped
+    if (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_multicast
+        or ip.is_reserved
+        or ip.is_unspecified
+    ):
+        return False
+    return ip.is_global
+
+
+def _check_tool_endpoint(endpoint_url: str) -> tuple[str | None, int, str | None]:
+    """Valida un endpoint contra SSRF. Devuelve (error, status_code, ip_a_fijar).
+
+    ip_a_fijar es la IP pública ya validada cuando el host es un nombre DNS: la
+    petición debe conectarse a esa IP para evitar DNS rebinding.
+    """
+    endpoint = str(endpoint_url or "").strip()
+    if not endpoint:
+        return "endpoint_url vacío en herramienta", 400, None
+
+    if urlparse(endpoint).scheme.lower() == "internal":
+        return None, 200, None
+
+    try:
+        url = httpx.URL(endpoint)
+    except (httpx.InvalidURL, TypeError, ValueError):
+        return "endpoint_url invalido", 400, None
+
+    if url.scheme.lower() not in {"http", "https"}:
+        return "Solo se permiten endpoints http/https o internal://", 400, None
+
+    hostname = str(url.host or "").strip().lower().rstrip(".")
+    if not hostname:
+        return "endpoint_url no tiene un host valido", 400, None
+
+    allowed_hosts = _allowed_tool_hosts()
+    if allowed_hosts:
+        # Con lista blanca configurada, el administrador decide qué hosts son confiables.
+        if hostname not in allowed_hosts:
+            return f"Host no permitido por política: {hostname}", 403, None
+        return None, 200, None
+
+    pinned_ip: str | None = None
+    try:
+        ipaddress.ip_address(hostname.strip("[]"))
+        resolved_ips = [hostname.strip("[]")]
+    except ValueError:
+        try:
+            resolved_ips = _resolve_host_ips(hostname, url.port)
+        except (OSError, UnicodeError, ValueError):
+            return f"No se pudo resolver el host del endpoint: {hostname}", 400, None
+        pinned_ip = resolved_ips[0] if resolved_ips else None
+
+    if not resolved_ips or not all(_is_public_ip(ip) for ip in resolved_ips):
+        return "El endpoint apunta a una red interna o reservada y no esta permitido", 400, None
+
+    return None, 200, pinned_ip
+
+
+def _validate_tool_endpoint(endpoint_url: str) -> tuple[str | None, int]:
+    """Valida un endpoint de herramienta contra SSRF. Devuelve (error, status_code)."""
+    error, status_code, _ = _check_tool_endpoint(endpoint_url)
+    return error, status_code
+
+
+def _pin_request_to_ip(endpoint: str, pinned_ip: str) -> tuple[str, dict[str, str], dict[str, Any]]:
+    """Reescribe la URL para conectar a la IP validada conservando Host y SNI/TLS del dominio."""
+    url = httpx.URL(endpoint)
+    host_header = url.host if url.port is None else f"{url.host}:{url.port}"
+    extensions: dict[str, Any] = {}
+    if url.scheme.lower() == "https":
+        # El certificado se sigue verificando contra el dominio original.
+        extensions["sni_hostname"] = url.host
+    return str(url.copy_with(host=pinned_ip)), {"Host": host_header}, extensions
+
+
+def _validate_tool_field_lengths(**fields: str) -> None:
+    for field_name, value in fields.items():
+        if len(str(value or "")) > MAX_TOOL_FIELD_CHARS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{field_name} excede el maximo de {MAX_TOOL_FIELD_CHARS} caracteres",
+            )
+
+
+def _require_safe_tool_endpoint(endpoint_url: str) -> None:
+    error, _ = _validate_tool_endpoint(endpoint_url)
+    if error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error)
+
+
 def _execute_internal_tool(
     tool: TextAgentTool,
     arguments: dict[str, Any],
@@ -1087,8 +1533,27 @@ def _execute_internal_tool(
             "mapped_text": None,
         }
 
+    timezone_name = (
+        str(arguments.get("timezone") or DEFAULT_APPOINTMENT_TIMEZONE).strip()[:64]
+        or DEFAULT_APPOINTMENT_TIMEZONE
+    )
+    if _resolve_zoneinfo(timezone_name) is None:
+        return {
+            "ok": False,
+            "status_code": 400,
+            "error": (
+                f"Zona horaria invalida: {timezone_name}. "
+                f"Usa un nombre IANA, por ejemplo {DEFAULT_APPOINTMENT_TIMEZONE}."
+            ),
+            "data": None,
+            "mapped_text": None,
+        }
+
     try:
-        appointment_date = _parse_optional_datetime(arguments.get("appointment_date"))
+        appointment_date = _parse_tool_appointment_datetime(
+            arguments.get("appointment_date"),
+            timezone_name,
+        )
     except HTTPException:
         appointment_date = None
 
@@ -1096,7 +1561,19 @@ def _execute_internal_tool(
         return {
             "ok": False,
             "status_code": 400,
-            "error": "appointment_date es requerido para agendar cita",
+            "error": "appointment_date es requerido para agendar cita (formato ISO8601)",
+            "data": None,
+            "mapped_text": None,
+        }
+
+    if appointment_date < _utcnow():
+        return {
+            "ok": False,
+            "status_code": 400,
+            "error": (
+                "La fecha calculada quedo en el pasado. Confirma la fecha con el cliente "
+                "usando el ano y dia actuales, y vuelve a intentar."
+            ),
             "data": None,
             "mapped_text": None,
         }
@@ -1109,6 +1586,23 @@ def _execute_internal_tool(
             "ok": False,
             "status_code": 400,
             "error": "Se necesita al menos un dato de contacto para la cita",
+            "data": None,
+            "mapped_text": None,
+        }
+
+    if not is_time_slot_available(
+        session,
+        user_id=agent.user_id,
+        appointment_date=appointment_date,
+        buffer_minutes=0,
+    ):
+        return {
+            "ok": False,
+            "status_code": 409,
+            "error": (
+                "Ese horario no esta disponible: ya hay una cita o un evento en la agenda. "
+                "Ofrece al cliente otra fecha u hora."
+            ),
             "data": None,
             "mapped_text": None,
         }
@@ -1126,8 +1620,7 @@ def _execute_internal_tool(
         contact_phone=contact_phone,
         contact_email=contact_email,
         appointment_date=appointment_date,
-        timezone=str(arguments.get("timezone") or "America/Bogota").strip()[:64]
-        or "America/Bogota",
+        timezone=timezone_name,
         status=next_status,
         source="agent",
         notes=str(arguments.get("notes") or "").strip()[:500],
@@ -1181,17 +1674,7 @@ def _execute_external_http_tool(
     arguments: dict[str, Any],
 ) -> dict[str, Any]:
     endpoint = str(tool.endpoint_url or "").strip()
-    if not endpoint:
-        return {
-            "ok": False,
-            "status_code": 400,
-            "error": "endpoint_url vacío en herramienta",
-            "data": None,
-            "mapped_text": None,
-        }
-
-    parsed = urlparse(endpoint)
-    if parsed.scheme not in {"http", "https"}:
+    if urlparse(endpoint).scheme.lower() == "internal":
         return {
             "ok": False,
             "status_code": 400,
@@ -1200,35 +1683,37 @@ def _execute_external_http_tool(
             "mapped_text": None,
         }
 
-    hostname = str(parsed.hostname or "").lower().strip()
-    allowed_hosts = _allowed_tool_hosts()
-    if allowed_hosts and hostname not in allowed_hosts:
+    # Se revalida justo antes de ejecutar (el DNS pudo cambiar desde que se guardó).
+    endpoint_error, endpoint_status, pinned_ip = _check_tool_endpoint(endpoint)
+    if endpoint_error:
         return {
             "ok": False,
-            "status_code": 403,
-            "error": f"Host no permitido por política: {hostname}",
+            "status_code": endpoint_status,
+            "error": endpoint_error,
             "data": None,
             "mapped_text": None,
         }
 
-    try:
-        raw_headers = json.loads(tool.headers_json or "{}")
-    except (json.JSONDecodeError, TypeError):
-        raw_headers = {}
-
-    headers = {str(k): str(v) for k, v in raw_headers.items()} if isinstance(raw_headers, dict) else {}
+    headers = _load_tool_headers(tool)
     method = str(tool.http_method or "POST").strip().upper()
     args = arguments if isinstance(arguments, dict) else {}
 
+    request_url = endpoint
     request_kwargs: dict[str, Any] = {"headers": headers}
+    if pinned_ip:
+        request_url, pinned_headers, extensions = _pin_request_to_ip(endpoint, pinned_ip)
+        request_kwargs["headers"] = {**headers, **pinned_headers}
+        if extensions:
+            request_kwargs["extensions"] = extensions
     if method in {"GET", "DELETE"}:
         request_kwargs["params"] = args
     else:
         request_kwargs["json"] = args
 
     try:
-        with httpx.Client(timeout=TOOL_EXECUTION_TIMEOUT_SECONDS) as client:
-            response = client.request(method, endpoint, **request_kwargs)
+        # Sin seguir redirecciones: un 3xx podría apuntar a un host interno.
+        with httpx.Client(timeout=TOOL_EXECUTION_TIMEOUT_SECONDS, follow_redirects=False) as client:
+            response = client.request(method, request_url, **request_kwargs)
     except httpx.TimeoutException:
         return {
             "ok": False,
@@ -1237,11 +1722,12 @@ def _execute_external_http_tool(
             "data": None,
             "mapped_text": None,
         }
-    except httpx.RequestError as exc:
+    except httpx.HTTPError:
+        logger.warning("Error de red ejecutando herramienta %s", tool.name, exc_info=True)
         return {
             "ok": False,
             "status_code": 502,
-            "error": f"Error de red ejecutando herramienta: {exc}",
+            "error": "Error de red ejecutando la herramienta",
             "data": None,
             "mapped_text": None,
         }
@@ -1460,7 +1946,39 @@ def _resolve_zoneinfo(timezone_name: str) -> ZoneInfo | None:
     normalized = str(timezone_name or "").strip() or "UTC"
     try:
         return ZoneInfo(normalized)
-    except ZoneInfoNotFoundError:
+    except (ZoneInfoNotFoundError, ValueError, TypeError, OSError):
+        return None
+
+
+def _parse_tool_appointment_datetime(value: Any, timezone_name: str) -> datetime | None:
+    """Fecha de una herramienta del LLM a UTC naive.
+
+    El LLM razona en hora local: un ISO sin offset se interpreta en `timezone_name`.
+    ISO con offset y unix timestamps ya son absolutos.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return _parse_optional_datetime(value)
+
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        raw = str(value).strip()
+        if not raw:
+            return None
+        if raw[-1] in {"Z", "z"}:
+            raw = raw[:-1] + "+00:00"
+        try:
+            parsed = datetime.fromisoformat(raw)
+        except ValueError:
+            return None
+
+    try:
+        if parsed.tzinfo is not None:
+            return parsed.astimezone(timezone.utc).replace(tzinfo=None)
+        return _local_naive_to_utc_naive(parsed, timezone_name)
+    except (OverflowError, ValueError):
         return None
 
 
@@ -1639,6 +2157,33 @@ def _default_appointment_datetime_utc(timezone_name: str) -> datetime:
     return _local_naive_to_utc_naive(candidate, timezone_name)
 
 
+_SCHEDULING_REQUEST_RE = re.compile(
+    r"\b(agendar|ag[eé]nd(?:ame|eme|emos|elo|ela|ala|e)|programar|reservar|apartar)\b"
+    r"|\bagenda\s+(?:una|mi|la)\s+cita\b"
+    r"|\b(quiero|quisiera|deseo|necesito|solicito|me\s+gustar[ií]a|podemos|podr[ií]a)\b"
+    r"[^.?!]{0,40}\bcita\b",
+    re.IGNORECASE,
+)
+_SCHEDULING_NEGATION_RE = re.compile(
+    r"\bno\s+(?:quiero|quisiera|deseo|necesito|me\s+interesa|gracias)\b"
+    r"|\bcancel\w*|\banul\w*"
+    r"|^\s*no\s*[.!]*\s*$",
+    re.IGNORECASE,
+)
+
+
+def _has_explicit_scheduling_intent(user_messages: list[str]) -> bool:
+    """Requiere una solicitud afirmativa de cita; una negativa en el ultimo mensaje la anula."""
+    if not user_messages:
+        return False
+    if _SCHEDULING_NEGATION_RE.search(str(user_messages[-1] or "")):
+        return False
+    return any(
+        _SCHEDULING_REQUEST_RE.search(text) and not _SCHEDULING_NEGATION_RE.search(text)
+        for text in (str(item or "") for item in user_messages)
+    )
+
+
 def _maybe_auto_create_appointment_from_sofia(
     *,
     agent: TextAgent,
@@ -1659,6 +2204,9 @@ def _maybe_auto_create_appointment_from_sofia(
         recent_user_messages.append(str(user_message or ""))
 
         latest_user_text = str(user_message or "")
+        if _SCHEDULING_NEGATION_RE.search(latest_user_text):
+            return
+
         contact_phone = (
             _extract_phone_candidate(latest_user_text)
             or _extract_phone_candidate(" ".join(recent_user_messages))
@@ -1699,6 +2247,7 @@ def _maybe_auto_create_appointment_from_sofia(
                 TextAppointment.text_agent_id == agent.id,
                 TextAppointment.conversation_id == conversation.id,
                 TextAppointment.deleted_at == None,
+                TextAppointment.status.in_(ACTIVE_APPOINTMENT_STATUSES),
             )
         ).first()
         if existing:
@@ -1716,7 +2265,18 @@ def _maybe_auto_create_appointment_from_sofia(
                 existing.contact_email = contact_email[:160]
                 updated_existing = True
 
-            if requested_utc_datetime and existing.appointment_date != requested_utc_datetime:
+            if (
+                requested_utc_datetime
+                and existing.appointment_date != requested_utc_datetime
+                and requested_utc_datetime > now
+                and is_time_slot_available(
+                    session,
+                    user_id=agent.user_id,
+                    appointment_date=requested_utc_datetime,
+                    buffer_minutes=0,
+                    exclude_appointment_id=existing.id,
+                )
+            ):
                 existing.appointment_date = requested_utc_datetime
                 existing.timezone = timezone_name
                 if "pendiente de confirmación" in str(existing.notes or ""):
@@ -1746,16 +2306,23 @@ def _maybe_auto_create_appointment_from_sofia(
                 )
             return
 
-        combined_text = " ".join(recent_user_messages).lower()
-        appointment_keywords = ["agendar", "agenda", "cita", "programar cita", "agend"]
-        has_appointment_intent = any(keyword in combined_text for keyword in appointment_keywords)
-        if not has_appointment_intent:
+        if not _has_explicit_scheduling_intent(recent_user_messages):
             return
 
         if not contact_phone and not contact_email:
             return
 
         appointment_date = requested_utc_datetime or _default_appointment_datetime_utc(timezone_name)
+
+        # No agendar automaticamente sobre un horario ya ocupado (citas o Google Calendar).
+        if not is_time_slot_available(
+            session,
+            user_id=agent.user_id,
+            appointment_date=appointment_date,
+            buffer_minutes=0,
+        ):
+            return
+
         appointment = TextAppointment(
             text_agent_id=agent.id,
             user_id=agent.user_id,
@@ -1804,6 +2371,35 @@ def _maybe_auto_create_appointment_from_sofia(
 
 # ─── LLM calls ──────────────────────────────────────────────────────────────
 
+def _post_to_llm_provider(provider_label: str, url: str, **kwargs: Any) -> httpx.Response:
+    try:
+        with httpx.Client(timeout=60) as client:
+            return client.post(url, **kwargs)
+    except httpx.TimeoutException as exc:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail=f"{provider_label} no respondio a tiempo. Intenta de nuevo.",
+        ) from exc
+    except httpx.HTTPError as exc:
+        logger.warning("Error de red llamando a %s", provider_label, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"No fue posible conectar con {provider_label}",
+        ) from exc
+
+
+def _provider_error_message(body: Any) -> str | None:
+    if not isinstance(body, dict):
+        return None
+    error = body.get("error")
+    if isinstance(error, dict):
+        message = error.get("message")
+        return str(message) if message else None
+    if isinstance(error, str) and error.strip():
+        return error.strip()
+    return None
+
+
 def _call_openai(
     api_key: str,
     model: str,
@@ -1819,15 +2415,15 @@ def _call_openai(
         "max_tokens": max_tokens,
     }
 
-    with httpx.Client(timeout=60) as client:
-        response = client.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
-        )
+    response = _post_to_llm_provider(
+        "OpenAI",
+        "https://api.openai.com/v1/chat/completions",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        json=payload,
+    )
 
     try:
         body = response.json()
@@ -1835,10 +2431,9 @@ def _call_openai(
         body = {"detail": response.text}
 
     if not response.is_success:
-        detail = body.get("error", {}).get("message") if isinstance(body, dict) else None
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=detail or "OpenAI rechazo la solicitud",
+            detail=_provider_error_message(body) or "OpenAI rechazo la solicitud",
         )
 
     choices = body.get("choices") if isinstance(body, dict) else None
@@ -1885,13 +2480,13 @@ def _call_gemini(
         },
     }
 
-    with httpx.Client(timeout=60) as client:
-        response = client.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
-            params={"key": api_key},
-            headers={"Content-Type": "application/json"},
-            json=payload,
-        )
+    response = _post_to_llm_provider(
+        "Gemini",
+        f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+        params={"key": api_key},
+        headers={"Content-Type": "application/json"},
+        json=payload,
+    )
 
     try:
         body = response.json()
@@ -1899,10 +2494,9 @@ def _call_gemini(
         body = {"detail": response.text}
 
     if not response.is_success:
-        detail = body.get("error", {}).get("message") if isinstance(body, dict) else None
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=detail or "Gemini rechazo la solicitud",
+            detail=_provider_error_message(body) or "Gemini rechazo la solicitud",
         )
 
     candidates = body.get("candidates") if isinstance(body, dict) else None
@@ -1959,11 +2553,13 @@ def _send_twilio_message(
 ) -> None:
     url = f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Messages.json"
     with httpx.Client(timeout=30) as client:
-        client.post(
+        response = client.post(
             url,
             auth=(account_sid, auth_token),
             data={"From": from_number, "To": to_number, "Body": body},
         )
+    if not response.is_success:
+        logger.warning("Twilio rechazo el envio de WhatsApp (HTTP %s)", response.status_code)
 
 
 def _send_meta_message(
@@ -1974,7 +2570,7 @@ def _send_meta_message(
 ) -> None:
     url = f"https://graph.facebook.com/v18.0/{phone_number_id}/messages"
     with httpx.Client(timeout=30) as client:
-        client.post(
+        response = client.post(
             url,
             headers={
                 "Authorization": f"Bearer {access_token}",
@@ -1988,6 +2584,8 @@ def _send_meta_message(
                 "text": {"body": body},
             },
         )
+    if not response.is_success:
+        logger.warning("Meta rechazo el envio de WhatsApp (HTTP %s)", response.status_code)
 
 
 # ─── Controller ──────────────────────────────────────────────────────────────
@@ -2174,8 +2772,8 @@ class TextAgentController:
         provider = _normalize_provider(payload.get("provider") or "openai")
         _resolve_provider_api_key(provider, current_user, session)
 
-        temperature = float(payload.get("temperature") or 0.7)
-        max_tokens = int(payload.get("max_tokens") or 512)
+        temperature = _parse_number_field(payload, "temperature", default=0.7)
+        max_tokens = _parse_number_field(payload, "max_tokens", default=512, cast=int)
         now = _utcnow()
 
         sofia_mode = bool(payload.get("sofia_mode", False))
@@ -2280,11 +2878,11 @@ class TextAgentController:
             agent.language = str(payload.get("language") or "es")
 
         if "temperature" in payload:
-            value = float(payload.get("temperature") or 0.7)
+            value = _parse_number_field(payload, "temperature", default=0.7)
             agent.temperature = max(0.0, min(2.0, value))
 
         if "max_tokens" in payload:
-            value = int(payload.get("max_tokens") or 512)
+            value = _parse_number_field(payload, "max_tokens", default=512, cast=int)
             agent.max_tokens = max(64, min(8192, value))
 
         if "sofia_mode" in payload:
@@ -2403,12 +3001,7 @@ class TextAgentController:
         token = str(payload.get("token") or "").strip()
         agent = _require_public_embed_agent(text_agent_id, token, session)
 
-        user_message = str(payload.get("message") or "").strip()
-        if not user_message:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="message es requerido",
-            )
+        user_message = _validate_chat_message(payload)
 
         session_id = _normalize_session_id(payload.get("session_id"))
         conversation_id = str(payload.get("conversation_id") or "").strip()
@@ -2450,26 +3043,17 @@ class TextAgentController:
         )
         session.commit()
 
-        history_rows = session.exec(
-            select(TextMessage)
-            .where(
-                TextMessage.conversation_id == conversation.id,
-                TextMessage.deleted_at == None,
-            )
-            .order_by(TextMessage.created_at.asc())
-        ).all()
-
-        history = [
-            {"role": row.role, "content": row.content}
-            for row in history_rows
-            if row.role in {"user", "assistant"}
-        ]
+        history = _load_recent_history(session, conversation.id)
+        has_prior_assistant = _has_prior_assistant_message(session, conversation.id)
 
         rag_context = _retrieve_rag_context(session, agent.id, user_message)
 
         if agent.sofia_mode:
             sofia_result = await _run_sofia_chat(
-                agent, conversation, history, user_message, rag_context, session
+                agent, conversation, history, user_message, rag_context, session,
+                api_key=_resolve_sofia_api_key(agent, session),
+                user_message_count=_count_user_messages(session, conversation.id),
+                has_prior_assistant=has_prior_assistant,
             )
             return {
                 "conversation_id": conversation.id,
@@ -2487,7 +3071,7 @@ class TextAgentController:
         tools_desc = _build_tools_description(tools)
 
         system_prompt = agent.system_prompt.strip() or "Eres un asistente util y claro."
-        extra_blocks = [b for b in [rag_context, tools_desc] if b]
+        extra_blocks = [b for b in [_build_datetime_context_block(), rag_context, tools_desc] if b]
         if extra_blocks:
             system_prompt = system_prompt + "\n\n" + "\n\n".join(extra_blocks)
 
@@ -2500,7 +3084,8 @@ class TextAgentController:
 
         api_key, _ = _resolve_provider_api_key(agent.provider, owner_user, session)
 
-        assistant_content, token_usage = _dispatch_llm_with_optional_tool_execution(
+        assistant_content, token_usage = await run_in_threadpool(
+            _dispatch_llm_with_optional_tool_execution,
             agent=agent,
             session=session,
             conversation=conversation,
@@ -2510,7 +3095,6 @@ class TextAgentController:
             history=history,
         )
 
-        has_prior_assistant = any(r.role == "assistant" for r in history_rows)
         assistant_content = _maybe_prepend_legal_notice(
             assistant_content, agent.legal_notice, has_prior_assistant
         )
@@ -2565,18 +3149,13 @@ class TextAgentController:
             query = query.where(TextConversation.escalation_status == status_filter)
 
         rows = session.exec(query).all()
+        last_user_messages = _latest_messages_by_conversation(
+            session, [conv.id for conv in rows], role="user"
+        )
 
         escalations = []
         for conv in rows:
-            last_msg = session.exec(
-                select(TextMessage)
-                .where(
-                    TextMessage.conversation_id == conv.id,
-                    TextMessage.role == "user",
-                    TextMessage.deleted_at == None,
-                )
-                .order_by(TextMessage.created_at.desc())
-            ).first()
+            last_msg = last_user_messages.get(conv.id)
 
             escalations.append({
                 "conversation_id": conv.id,
@@ -2714,15 +3293,28 @@ class TextAgentController:
             except (json.JSONDecodeError, TypeError):
                 response_mapping = {}
 
+        _require_safe_tool_endpoint(endpoint_url)
+
+        description = str(payload.get("description") or "")
+        headers_json = json.dumps({str(k): str(v) for k, v in headers.items()})
+        body_template = str(payload.get("body_template") or "")
+        _validate_tool_field_lengths(
+            name=name,
+            description=description,
+            endpoint_url=endpoint_url,
+            headers=headers_json,
+            body_template=body_template,
+        )
+
         now = _utcnow()
         tool = TextAgentTool(
             text_agent_id=text_agent_id,
             name=name,
-            description=str(payload.get("description") or ""),
+            description=description,
             endpoint_url=endpoint_url,
             http_method=method,
-            headers_json=json.dumps(headers),
-            body_template=str(payload.get("body_template") or ""),
+            headers_json=headers_json,
+            body_template=body_template,
             parameters_schema_json=json.dumps(parameters_schema),
             response_mapping_json=json.dumps(response_mapping),
             enabled=bool(payload.get("enabled", True)),
@@ -2730,7 +3322,7 @@ class TextAgentController:
             updated_at=now,
         )
         session.add(tool)
-        session.commit()
+        _commit_with_data_error_guard(session)
         session.refresh(tool)
 
         return _serialize_tool(tool)
@@ -2771,6 +3363,8 @@ class TextAgentController:
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="endpoint_url no puede estar vacio",
                 )
+            if endpoint_url != tool.endpoint_url:
+                _require_safe_tool_endpoint(endpoint_url)
             tool.endpoint_url = endpoint_url
 
         if "http_method" in payload:
@@ -2789,7 +3383,7 @@ class TextAgentController:
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="headers debe ser un objeto",
                 )
-            tool.headers_json = json.dumps(headers)
+            tool.headers_json = json.dumps(_merge_masked_headers(headers, _load_tool_headers(tool)))
 
         if "body_template" in payload:
             tool.body_template = str(payload.get("body_template") or "")
@@ -2815,9 +3409,20 @@ class TextAgentController:
         if "enabled" in payload:
             tool.enabled = bool(payload.get("enabled"))
 
+        current_values = {
+            "name": tool.name,
+            "description": tool.description,
+            "endpoint_url": tool.endpoint_url,
+            "headers": tool.headers_json,
+            "body_template": tool.body_template,
+        }
+        _validate_tool_field_lengths(
+            **{field: value for field, value in current_values.items() if field in payload}
+        )
+
         tool.updated_at = _utcnow()
         session.add(tool)
-        session.commit()
+        _commit_with_data_error_guard(session)
         session.refresh(tool)
 
         return _serialize_tool(tool)
@@ -2956,7 +3561,7 @@ class TextAgentController:
             updated_at=now,
         )
         session.add(appointment)
-        _apply_google_calendar_sync(session, appointment, operation="upsert")
+        await run_in_threadpool(_apply_google_calendar_sync, session, appointment, operation="upsert")
 
         _log_audit_event(
             session,
@@ -3041,7 +3646,7 @@ class TextAgentController:
 
         appointment.updated_at = _utcnow()
         session.add(appointment)
-        _apply_google_calendar_sync(session, appointment, operation="upsert")
+        await run_in_threadpool(_apply_google_calendar_sync, session, appointment, operation="upsert")
 
         _log_audit_event(
             session,
@@ -3090,7 +3695,7 @@ class TextAgentController:
         if appointment.status != "completed":
             appointment.status = "cancelled"
         session.add(appointment)
-        _apply_google_calendar_sync(session, appointment, operation="delete")
+        await run_in_threadpool(_apply_google_calendar_sync, session, appointment, operation="delete")
 
         _log_audit_event(
             session,
@@ -3139,16 +3744,48 @@ class TextAgentController:
         current_user: CurrentUser,
         session: SessionDep,
     ):
-        raw = await file.read()
-        content = raw.decode("utf-8", errors="ignore").strip()
-        document_name = (name or "").strip() or file.filename or "Documento archivo"
+        filename = str(file.filename or "").strip()
+        extension = os.path.splitext(filename)[1].lower()
+        if extension not in KB_ALLOWED_EXTENSIONS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "Formato de archivo no soportado. Sube un PDF o un archivo de texto: "
+                    + ", ".join(sorted(KB_ALLOWED_EXTENSIONS))
+                    + ". Los documentos de Word deben exportarse a PDF o texto antes de subirlos."
+                ),
+            )
+
+        raw = await file.read(KB_MAX_FILE_BYTES + 1)
+        if len(raw) > KB_MAX_FILE_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                detail=f"El archivo excede el maximo de {KB_MAX_FILE_BYTES // (1024 * 1024)} MB",
+            )
+        if extension == ".pdf":
+            # La extraccion de PDF es CPU intensiva: fuera del event loop.
+            content = await run_in_threadpool(_extract_pdf_text, raw)
+        else:
+            content = _decode_text_file(raw)
+        if content is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="El archivo no parece ser de texto plano",
+            )
+        if not content:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="El archivo esta vacio",
+            )
+
+        document_name = ((name or "").strip() or filename or "Documento archivo")[:255]
 
         now = _utcnow()
         doc = TextKnowledgeBaseDocument(
             user_id=current_user.id,
             name=document_name,
             source_type="file",
-            source_value=file.filename or "uploaded-file",
+            source_value=(filename or "uploaded-file")[:255],
             content=content,
             index_status="indexing",
             chunk_count=0,
@@ -3156,22 +3793,10 @@ class TextAgentController:
             updated_at=now,
         )
         session.add(doc)
-        session.commit()
+        _commit_with_data_error_guard(session)
         session.refresh(doc)
 
-        try:
-            count = _index_document(doc, session)
-            doc.chunk_count = count
-            doc.index_status = "indexed"
-            doc.updated_at = _utcnow()
-            session.add(doc)
-            session.commit()
-            session.refresh(doc)
-        except Exception:
-            doc.index_status = "failed"
-            session.add(doc)
-            session.commit()
-
+        _reindex_document_safely(doc, session)
         return _serialize_document(doc)
 
     @staticmethod
@@ -3186,19 +3811,7 @@ class TextAgentController:
         session.add(doc)
         session.commit()
 
-        try:
-            count = _index_document(doc, session)
-            doc.chunk_count = count
-            doc.index_status = "indexed"
-            doc.updated_at = _utcnow()
-            session.add(doc)
-            session.commit()
-            session.refresh(doc)
-        except Exception:
-            doc.index_status = "failed"
-            session.add(doc)
-            session.commit()
-
+        _reindex_document_safely(doc, session)
         return _serialize_document(doc)
 
     @staticmethod
@@ -3427,23 +4040,23 @@ class TextAgentController:
             return {"conversations": []}
 
         conversation_ids = [row.id for row in rows]
-        messages = session.exec(
-            select(TextMessage)
-            .where(
-                TextMessage.conversation_id.in_(conversation_ids),
-                TextMessage.deleted_at == None,
-            )
-            .order_by(TextMessage.created_at.asc())
-        ).all()
-
-        grouped: dict[str, list[TextMessage]] = {}
-        for message in messages:
-            grouped.setdefault(message.conversation_id, []).append(message)
+        message_counts = {
+            conversation_id: int(count or 0)
+            for conversation_id, count in session.exec(
+                select(TextMessage.conversation_id, func.count(TextMessage.id))
+                .where(
+                    TextMessage.conversation_id.in_(conversation_ids),
+                    TextMessage.deleted_at == None,
+                )
+                .group_by(TextMessage.conversation_id)
+            ).all()
+        }
+        last_messages = _latest_messages_by_conversation(session, conversation_ids)
 
         result: list[dict[str, Any]] = []
         for conversation in rows:
-            msgs = grouped.get(conversation.id, [])
-            last_preview = msgs[-1].content[:140] if msgs else ""
+            last_message = last_messages.get(conversation.id)
+            last_preview = last_message.content[:140] if last_message else ""
             result.append(
                 {
                     "conversation_id": conversation.id,
@@ -3452,7 +4065,7 @@ class TextAgentController:
                     "channel": conversation.channel,
                     "start_time_unix_secs": _to_unix(conversation.created_at),
                     "updated_at_unix_secs": _to_unix(conversation.updated_at),
-                    "message_count": len(msgs),
+                    "message_count": message_counts.get(conversation.id, 0),
                     "last_message_preview": last_preview,
                     "escalation_status": conversation.escalation_status,
                     "escalation_reason": conversation.escalation_reason,
@@ -3621,6 +4234,7 @@ class TextAgentController:
             allowed_statuses = {
                 "none",
                 "scheduled",
+                "reminder_due",
                 "reminder_sent",
                 "contacted",
                 "renewed",
@@ -3631,7 +4245,7 @@ class TextAgentController:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=(
-                        "renewal_status invalido. Usa: none, scheduled, reminder_sent, "
+                        "renewal_status invalido. Usa: none, scheduled, reminder_due, reminder_sent, "
                         "contacted, renewed, expired o cancelled"
                     ),
                 )
@@ -3706,12 +4320,7 @@ class TextAgentController:
     ):
         agent = _require_owned_text_agent(text_agent_id, current_user, session)
 
-        user_message = str(payload.get("message") or "").strip()
-        if not user_message:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="message es requerido",
-            )
+        user_message = _validate_chat_message(payload)
 
         conversation_id = str(payload.get("conversation_id") or "").strip()
         if conversation_id:
@@ -3751,26 +4360,17 @@ class TextAgentController:
         )
         session.commit()
 
-        history_rows = session.exec(
-            select(TextMessage)
-            .where(
-                TextMessage.conversation_id == conversation.id,
-                TextMessage.deleted_at == None,
-            )
-            .order_by(TextMessage.created_at.asc())
-        ).all()
-
-        history = [
-            {"role": row.role, "content": row.content}
-            for row in history_rows
-            if row.role in {"user", "assistant"}
-        ]
+        history = _load_recent_history(session, conversation.id)
+        has_prior_assistant = _has_prior_assistant_message(session, conversation.id)
 
         rag_context = _retrieve_rag_context(session, agent.id, user_message)
 
         if agent.sofia_mode:
             sofia_result = await _run_sofia_chat(
-                agent, conversation, history, user_message, rag_context, session
+                agent, conversation, history, user_message, rag_context, session,
+                api_key=_resolve_sofia_api_key(agent, session),
+                user_message_count=_count_user_messages(session, conversation.id),
+                has_prior_assistant=has_prior_assistant,
             )
             return {
                 "conversation_id": conversation.id,
@@ -3787,13 +4387,14 @@ class TextAgentController:
         tools_desc = _build_tools_description(tools)
 
         system_prompt = agent.system_prompt.strip() or "Eres un asistente util y claro."
-        extra_blocks = [b for b in [rag_context, tools_desc] if b]
+        extra_blocks = [b for b in [_build_datetime_context_block(), rag_context, tools_desc] if b]
         if extra_blocks:
             system_prompt = system_prompt + "\n\n" + "\n\n".join(extra_blocks)
 
         api_key, _ = _resolve_provider_api_key(agent.provider, current_user, session)
 
-        assistant_content, token_usage = _dispatch_llm_with_optional_tool_execution(
+        assistant_content, token_usage = await run_in_threadpool(
+            _dispatch_llm_with_optional_tool_execution,
             agent=agent,
             session=session,
             conversation=conversation,
@@ -3803,7 +4404,6 @@ class TextAgentController:
             history=history,
         )
 
-        has_prior_assistant = any(r.role == "assistant" for r in history_rows)
         assistant_content = _maybe_prepend_legal_notice(
             assistant_content, agent.legal_notice, has_prior_assistant
         )
@@ -3839,6 +4439,7 @@ class TextAgentController:
         sender: str,
         message_text: str,
         session: SessionDep,
+        external_id: str | None = None,
     ) -> str:
         config = session.get(TextAgentWhatsApp, config_id)
         if not config or not config.active:
@@ -3846,6 +4447,18 @@ class TextAgentController:
 
         agent = session.get(TextAgent, config.text_agent_id)
         if not agent:
+            return ""
+
+        message_text = str(message_text or "").strip()[:MAX_CHAT_MESSAGE_CHARS]
+        if not message_text:
+            return ""
+
+        # Meta/Twilio reintentan entregas: el id del proveedor evita respuestas duplicadas.
+        normalized_external_id = str(external_id or "").strip()[:255] or None
+        if normalized_external_id and session.exec(
+            select(TextMessage.id).where(TextMessage.external_id == normalized_external_id)
+        ).first():
+            logger.info("Mensaje de WhatsApp duplicado ignorado: %s", normalized_external_id)
             return ""
 
         wa_title = f"whatsapp:{sender}"
@@ -3878,24 +4491,18 @@ class TextAgentController:
                 content=message_text,
                 provider=agent.provider,
                 model=agent.model,
+                external_id=normalized_external_id,
             )
         )
-        session.commit()
+        try:
+            session.commit()
+        except IntegrityError:
+            session.rollback()
+            logger.info("Mensaje de WhatsApp duplicado ignorado: %s", normalized_external_id)
+            return ""
 
-        history_rows = session.exec(
-            select(TextMessage)
-            .where(
-                TextMessage.conversation_id == conversation.id,
-                TextMessage.deleted_at == None,
-            )
-            .order_by(TextMessage.created_at.asc())
-        ).all()
-
-        history = [
-            {"role": row.role, "content": row.content}
-            for row in history_rows
-            if row.role in {"user", "assistant"}
-        ]
+        history = _load_recent_history(session, conversation.id)
+        has_prior_assistant = _has_prior_assistant_message(session, conversation.id)
 
         rag_context = _retrieve_rag_context(session, agent.id, message_text)
 
@@ -3904,10 +4511,14 @@ class TextAgentController:
                 sofia_result = await _run_sofia_chat(
                     agent, conversation, history, message_text, rag_context, session,
                     sender_phone=sender,
+                    api_key=_resolve_sofia_api_key(agent, session),
+                    user_message_count=_count_user_messages(session, conversation.id),
+                    has_prior_assistant=has_prior_assistant,
                 )
                 return sofia_result["response"]
             except Exception:
                 logger.exception("Sofia graph error")
+                session.rollback()
                 return "Lo siento, ocurrió un error. En breve un asesor se comunicará con usted."
 
         _ensure_default_appointment_tool(session, agent)
@@ -3915,28 +4526,35 @@ class TextAgentController:
         tools_desc = _build_tools_description(tools)
 
         system_prompt = agent.system_prompt.strip() or "Eres un asistente util y claro."
-        extra_blocks = [b for b in [rag_context, tools_desc] if b]
+        extra_blocks = [b for b in [_build_datetime_context_block(), rag_context, tools_desc] if b]
         if extra_blocks:
             system_prompt = system_prompt + "\n\n" + "\n\n".join(extra_blocks)
 
-        env_key = _get_env_provider_key(agent.provider)
-        if not env_key:
+        owner_user = session.get(User, agent.user_id)
+        try:
+            if not owner_user:
+                raise ValueError("Propietario del agente no encontrado")
+            api_key, _ = _resolve_provider_api_key(agent.provider, owner_user, session)
+        except (HTTPException, ValueError):
+            logger.warning("Agente %s sin API key disponible para WhatsApp", agent.id)
             return "Lo siento, no puedo responder ahora mismo."
 
         try:
-            assistant_content, token_usage = _dispatch_llm_with_optional_tool_execution(
+            assistant_content, token_usage = await run_in_threadpool(
+                _dispatch_llm_with_optional_tool_execution,
                 agent=agent,
                 session=session,
                 conversation=conversation,
                 tools=tools,
-                api_key=env_key,
+                api_key=api_key,
                 system_prompt=system_prompt,
                 history=history,
             )
         except Exception:
+            logger.exception("Error generando respuesta de WhatsApp")
+            session.rollback()
             return "Lo siento, ocurrio un error al procesar tu mensaje."
 
-        has_prior_assistant = any(r.role == "assistant" for r in history_rows)
         assistant_content = _maybe_prepend_legal_notice(
             assistant_content, agent.legal_notice, has_prior_assistant
         )
@@ -3968,10 +4586,16 @@ async def _run_sofia_chat(
     rag_context: str,
     session: SessionDep,
     sender_phone: str = "",
+    *,
+    api_key: str | None = None,
+    user_message_count: int | None = None,
+    has_prior_assistant: bool | None = None,
 ) -> dict[str, Any]:
     try:
         sofia_config = json.loads(agent.sofia_config_json or "{}")
     except (json.JSONDecodeError, TypeError):
+        sofia_config = {}
+    if not isinstance(sofia_config, dict):
         sofia_config = {}
 
     # Fuente de verdad única: legal_notice del agente (con fallback de tenant).
@@ -3980,7 +4604,11 @@ async def _run_sofia_chat(
     if effective_legal_notice:
         sofia_config["legal_notice"] = effective_legal_notice
 
-    user_msg_count = sum(1 for m in history if m["role"] == "user")
+    if user_message_count is None:
+        user_message_count = sum(1 for m in history if m["role"] == "user")
+
+    previous_escalation_status = str(conversation.escalation_status or "none").strip().lower()
+    already_escalated = previous_escalation_status in {"pending", "in_progress"}
 
     has_open_appointment = bool(
         session.exec(
@@ -3988,7 +4616,7 @@ async def _run_sofia_chat(
                 TextAppointment.text_agent_id == agent.id,
                 TextAppointment.conversation_id == conversation.id,
                 TextAppointment.deleted_at == None,
-                TextAppointment.status.in_(["scheduled", "confirmed"]),
+                TextAppointment.status.in_(ACTIVE_APPOINTMENT_STATUSES),
             )
         ).first()
     )
@@ -3999,19 +4627,32 @@ async def _run_sofia_chat(
         + "continúa resolviendo horarios o preferencia de contacto sin repetir la frase de escalación en cada respuesta."
     ).strip()
 
-    sofia_result = await run_sofia(
-        user_message=user_message,
-        history=history,
-        rag_context=rag_context,
-        message_count=user_msg_count,
-        system_prompt_override=runtime_prompt_override,
-        config=sofia_config,
-        already_escalated=conversation.escalation_status in {"pending", "in_progress"},
-        has_open_appointment=has_open_appointment,
-    )
+    try:
+        sofia_result = await run_sofia(
+            user_message=user_message,
+            history=history,
+            rag_context=rag_context,
+            message_count=user_message_count,
+            system_prompt_override=runtime_prompt_override,
+            config=sofia_config,
+            already_escalated=already_escalated,
+            has_open_appointment=has_open_appointment,
+            uncertainty_count=int(getattr(conversation, "sofia_uncertainty_count", 0) or 0),
+            allow_threshold_escalation=previous_escalation_status in {"", "none"},
+            api_key=api_key,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Sofia no pudo generar una respuesta")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="El asistente no esta disponible en este momento. Intenta de nuevo.",
+        ) from exc
 
     assistant_content = sofia_result.get("response", "")
-    has_prior_assistant = any(m["role"] == "assistant" for m in history)
+    if has_prior_assistant is None:
+        has_prior_assistant = any(m["role"] == "assistant" for m in history)
     assistant_content = _maybe_prepend_legal_notice(
         assistant_content, agent.legal_notice, has_prior_assistant
     )
@@ -4028,7 +4669,8 @@ async def _run_sofia_chat(
         )
     )
 
-    _maybe_auto_create_appointment_from_sofia(
+    await run_in_threadpool(
+        _maybe_auto_create_appointment_from_sofia,
         agent=agent,
         conversation=conversation,
         history=history,
@@ -4056,27 +4698,46 @@ async def _run_sofia_chat(
             },
         )
 
+    notify_advisor = False
     if sofia_result.get("should_escalate"):
-        conversation.escalation_status = "pending"
-        conversation.escalation_reason = sofia_result.get("escalation_reason", "user_request")
-        conversation.escalated_at = now
-
-        if sender_phone:
-            _notify_advisor_whatsapp(
-                agent, session, sender_phone,
-                sofia_result.get("escalation_reason", ""),
-                user_message,
-                conversation.id,
-            )
+        # Solo la transición a "pending" cuenta como escalación nueva (y notifica al asesor).
+        if not already_escalated:
+            conversation.escalation_status = "pending"
+            conversation.escalation_reason = sofia_result.get("escalation_reason", "user_request")
+            conversation.escalated_at = now
+            notify_advisor = bool(sender_phone)
+        conversation.sofia_uncertainty_count = 0
+    else:
+        conversation.sofia_uncertainty_count = int(sofia_result.get("uncertainty_count") or 0)
 
     conversation.updated_at = now
     session.add(conversation)
     session.commit()
 
+    if notify_advisor:
+        await _notify_advisor_whatsapp(
+            agent, session, sender_phone,
+            sofia_result.get("escalation_reason", ""),
+            user_message,
+            conversation.id,
+        )
+
     return sofia_result
 
 
-def _notify_advisor_whatsapp(
+def _resolve_sofia_api_key(agent: TextAgent, session: SessionDep) -> str | None:
+    """API key de OpenAI del dueño del agente para Sofía; None usa la del entorno."""
+    owner = session.get(User, agent.user_id)
+    if not owner:
+        return None
+    try:
+        api_key, _ = _resolve_provider_api_key("openai", owner, session)
+    except (HTTPException, ValueError):
+        return None
+    return api_key or None
+
+
+async def _notify_advisor_whatsapp(
     agent: TextAgent,
     session: SessionDep,
     sender_phone: str,
@@ -4114,11 +4775,24 @@ def _notify_advisor_whatsapp(
     try:
         if wa_config.provider == "meta" and wa_config.access_token_encrypted and wa_config.phone_number_id:
             access_token = decrypt_secret(wa_config.access_token_encrypted)
-            _send_meta_message(access_token, wa_config.phone_number_id, advisor_phone, notification)
+            await run_in_threadpool(
+                _send_meta_message,
+                access_token,
+                wa_config.phone_number_id,
+                advisor_phone,
+                notification,
+            )
         elif wa_config.provider == "twilio" and wa_config.account_sid and wa_config.auth_token_encrypted:
             auth_token = decrypt_secret(wa_config.auth_token_encrypted)
             from_number = f"whatsapp:{wa_config.phone_number}"
             to_number = f"whatsapp:{advisor_phone}"
-            _send_twilio_message(wa_config.account_sid, auth_token, from_number, to_number, notification)
+            await run_in_threadpool(
+                _send_twilio_message,
+                wa_config.account_sid,
+                auth_token,
+                from_number,
+                to_number,
+                notification,
+            )
     except Exception:
         logger.exception("Failed to notify advisor via WhatsApp")

@@ -12,7 +12,6 @@ import {
 } from '@heroicons/react/24/outline'
 import { getContacts, createContact, updateContact, deleteContact } from '@/api/ContactsAPI'
 import type { Contact, ContactPayload } from '@/api/ContactsAPI'
-import { useCurrentUser } from '@/hooks/useCurrentUser'
 
 type ContactForm = {
   name: string
@@ -25,7 +24,6 @@ type ContactForm = {
 
 export default function ContactsView() {
   const queryClient = useQueryClient()
-  const { isSuperAdmin } = useCurrentUser()
   const [search, setSearch] = useState('')
   const [specialtyFilter, setSpecialtyFilter] = useState('')
   const [showModal, setShowModal] = useState(false)
@@ -36,7 +34,7 @@ export default function ContactsView() {
     queryFn: () => getContacts({ search: search || undefined, specialty: specialtyFilter || undefined }),
   })
 
-  const contacts: Contact[] = data?.contacts ?? []
+  const contacts = useMemo<Contact[]>(() => data?.contacts ?? [], [data])
 
   const defaultValues = useMemo<ContactForm>(
     () => ({
@@ -138,14 +136,14 @@ export default function ContactsView() {
       <div className="mx-auto max-w-6xl">
         <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-[#271173]">Directorio de Asesores</h1>
-            <p className="mt-1 text-sm text-black/50">
+            <h1 className="text-2xl font-bold text-primary-600">Directorio de Asesores</h1>
+            <p className="mt-1 text-sm text-text-tertiary">
               Administra el catálogo de personas para redireccionamiento del agente de voz.
             </p>
           </div>
           <button
             onClick={openCreate}
-            className="inline-flex items-center gap-2 rounded-xl bg-[#271173] px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-[#3a1d9e] transition-colors"
+            className="inline-flex items-center gap-2 rounded-xl bg-primary-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-[#3a1d9e] transition-colors"
           >
             <PlusIcon className="h-4 w-4" />
             Nuevo contacto
@@ -154,19 +152,19 @@ export default function ContactsView() {
 
         <div className="mb-4 flex flex-col gap-3 sm:flex-row">
           <div className="relative flex-1">
-            <MagnifyingGlassIcon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-black/40" />
+            <MagnifyingGlassIcon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted" />
             <input
               type="text"
               placeholder="Buscar por nombre, apellido, especialidad..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full rounded-xl border border-[#e4e0f5] bg-white py-2.5 pl-10 pr-4 text-sm outline-none focus:border-[#271173] focus:ring-1 focus:ring-[#271173]"
+              className="w-full rounded-xl border border-border-default bg-surface py-2.5 pl-10 pr-4 text-sm outline-none focus:border-primary-500 focus:ring-1 focus:ring-[#271173]"
             />
           </div>
           <select
             value={specialtyFilter}
             onChange={(e) => setSpecialtyFilter(e.target.value)}
-            className="rounded-xl border border-[#e4e0f5] bg-white px-4 py-2.5 text-sm outline-none focus:border-[#271173] focus:ring-1 focus:ring-[#271173]"
+            className="rounded-xl border border-border-default bg-surface px-4 py-2.5 text-sm outline-none focus:border-primary-500 focus:ring-1 focus:ring-[#271173]"
           >
             <option value="">Todas las especialidades</option>
             {specialties.map((s) => (
@@ -178,55 +176,55 @@ export default function ContactsView() {
         </div>
 
         {isLoading ? (
-          <div className="rounded-2xl border border-[#e4e0f5] bg-white p-12 text-center text-sm text-black/50">
+          <div className="rounded-2xl border border-border-default bg-surface p-12 text-center text-sm text-text-tertiary">
             Cargando contactos...
           </div>
         ) : contacts.length === 0 ? (
-          <div className="rounded-2xl border border-[#e4e0f5] bg-white p-12 text-center">
+          <div className="rounded-2xl border border-border-default bg-surface p-12 text-center">
             <UserCircleIcon className="mx-auto h-12 w-12 text-black/20" />
-            <p className="mt-3 text-sm font-medium text-black/60">No hay contactos</p>
-            <p className="mt-1 text-xs text-black/40">
+            <p className="mt-3 text-sm font-medium text-text-secondary">No hay contactos</p>
+            <p className="mt-1 text-xs text-text-muted">
               Agrega asesores al directorio para que el agente de voz pueda redireccionar llamadas.
             </p>
           </div>
         ) : (
-          <div className="overflow-hidden rounded-2xl border border-[#e4e0f5] bg-white">
+          <div className="overflow-hidden rounded-2xl border border-border-default bg-surface">
             <table className="w-full text-left text-sm">
               <thead className="bg-[#f5f3ff]">
                 <tr>
-                  <th className="px-5 py-3 font-semibold text-[#271173]">Nombre</th>
-                  <th className="px-5 py-3 font-semibold text-[#271173]">Especialidad</th>
-                  <th className="px-5 py-3 font-semibold text-[#271173]">Teléfono</th>
-                  <th className="px-5 py-3 font-semibold text-[#271173]">WhatsApp</th>
-                  <th className="px-5 py-3 font-semibold text-[#271173]">Email</th>
-                  <th className="px-5 py-3 text-right font-semibold text-[#271173]">Acciones</th>
+                  <th className="px-5 py-3 font-semibold text-primary-600">Nombre</th>
+                  <th className="px-5 py-3 font-semibold text-primary-600">Especialidad</th>
+                  <th className="px-5 py-3 font-semibold text-primary-600">Teléfono</th>
+                  <th className="px-5 py-3 font-semibold text-primary-600">WhatsApp</th>
+                  <th className="px-5 py-3 font-semibold text-primary-600">Email</th>
+                  <th className="px-5 py-3 text-right font-semibold text-primary-600">Acciones</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#f0eefb]">
                 {contacts.map((contact) => (
-                  <tr key={contact.id} className="hover:bg-[#faf9ff]">
+                  <tr key={contact.id} className="hover:bg-bg-secondary">
                     <td className="px-5 py-3">
-                      <div className="font-medium text-black/80">
+                      <div className="font-medium text-text-primary">
                         {contact.name} {contact.last_name}
                       </div>
                     </td>
                     <td className="px-5 py-3">
                       {contact.specialty ? (
-                        <span className="inline-flex rounded-lg bg-[#f5f3ff] px-2.5 py-1 text-xs font-medium text-[#271173]">
+                        <span className="inline-flex rounded-lg bg-[#f5f3ff] px-2.5 py-1 text-xs font-medium text-primary-600">
                           {contact.specialty}
                         </span>
                       ) : (
                         <span className="text-xs text-black/30">—</span>
                       )}
                     </td>
-                    <td className="px-5 py-3 text-black/60">{contact.phone || '—'}</td>
-                    <td className="px-5 py-3 text-black/60">{contact.whatsapp || '—'}</td>
-                    <td className="px-5 py-3 text-black/60">{contact.email || '—'}</td>
+                    <td className="px-5 py-3 text-text-secondary">{contact.phone || '—'}</td>
+                    <td className="px-5 py-3 text-text-secondary">{contact.whatsapp || '—'}</td>
+                    <td className="px-5 py-3 text-text-secondary">{contact.email || '—'}</td>
                     <td className="px-5 py-3 text-right">
                       <div className="inline-flex gap-2">
                         <button
                           onClick={() => openEdit(contact)}
-                          className="rounded-lg p-1.5 text-black/40 hover:bg-[#f5f3ff] hover:text-[#271173]"
+                          className="rounded-lg p-1.5 text-text-muted hover:bg-primary-50/60 hover:text-primary-600"
                           title="Editar"
                         >
                           <PencilSquareIcon className="h-4 w-4" />
@@ -237,7 +235,7 @@ export default function ContactsView() {
                               deleteMutation.mutate(contact.id)
                             }
                           }}
-                          className="rounded-lg p-1.5 text-black/40 hover:bg-rose-50 hover:text-rose-600"
+                          className="rounded-lg p-1.5 text-text-muted hover:bg-danger-50 hover:text-danger-600"
                           title="Eliminar"
                         >
                           <TrashIcon className="h-4 w-4" />
@@ -254,9 +252,9 @@ export default function ContactsView() {
 
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl">
+          <div className="w-full max-w-lg rounded-2xl bg-surface p-6 shadow-xl">
             <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-lg font-bold text-[#271173]">
+              <h2 className="text-lg font-bold text-primary-600">
                 {editingContact ? 'Editar contacto' : 'Nuevo contacto'}
               </h2>
               <button
@@ -265,7 +263,7 @@ export default function ContactsView() {
                   setEditingContact(null)
                   reset(defaultValues)
                 }}
-                className="rounded-lg p-1 text-black/40 hover:bg-black/5"
+                className="rounded-lg p-1 text-text-muted hover:bg-black/5"
               >
                 <XMarkIcon className="h-5 w-5" />
               </button>
@@ -274,10 +272,10 @@ export default function ContactsView() {
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-black/60">Nombre *</label>
+                  <label className="mb-1 block text-xs font-medium text-text-secondary">Nombre *</label>
                   <input
                     {...register('name', { required: 'El nombre es requerido' })}
-                    className="w-full rounded-xl border border-[#e4e0f5] bg-white px-4 py-2.5 text-sm outline-none focus:border-[#271173] focus:ring-1 focus:ring-[#271173]"
+                    className="w-full rounded-xl border border-border-default bg-surface px-4 py-2.5 text-sm outline-none focus:border-primary-500 focus:ring-1 focus:ring-[#271173]"
                     placeholder="Ej: Dorian"
                   />
                   {errors.name && (
@@ -285,49 +283,49 @@ export default function ContactsView() {
                   )}
                 </div>
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-black/60">Apellido</label>
+                  <label className="mb-1 block text-xs font-medium text-text-secondary">Apellido</label>
                   <input
                     {...register('last_name')}
-                    className="w-full rounded-xl border border-[#e4e0f5] bg-white px-4 py-2.5 text-sm outline-none focus:border-[#271173] focus:ring-1 focus:ring-[#271173]"
+                    className="w-full rounded-xl border border-border-default bg-surface px-4 py-2.5 text-sm outline-none focus:border-primary-500 focus:ring-1 focus:ring-[#271173]"
                     placeholder="Ej: Gomez"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="mb-1 block text-xs font-medium text-black/60">Especialidad</label>
+                <label className="mb-1 block text-xs font-medium text-text-secondary">Especialidad</label>
                 <input
                   {...register('specialty')}
-                  className="w-full rounded-xl border border-[#e4e0f5] bg-white px-4 py-2.5 text-sm outline-none focus:border-[#271173] focus:ring-1 focus:ring-[#271173]"
+                  className="w-full rounded-xl border border-border-default bg-surface px-4 py-2.5 text-sm outline-none focus:border-primary-500 focus:ring-1 focus:ring-[#271173]"
                   placeholder="Ej: Seguros de auto, Asesoría financiera"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-black/60">Teléfono</label>
+                  <label className="mb-1 block text-xs font-medium text-text-secondary">Teléfono</label>
                   <input
                     {...register('phone')}
-                    className="w-full rounded-xl border border-[#e4e0f5] bg-white px-4 py-2.5 text-sm outline-none focus:border-[#271173] focus:ring-1 focus:ring-[#271173]"
+                    className="w-full rounded-xl border border-border-default bg-surface px-4 py-2.5 text-sm outline-none focus:border-primary-500 focus:ring-1 focus:ring-[#271173]"
                     placeholder="+52 55 1234 5678"
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-xs font-medium text-black/60">WhatsApp</label>
+                  <label className="mb-1 block text-xs font-medium text-text-secondary">WhatsApp</label>
                   <input
                     {...register('whatsapp')}
-                    className="w-full rounded-xl border border-[#e4e0f5] bg-white px-4 py-2.5 text-sm outline-none focus:border-[#271173] focus:ring-1 focus:ring-[#271173]"
+                    className="w-full rounded-xl border border-border-default bg-surface px-4 py-2.5 text-sm outline-none focus:border-primary-500 focus:ring-1 focus:ring-[#271173]"
                     placeholder="+52 55 1234 5678"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="mb-1 block text-xs font-medium text-black/60">Email</label>
+                <label className="mb-1 block text-xs font-medium text-text-secondary">Email</label>
                 <input
                   {...register('email')}
                   type="email"
-                  className="w-full rounded-xl border border-[#e4e0f5] bg-white px-4 py-2.5 text-sm outline-none focus:border-[#271173] focus:ring-1 focus:ring-[#271173]"
+                  className="w-full rounded-xl border border-border-default bg-surface px-4 py-2.5 text-sm outline-none focus:border-primary-500 focus:ring-1 focus:ring-[#271173]"
                   placeholder="correo@ejemplo.com"
                 />
               </div>
@@ -340,14 +338,14 @@ export default function ContactsView() {
                     setEditingContact(null)
                     reset(defaultValues)
                   }}
-                  className="rounded-xl border border-[#e4e0f5] px-4 py-2.5 text-sm font-medium text-black/60 hover:bg-[#f5f3ff]"
+                  className="rounded-xl border border-border-default px-4 py-2.5 text-sm font-medium text-text-secondary hover:bg-primary-50/60"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
                   disabled={createMutation.isPending || updateMutation.isPending}
-                  className="rounded-xl bg-[#271173] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#3a1d9e] disabled:opacity-50"
+                  className="rounded-xl bg-primary-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-[#3a1d9e] disabled:opacity-50"
                 >
                   {editingContact ? 'Guardar cambios' : 'Crear contacto'}
                 </button>

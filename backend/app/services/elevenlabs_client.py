@@ -14,7 +14,7 @@ ELEVENLABS_BASE = "https://api.elevenlabs.io/v1"
 def _headers(*, json_body: bool = False) -> dict[str, str]:
     if not ELEVENLABS_API_KEY:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="ELEVENLABS_API_KEY no configurada en el backend",
         )
 

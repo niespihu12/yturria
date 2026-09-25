@@ -38,10 +38,14 @@ _host_part="${_rest#*@}"
 DB_HOST="$(echo "$_host_part" | cut -d: -f1)"
 _port_db="${_host_part#*:}"
 DB_PORT="$(echo "$_port_db" | cut -d/ -f1)"
-DB_NAME="$(echo "$_port_db" | cut -d/ -f2)"
+DB_NAME="$(echo "$_port_db" | cut -d/ -f2 | cut -d? -f1)"
+# Las contraseñas con caracteres especiales vienen URL-encoded (p. ej. %40 = @).
+_bs='\'
+DB_PASS="$(printf '%b' "${DB_PASS//%/${_bs}x}")"
 
 if [[ -z "$DB_NAME" || -z "$DB_HOST" || -z "$DB_USER" ]]; then
-  echo "[ERROR] $(date -Iseconds) No se pudo parsear DATABASE_URL: $DATABASE_URL" >&2
+  # No se imprime la URL: contiene la contraseña.
+  echo "[ERROR] $(date -Iseconds) No se pudo parsear DATABASE_URL (formato: mysql://user:pass@host:port/db)" >&2
   exit 1
 fi
 
@@ -84,7 +88,7 @@ log "Dump comprimido: $DUMP_SIZE"
 
 # ── Cifrado con openssl ────────────────────────────────────────────────────────
 if ! openssl enc -aes-256-cbc -pbkdf2 -iter 100000 \
-    -pass "pass:${BACKUP_ENCRYPT_PASSPHRASE}" \
+    -pass env:BACKUP_ENCRYPT_PASSPHRASE \
     -in "$TEMP_DUMP" \
     -out "$BACKUP_FILE"; then
   log "ERROR: cifrado falló"

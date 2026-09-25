@@ -4,10 +4,12 @@ import re
 import json
 from datetime import datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import httpx
 from fastapi import HTTPException, Response, UploadFile, status
 from sqlmodel import Session, select
+from starlette.concurrency import run_in_threadpool
 
 from app.controllers.deps.auth import CurrentUser
 from app.controllers.deps.db_session import SessionDep
@@ -19,6 +21,7 @@ from app.models.UserWhatsAppConfig import UserWhatsAppConfig
 from app.models.VoiceAgentRuntimeConfig import VoiceAgentRuntimeConfig
 from app.models.UserPhoneNumber import UserPhoneNumber
 from app.models.UserTool import UserTool
+from app.models.UserKnowledgeBaseDocument import UserKnowledgeBaseDocument
 from app.models.UserCalendarConnection import UserCalendarConnection
 from app.models.Contact import Contact
 from app.services.appointment_service import (
@@ -43,6 +46,7 @@ from app.utils.client_defaults import (
 )
 from app.utils.text_agent_templates import (
     TEXT_AGENT_DEFAULT_TEMPLATE_KEY,
+    VOICE_AGENT_NON_ADMIN_LIMIT,
     get_text_agent_template_definition,
     normalize_text_agent_template_key,
 )
@@ -63,6 +67,40 @@ SUPPORTED_APPOINTMENT_STATUSES = {
 
 SUPPORTED_APPOINTMENT_SOURCES = {"manual", "agent", "embed", "phone", "voice"}
 SUPPORTED_ESCALATION_CHANNELS = {"phone", "whatsapp"}
+# Citas en estos estados liberan la franja: su evento de Google se elimina.
+GOOGLE_EVENT_RELEASE_STATUSES = {"cancelled", "no_show"}
+DEFAULT_APPOINTMENT_TIMEZONE = "America/Bogota"
+
+EL_LIST_PAGE_SIZE = 100
+EL_LIST_MAX_PAGES = 50
+
+VOICE_TOOL_WEBHOOK_PATH = "/webhooks/voice/tools/"
+VOICE_TOOL_TOKEN_HEADER = "X-Voice-Tool-Token"
+REDACTED_SECRET = "********"
+
+# Cliente final (no super_admin): claves que puede enviar al crear/editar un agente de voz.
+# Tools (tool_ids/tools), MCP y ajustes sensibles de plataforma (overrides, auth,
+# webhooks...) quedan reservados al super admin. Lo omitido lo conserva ElevenLabs.
+NON_ADMIN_AGENT_KEYS = frozenset({"name", "conversation_config", "platform_settings"})
+NON_ADMIN_CONVERSATION_CONFIG_KEYS = frozenset(
+    {"agent", "tts", "turn", "conversation", "asr", "vad", "language_presets"}
+)
+NON_ADMIN_PROMPT_KEYS = frozenset(
+    {
+        "prompt",
+        "llm",
+        "temperature",
+        "max_tokens",
+        "knowledge_base",
+        "rag",
+        "ignore_default_personality",
+        "built_in_tools",
+        "timezone",
+    }
+)
+NON_ADMIN_PLATFORM_SETTINGS_KEYS = frozenset(
+    {"call_recording_enabled", "privacy", "ignore_default_personality"}
+)
 
 
 def _resolve_voice_template_defaults(template_key: Any) -> tuple[str, str, str]:
@@ -82,7 +120,7 @@ def _resolve_voice_template_defaults(template_key: Any) -> tuple[str, str, str]:
 def _headers(*, json_body: bool = False) -> dict[str, str]:
     if not ELEVENLABS_API_KEY:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="ELEVENLABS_API_KEY no configurada en el backend",
         )
 
@@ -114,7 +152,7 @@ def _parse_el_response(resp: httpx.Response) -> Any:
         return {"detail": resp.text}
 
 
-def _elevenlabs_request(
+async def _elevenlabs_request(
     method: str,
     path: str,
     *,
@@ -123,9 +161,10 @@ def _elevenlabs_request(
     data: dict | None = None,
     files: dict | None = None,
 ) -> Any:
+    # Cliente async: una llamada lenta a ElevenLabs no bloquea el event loop.
     headers = _headers(json_body=json is not None and files is None and data is None)
-    with httpx.Client(timeout=60) as client:
-        resp = client.request(
+    async with httpx.AsyncClient(timeout=60) as client:
+        resp = await client.request(
             method,
             f"{ELEVENLABS_BASE}{path}",
             headers=headers,
@@ -144,20 +183,259 @@ def _elevenlabs_request(
     return body
 
 
-def _elevenlabs_get(path: str, *, params: dict | None = None) -> Any:
-    return _elevenlabs_request("GET", path, params=params)
+async def _elevenlabs_get(path: str, *, params: dict | None = None) -> Any:
+    return await _elevenlabs_request("GET", path, params=params)
 
 
-def _elevenlabs_post(path: str, body: dict) -> Any:
-    return _elevenlabs_request("POST", path, json=body)
+async def _elevenlabs_post(path: str, body: dict) -> Any:
+    return await _elevenlabs_request("POST", path, json=body)
 
 
-def _elevenlabs_patch(path: str, body: dict) -> Any:
-    return _elevenlabs_request("PATCH", path, json=body)
+async def _elevenlabs_patch(path: str, body: dict) -> Any:
+    return await _elevenlabs_request("PATCH", path, json=body)
 
 
-def _elevenlabs_delete(path: str) -> Any:
-    return _elevenlabs_request("DELETE", path)
+async def _elevenlabs_delete(path: str) -> Any:
+    return await _elevenlabs_request("DELETE", path)
+
+
+async def _elevenlabs_list_all(path: str, key: str) -> list[dict]:
+    """Recorre todas las paginas (cursor) de un listado paginado de ElevenLabs."""
+    items: list[dict] = []
+    params: dict[str, Any] = {"page_size": EL_LIST_PAGE_SIZE}
+    for _ in range(EL_LIST_MAX_PAGES):
+        data = await _elevenlabs_get(path, params=params)
+        if not isinstance(data, dict):
+            break
+        page = data.get(key)
+        if isinstance(page, list):
+            items.extend(item for item in page if isinstance(item, dict))
+        next_cursor = data.get("next_cursor")
+        if not data.get("has_more") or not next_cursor:
+            break
+        params = {"page_size": EL_LIST_PAGE_SIZE, "cursor": next_cursor}
+    return items
+
+
+def _voice_tool_token() -> str:
+    return os.getenv("VOICE_AGENT_TOOL_TOKEN", "").strip()
+
+
+def _inject_voice_tool_token(tool_config: Any) -> None:
+    """Las herramientas webhook que apuntan a /api/webhooks/voice/tools/* reciben el
+    token del servidor (el frontend nunca lo conoce)."""
+    if not isinstance(tool_config, dict):
+        return
+    api_schema = tool_config.get("api_schema")
+    if not isinstance(api_schema, dict):
+        return
+    url = str(api_schema.get("url") or "")
+    if VOICE_TOOL_WEBHOOK_PATH not in url:
+        return
+
+    raw_headers = api_schema.get("request_headers")
+    headers = {
+        key: value
+        for key, value in (raw_headers.items() if isinstance(raw_headers, dict) else [])
+        if str(key).lower() != VOICE_TOOL_TOKEN_HEADER.lower()
+    }
+    token = _voice_tool_token()
+    if token:
+        headers[VOICE_TOOL_TOKEN_HEADER] = token
+    else:
+        logger.warning("VOICE_AGENT_TOOL_TOKEN no configurado; la herramienta %s fallara", url)
+    api_schema["request_headers"] = headers
+
+
+def _inject_voice_tool_token_in_agent_payload(payload: dict) -> None:
+    conv_cfg = payload.get("conversation_config")
+    agent_cfg = conv_cfg.get("agent") if isinstance(conv_cfg, dict) else None
+    prompt_cfg = agent_cfg.get("prompt") if isinstance(agent_cfg, dict) else None
+    tools = prompt_cfg.get("tools") if isinstance(prompt_cfg, dict) else None
+    if isinstance(tools, list):
+        for tool in tools:
+            _inject_voice_tool_token(tool)
+
+
+def _redact_voice_tool_token(value: Any) -> Any:
+    """Oculta el token de herramientas en las respuestas que devuelven configs de tools."""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key == "request_headers" and isinstance(item, dict):
+                for header in item:
+                    if str(header).lower() == VOICE_TOOL_TOKEN_HEADER.lower():
+                        item[header] = REDACTED_SECRET
+            else:
+                _redact_voice_tool_token(item)
+    elif isinstance(value, list):
+        for item in value:
+            _redact_voice_tool_token(item)
+    return value
+
+
+def _prompt_config(payload: Any) -> dict | None:
+    conv_cfg = payload.get("conversation_config") if isinstance(payload, dict) else None
+    agent_cfg = conv_cfg.get("agent") if isinstance(conv_cfg, dict) else None
+    prompt_cfg = agent_cfg.get("prompt") if isinstance(agent_cfg, dict) else None
+    return prompt_cfg if isinstance(prompt_cfg, dict) else None
+
+
+def _sanitize_non_admin_agent_payload(
+    payload: Any, *, extra_keys: frozenset[str] = frozenset()
+) -> dict:
+    if not isinstance(payload, dict):
+        return {}
+
+    allowed_keys = NON_ADMIN_AGENT_KEYS | extra_keys
+    sanitized = {key: value for key, value in payload.items() if key in allowed_keys}
+
+    conv_cfg = sanitized.pop("conversation_config", None)
+    if isinstance(conv_cfg, dict):
+        conv_cfg = {
+            key: value
+            for key, value in conv_cfg.items()
+            if key in NON_ADMIN_CONVERSATION_CONFIG_KEYS
+        }
+        agent_cfg = conv_cfg.get("agent")
+        if isinstance(agent_cfg, dict):
+            agent_cfg = dict(agent_cfg)
+            prompt_cfg = agent_cfg.get("prompt")
+            if isinstance(prompt_cfg, dict):
+                agent_cfg["prompt"] = {
+                    key: value
+                    for key, value in prompt_cfg.items()
+                    if key in NON_ADMIN_PROMPT_KEYS
+                }
+            else:
+                agent_cfg.pop("prompt", None)
+            conv_cfg["agent"] = agent_cfg
+        else:
+            conv_cfg.pop("agent", None)
+        sanitized["conversation_config"] = conv_cfg
+
+    platform_settings = sanitized.pop("platform_settings", None)
+    if isinstance(platform_settings, dict):
+        filtered = {
+            key: value
+            for key, value in platform_settings.items()
+            if key in NON_ADMIN_PLATFORM_SETTINGS_KEYS
+        }
+        if filtered:
+            sanitized["platform_settings"] = filtered
+
+    return sanitized
+
+
+def _extract_knowledge_base_ids(agent_config: Any) -> set[str]:
+    prompt_cfg = _prompt_config(agent_config)
+    items = prompt_cfg.get("knowledge_base") if prompt_cfg else None
+    if not isinstance(items, list):
+        return set()
+    return {
+        str(item.get("id")).strip()
+        for item in items
+        if isinstance(item, dict) and str(item.get("id") or "").strip()
+    }
+
+
+def _owned_knowledge_base_ids(user_id: str, session: Session) -> set[str]:
+    rows = session.exec(
+        select(UserKnowledgeBaseDocument).where(UserKnowledgeBaseDocument.user_id == user_id)
+    ).all()
+    return {row.documentation_id for row in rows}
+
+
+async def _knowledge_base_ids_attached_to_user_agents(user_id: str, session: Session) -> set[str]:
+    """Documentos (incluidos los legacy sin dueño registrado) que usan los agentes del usuario."""
+    agent_ids = {
+        row.agent_id
+        for row in session.exec(select(UserAgent).where(UserAgent.user_id == user_id)).all()
+    }
+    attached: set[str] = set()
+    for agent_id in sorted(agent_ids):
+        try:
+            agent_config = await _elevenlabs_get(f"/convai/agents/{agent_id}")
+        except Exception:
+            logger.warning(
+                "No se pudo leer el agente %s para resolver su base de conocimiento", agent_id
+            )
+            continue
+        attached |= _extract_knowledge_base_ids(agent_config)
+    return attached
+
+
+async def _require_knowledge_base_access(
+    documentation_id: str,
+    current_user: CurrentUser,
+    session: Session,
+    *,
+    write: bool,
+) -> None:
+    """Lectura: documentos propios o usados por los agentes del usuario.
+    Escritura (editar/eliminar): solo documentos propios. Super admin: todo."""
+    if is_super_admin_user(current_user):
+        return
+
+    owner = session.exec(
+        select(UserKnowledgeBaseDocument).where(
+            UserKnowledgeBaseDocument.documentation_id == documentation_id
+        )
+    ).first()
+    if owner and owner.user_id == current_user.id:
+        return
+
+    if not write and documentation_id in await _knowledge_base_ids_attached_to_user_agents(
+        current_user.id, session
+    ):
+        return
+
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="Documento de conocimiento no encontrado o sin permisos",
+    )
+
+
+async def _validate_non_admin_knowledge_base(
+    payload: dict,
+    current_user: CurrentUser,
+    session: Session,
+    *,
+    agent_id: str | None,
+) -> None:
+    prompt_cfg = _prompt_config(payload)
+    if not prompt_cfg or "knowledge_base" not in prompt_cfg:
+        return
+
+    requested = _extract_knowledge_base_ids(payload)
+    not_owned = requested - _owned_knowledge_base_ids(current_user.id, session)
+    if not_owned and agent_id:
+        # Los documentos que el agente ya tenia asociados se pueden conservar.
+        current_agent = await _elevenlabs_get(f"/convai/agents/{agent_id}")
+        not_owned -= _extract_knowledge_base_ids(current_agent)
+
+    if not_owned:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Documento de conocimiento no encontrado o sin permisos",
+        )
+
+
+def _record_knowledge_base_ownership(
+    result: Any, current_user: CurrentUser, session: Session
+) -> None:
+    documentation_id = result.get("id") if isinstance(result, dict) else None
+    if not isinstance(documentation_id, str) or not documentation_id:
+        return
+    existing = session.exec(
+        select(UserKnowledgeBaseDocument).where(
+            UserKnowledgeBaseDocument.documentation_id == documentation_id
+        )
+    ).first()
+    if not existing:
+        session.add(
+            UserKnowledgeBaseDocument(user_id=current_user.id, documentation_id=documentation_id)
+        )
+        session.commit()
 
 
 def _normalize_optional_user_id(value: str | None) -> str | None:
@@ -253,6 +531,30 @@ def _to_unix(value: datetime | None) -> int | None:
     return int(value.replace(tzinfo=timezone.utc).timestamp())
 
 
+def _utc_naive_from_unix(value: int | float, field_name: str) -> datetime:
+    try:
+        return datetime.utcfromtimestamp(int(value))
+    except (OverflowError, OSError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{field_name} fuera de rango",
+        ) from exc
+
+
+def _resolve_timezone(value: Any, fallback: str = DEFAULT_APPOINTMENT_TIMEZONE) -> str:
+    name = str(value or "").strip() or fallback
+    try:
+        if len(name) > 64:
+            raise ValueError(name)
+        ZoneInfo(name)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="timezone invalido. Usa una zona IANA, por ejemplo America/Bogota",
+        ) from exc
+    return name
+
+
 def _parse_optional_datetime(value: Any) -> datetime | None:
     if value is None:
         return None
@@ -263,7 +565,7 @@ def _parse_optional_datetime(value: Any) -> datetime | None:
     if isinstance(value, (int, float)):
         if value <= 0:
             return None
-        return datetime.utcfromtimestamp(int(value))
+        return _utc_naive_from_unix(value, "appointment_date")
 
     raw = str(value).strip()
     if not raw:
@@ -280,7 +582,10 @@ def _parse_optional_datetime(value: Any) -> datetime | None:
             detail="appointment_date debe ser ISO8601 o unix timestamp",
         ) from exc
 
-    return parsed.replace(tzinfo=None) if parsed.tzinfo else parsed
+    # Si trae offset (ej. -05:00), convertir a UTC antes de guardar como naive UTC.
+    if parsed.tzinfo:
+        return parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    return parsed
 
 
 def _serialize_appointment(appointment: TextAppointment) -> dict[str, Any]:
@@ -306,13 +611,14 @@ def _serialize_appointment(appointment: TextAppointment) -> dict[str, Any]:
     }
 
 
-def _apply_google_calendar_sync(
+async def _apply_google_calendar_sync(
     session: SessionDep,
     appointment: TextAppointment,
     *,
     operation: str = "upsert",
 ) -> None:
-    # Buscar conexion OAuth del usuario
+    # Buscar conexion OAuth del usuario (DB en el hilo del request; solo la llamada a
+    # Google, que es bloqueante, va al threadpool).
     user_conn = session.exec(
         select(UserCalendarConnection).where(
             UserCalendarConnection.user_id == appointment.user_id,
@@ -322,7 +628,8 @@ def _apply_google_calendar_sync(
     ).first()
 
     try:
-        result = sync_google_calendar_for_appointment(
+        result = await run_in_threadpool(
+            sync_google_calendar_for_appointment,
             appointment,
             operation=operation,
             user_calendar_connection=user_conn,
@@ -429,6 +736,25 @@ def _resolve_voice_whatsapp_config(session: SessionDep, user_id: str) -> UserWha
     ).first()
 
 
+async def _is_slot_available(session: SessionDep, **kwargs: Any) -> bool:
+    # is_time_slot_available consulta Google Calendar (bloqueante): va al threadpool.
+    return await run_in_threadpool(is_time_slot_available, session, **kwargs)
+
+
+async def _get_authorized_conversation(
+    conversation_id: str, current_user: CurrentUser, session: SessionDep
+) -> dict:
+    data = await _elevenlabs_get(f"/convai/conversations/{conversation_id}")
+    agent_id = data.get("agent_id") if isinstance(data, dict) else None
+    if not isinstance(agent_id, str) or not agent_id.strip():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversacion no encontrada o sin permisos",
+        )
+    _require_owned_agent(agent_id, current_user, session)
+    return data
+
+
 class AgentController:
 
     @staticmethod
@@ -448,8 +774,7 @@ class AgentController:
         if not rows:
             return {"agents": []}
 
-        el_data = _elevenlabs_get("/convai/agents")
-        el_agents: list[dict] = el_data.get("agents", [])
+        el_agents = await _elevenlabs_list_all("/convai/agents", "agents")
 
         if not is_super_admin:
             owned_ids = {row.agent_id for row in rows}
@@ -500,14 +825,14 @@ class AgentController:
     @staticmethod
     async def get_agent(agent_id: str, current_user: CurrentUser, session: SessionDep):
         _require_owned_agent(agent_id, current_user, session)
-        return _elevenlabs_get(f"/convai/agents/{agent_id}")
+        return _redact_voice_tool_token(await _elevenlabs_get(f"/convai/agents/{agent_id}"))
 
     @staticmethod
     async def get_signed_url(
         agent_id: str, current_user: CurrentUser, session: SessionDep
     ):
         _require_owned_agent(agent_id, current_user, session)
-        data = _elevenlabs_post(f"/convai/agents/{agent_id}/link", {})
+        data = await _elevenlabs_post(f"/convai/agents/{agent_id}/link", {})
         conversation_token = data.get("token", {}).get("conversation_token", "")
         return {
             "signed_url": (
@@ -532,12 +857,12 @@ class AgentController:
                     select(UserAgent).where(UserAgent.user_id == current_user.id)
                 ).all()
             )
-            if existing_count >= 1:
+            if existing_count >= VOICE_AGENT_NON_ADMIN_LIMIT:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail=(
-                        "Tu plan permite un único agente de voz. "
-                        "Edita el existente o contacta al administrador."
+                        f"Tu plan permite hasta {VOICE_AGENT_NON_ADMIN_LIMIT} agentes de voz. "
+                        "Edita uno existente o contacta al administrador."
                     ),
                 )
 
@@ -548,6 +873,12 @@ class AgentController:
                 ).order_by(Contact.name, Contact.last_name)
             ).all()
 
+            payload = _sanitize_non_admin_agent_payload(
+                payload, extra_keys=frozenset({"template_key"})
+            )
+            await _validate_non_admin_knowledge_base(
+                payload, current_user, session, agent_id=None
+            )
             payload = apply_client_voice_defaults(
                 payload,
                 prompt_override=template_prompt,
@@ -589,6 +920,7 @@ class AgentController:
             agent_cfg = conv_cfg.setdefault("agent", {})
             prompt_cfg = agent_cfg.setdefault("prompt", {})
             prompt_cfg["built_in_tools"] = build_client_built_in_tools(user_contacts)
+            _inject_voice_tool_token_in_agent_payload(payload)
 
             contact_catalog = build_contact_catalog_prompt(current_user.id, session)
             if contact_catalog:
@@ -605,7 +937,7 @@ class AgentController:
             conv_cfg.setdefault("tts", {})["model_id"] = "eleven_turbo_v2_5"
         payload["conversation_config"] = conv_cfg
 
-        el_agent = _elevenlabs_post("/convai/agents/create", payload)
+        el_agent = await _elevenlabs_post("/convai/agents/create", payload)
         agent_id: str = el_agent["agent_id"]
 
         # Store ownership
@@ -613,7 +945,7 @@ class AgentController:
         session.add(mapping)
         session.commit()
 
-        return el_agent
+        return _redact_voice_tool_token(el_agent)
 
     @staticmethod
     async def bootstrap_client(current_user: CurrentUser, session: SessionDep) -> dict:
@@ -649,7 +981,7 @@ class AgentController:
                 prompt_cfg["prompt"] = current_prompt + "\n" + contact_catalog
 
         try:
-            el_agent = _elevenlabs_post("/convai/agents/create", payload)
+            el_agent = await _elevenlabs_post("/convai/agents/create", payload)
         except HTTPException:
             # ElevenLabs sin credenciales o caído: no bloquear el resto del onboarding.
             return {"created": False, "agent_id": None, "error": "elevenlabs_unavailable"}
@@ -666,19 +998,28 @@ class AgentController:
     async def update_agent(
         agent_id: str, payload: dict, current_user: CurrentUser, session: SessionDep
     ):
-        _require_owned_agent(agent_id, current_user, session)
-        user_contacts = session.exec(
-            select(Contact).where(
-                Contact.user_id == current_user.id,
-                Contact.active == True,
-            ).order_by(Contact.name, Contact.last_name)
-        ).all()
+        owner = _require_owned_agent(agent_id, current_user, session)
 
         if not is_super_admin_user(current_user):
-            payload = apply_client_voice_defaults(payload, contacts=user_contacts)
+            owner_contacts = session.exec(
+                select(Contact).where(
+                    Contact.user_id == owner.user_id,
+                    Contact.active == True,
+                ).order_by(Contact.name, Contact.last_name)
+            ).all()
+            payload = _sanitize_non_admin_agent_payload(payload)
+            await _validate_non_admin_knowledge_base(
+                payload, current_user, session, agent_id=agent_id
+            )
+            # partial: un PATCH parcial (p. ej. solo platform_settings) no pisa el prompt.
+            payload = apply_client_voice_defaults(payload, contacts=owner_contacts, partial=True)
+        else:
+            if not isinstance(payload, dict):
+                payload = {}
+            _inject_voice_tool_token_in_agent_payload(payload)
 
-        # Contexto adicional: catálogo de contactos en updates
-        contact_catalog = build_contact_catalog_prompt(current_user.id, session)
+        # Contexto adicional: catálogo de contactos del dueño del agente
+        contact_catalog = build_contact_catalog_prompt(owner.user_id, session)
         if contact_catalog:
             conv_cfg = payload.setdefault("conversation_config", {})
             agent_cfg = conv_cfg.setdefault("agent", {})
@@ -687,7 +1028,8 @@ class AgentController:
             if current_prompt and "--- DIRECTORIO DE ASESORES ---" not in current_prompt:
                 prompt_cfg["prompt"] = current_prompt + "\n" + contact_catalog
 
-        return _elevenlabs_patch(f"/convai/agents/{agent_id}", payload)
+        result = await _elevenlabs_patch(f"/convai/agents/{agent_id}", payload)
+        return _redact_voice_tool_token(result)
 
     @staticmethod
     async def get_whatsapp_global_config(current_user: CurrentUser, session: SessionDep):
@@ -915,12 +1257,14 @@ class AgentController:
         )
 
         try:
-            send_whatsapp_message(config, to_number=user_phone, message=message)
+            await run_in_threadpool(
+                send_whatsapp_message, config, to_number=user_phone, message=message
+            )
         except Exception as exc:
             logger.exception("No se pudo enviar escalacion por WhatsApp")
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"Fallo enviando WhatsApp: {exc}",
+                detail="No se pudo enviar el mensaje de WhatsApp",
             ) from exc
 
         _log_audit_event(
@@ -969,11 +1313,11 @@ class AgentController:
                 detail=str(exc),
             ) from exc
 
-        if not is_time_slot_available(
+        if not await _is_slot_available(
             session,
             user_id=owner.user_id,
             appointment_date=appointment_date,
-            buffer_minutes=60,
+            buffer_minutes=0,
         ):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -1009,19 +1353,25 @@ class AgentController:
         )
 
         session.add(appointment)
-        _apply_google_calendar_sync(session, appointment, operation="upsert")
-
-        confirmation = {
-            "channel": "none",
-            "sent": False,
-        }
-
         runtime_config = _get_or_create_voice_runtime_config(
             session,
             owner_user_id=owner.user_id,
             agent_id=agent_id,
         )
         whatsapp_config = _resolve_voice_whatsapp_config(session, owner.user_id)
+
+        # Persistir la cita antes de los efectos externos (evento de Google, WhatsApp).
+        # Nota: sin lock/unique en BD, dos requests simultaneos aun pueden reservar la
+        # misma franja (race entre is_time_slot_available y el commit).
+        session.commit()
+        session.refresh(appointment)
+
+        await _apply_google_calendar_sync(session, appointment, operation="upsert")
+
+        confirmation = {
+            "channel": "none",
+            "sent": False,
+        }
 
         if (
             runtime_config.whatsapp_enabled
@@ -1041,7 +1391,8 @@ class AgentController:
             )
 
             try:
-                send_whatsapp_message(
+                await run_in_threadpool(
+                    send_whatsapp_message,
                     whatsapp_config,
                     to_number=contact_phone,
                     message=confirmation_message,
@@ -1076,11 +1427,11 @@ class AgentController:
 
     @staticmethod
     async def list_voices(_: CurrentUser):
-        return _elevenlabs_get("/voices")
+        return await _elevenlabs_get("/voices")
 
     @staticmethod
     async def get_voice_preview(voice_id: str, _: CurrentUser):
-        data = _elevenlabs_get(f"/voices/{voice_id}")
+        data = await _elevenlabs_get(f"/voices/{voice_id}")
         return {"preview_url": data.get("preview_url", "")}
 
     @staticmethod
@@ -1098,7 +1449,7 @@ class AgentController:
         if page_size is not None:
             params["page_size"] = page_size
 
-        return _elevenlabs_request(
+        return await _elevenlabs_request(
             "GET", "/convai/conversations", params=params
         )
 
@@ -1106,24 +1457,17 @@ class AgentController:
     async def get_conversation_detail(
         conversation_id: str, current_user: CurrentUser, session: SessionDep
     ):
-        data = _elevenlabs_get(f"/convai/conversations/{conversation_id}")
-        agent_id = data.get("agent_id")
-        if isinstance(agent_id, str):
-            _require_owned_agent(agent_id, current_user, session)
-        return data
+        return await _get_authorized_conversation(conversation_id, current_user, session)
 
     @staticmethod
     async def get_conversation_audio(
         conversation_id: str, current_user: CurrentUser, session: SessionDep
     ):
-        detail = _elevenlabs_get(f"/convai/conversations/{conversation_id}")
-        agent_id = detail.get("agent_id")
-        if isinstance(agent_id, str):
-            _require_owned_agent(agent_id, current_user, session)
+        await _get_authorized_conversation(conversation_id, current_user, session)
 
         headers = _headers()
-        with httpx.Client(timeout=120) as client:
-            resp = client.get(
+        async with httpx.AsyncClient(timeout=120) as client:
+            resp = await client.get(
                 f"{ELEVENLABS_BASE}/convai/conversations/{conversation_id}/audio",
                 headers=headers,
             )
@@ -1154,11 +1498,8 @@ class AgentController:
     async def run_conversation_analysis(
         conversation_id: str, current_user: CurrentUser, session: SessionDep
     ):
-        detail = _elevenlabs_get(f"/convai/conversations/{conversation_id}")
-        agent_id = detail.get("agent_id")
-        if isinstance(agent_id, str):
-            _require_owned_agent(agent_id, current_user, session)
-        return _elevenlabs_post(f"/convai/conversations/{conversation_id}/analysis/run", {})
+        await _get_authorized_conversation(conversation_id, current_user, session)
+        return await _elevenlabs_post(f"/convai/conversations/{conversation_id}/analysis/run", {})
 
     @staticmethod
     async def list_appointments(
@@ -1191,12 +1532,12 @@ class AgentController:
 
         if isinstance(from_unix, int) and from_unix > 0:
             statement = statement.where(
-                TextAppointment.appointment_date >= datetime.utcfromtimestamp(from_unix)
+                TextAppointment.appointment_date >= _utc_naive_from_unix(from_unix, "from_unix")
             )
 
         if isinstance(to_unix, int) and to_unix > 0:
             statement = statement.where(
-                TextAppointment.appointment_date <= datetime.utcfromtimestamp(to_unix)
+                TextAppointment.appointment_date <= _utc_naive_from_unix(to_unix, "to_unix")
             )
 
         safe_limit = max(1, min(int(limit or 100), 200))
@@ -1224,11 +1565,13 @@ class AgentController:
                 detail="appointment_date es requerido (ISO8601 o unix timestamp)",
             )
 
-        if not is_time_slot_available(
+        timezone_name = _resolve_timezone(payload.get("timezone"))
+
+        if not await _is_slot_available(
             session,
             user_id=owner_mapping.user_id,
             appointment_date=appointment_date,
-            buffer_minutes=60,
+            buffer_minutes=0,
         ):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -1269,8 +1612,7 @@ class AgentController:
             contact_phone=contact_phone,
             contact_email=contact_email,
             appointment_date=appointment_date,
-            timezone=str(payload.get("timezone") or "America/Bogota").strip()[:64]
-            or "America/Bogota",
+            timezone=timezone_name,
             status=normalized_status,
             source=source,
             notes=str(payload.get("notes") or "").strip()[:500],
@@ -1279,14 +1621,22 @@ class AgentController:
         )
 
         session.add(appointment)
-        _apply_google_calendar_sync(session, appointment, operation="upsert")
-
         runtime_config = _get_or_create_voice_runtime_config(
             session,
             owner_user_id=owner_mapping.user_id,
             agent_id=agent_id,
         )
         whatsapp_config = _resolve_voice_whatsapp_config(session, owner_mapping.user_id)
+
+        # Persistir la cita antes de crear el evento en Google o confirmar por WhatsApp.
+        session.commit()
+        session.refresh(appointment)
+
+        if appointment.status in GOOGLE_EVENT_RELEASE_STATUSES:
+            google_operation = "delete"
+        else:
+            google_operation = "upsert"
+        await _apply_google_calendar_sync(session, appointment, operation=google_operation)
 
         confirmation_channel = "none"
         if (
@@ -1304,7 +1654,8 @@ class AgentController:
                 timezone=appointment.timezone,
             )
             try:
-                send_whatsapp_message(
+                await run_in_threadpool(
+                    send_whatsapp_message,
                     whatsapp_config,
                     to_number=contact_phone,
                     message=confirmation_message,
@@ -1362,11 +1713,11 @@ class AgentController:
                     detail="appointment_date no puede ser null",
                 )
 
-            if not is_time_slot_available(
+            if not await _is_slot_available(
                 session,
                 user_id=appointment.user_id,
                 appointment_date=updated_date,
-                buffer_minutes=60,
+                buffer_minutes=0,
                 exclude_appointment_id=appointment.id,
             ):
                 raise HTTPException(
@@ -1407,8 +1758,8 @@ class AgentController:
             appointment.conversation_id = conversation_id or None
 
         if "timezone" in payload:
-            appointment.timezone = (
-                str(payload.get("timezone") or "").strip()[:64] or appointment.timezone
+            appointment.timezone = _resolve_timezone(
+                payload.get("timezone"), fallback=appointment.timezone
             )
 
         if "notes" in payload:
@@ -1416,7 +1767,15 @@ class AgentController:
 
         appointment.updated_at = _utcnow()
         session.add(appointment)
-        _apply_google_calendar_sync(session, appointment, operation="upsert")
+        session.commit()
+        session.refresh(appointment)
+
+        # Cancelada / no_show libera la franja: se borra el evento en vez de actualizarlo.
+        if appointment.status in GOOGLE_EVENT_RELEASE_STATUSES:
+            google_operation = "delete"
+        else:
+            google_operation = "upsert"
+        await _apply_google_calendar_sync(session, appointment, operation=google_operation)
         session.commit()
         session.refresh(appointment)
         return _serialize_appointment(appointment)
@@ -1450,17 +1809,36 @@ class AgentController:
         if appointment.status != "completed":
             appointment.status = "cancelled"
         session.add(appointment)
-        _apply_google_calendar_sync(session, appointment, operation="delete")
+        session.commit()
+        session.refresh(appointment)
+
+        await _apply_google_calendar_sync(session, appointment, operation="delete")
         session.commit()
         return {"deleted": True}
 
     @staticmethod
-    async def list_knowledge_base_documents(_: CurrentUser):
-        return _elevenlabs_get("/convai/knowledge-base")
+    async def list_knowledge_base_documents(current_user: CurrentUser, session: SessionDep):
+        if is_super_admin_user(current_user):
+            documents = await _elevenlabs_list_all("/convai/knowledge-base", "documents")
+        else:
+            # El workspace de ElevenLabs es compartido: solo se exponen los documentos
+            # propios y los que usan los agentes del usuario.
+            visible_ids = _owned_knowledge_base_ids(current_user.id, session)
+            visible_ids |= await _knowledge_base_ids_attached_to_user_agents(
+                current_user.id, session
+            )
+            if not visible_ids:
+                return {"documents": [], "has_more": False, "next_cursor": None}
+            documents = [
+                document
+                for document in await _elevenlabs_list_all("/convai/knowledge-base", "documents")
+                if document.get("id") in visible_ids
+            ]
+        return {"documents": documents, "has_more": False, "next_cursor": None}
 
     @staticmethod
     async def create_knowledge_base_document_from_file(
-        file: UploadFile, name: str | None, _: CurrentUser
+        file: UploadFile, name: str | None, current_user: CurrentUser, session: SessionDep
     ):
         file_bytes = await file.read()
         files = {
@@ -1471,40 +1849,70 @@ class AgentController:
             )
         }
         data = {"name": name} if name else None
-        return _elevenlabs_request(
+        result = await _elevenlabs_request(
             "POST",
             "/convai/knowledge-base/file",
             data=data,
             files=files,
         )
+        _record_knowledge_base_ownership(result, current_user, session)
+        return result
 
     @staticmethod
-    async def create_knowledge_base_document_from_text(payload: dict, _: CurrentUser):
-        return _elevenlabs_post("/convai/knowledge-base/text", payload)
+    async def create_knowledge_base_document_from_text(
+        payload: dict, current_user: CurrentUser, session: SessionDep
+    ):
+        result = await _elevenlabs_post("/convai/knowledge-base/text", payload)
+        _record_knowledge_base_ownership(result, current_user, session)
+        return result
 
     @staticmethod
-    async def create_knowledge_base_document_from_url(payload: dict, _: CurrentUser):
-        return _elevenlabs_post("/convai/knowledge-base/url", payload)
+    async def create_knowledge_base_document_from_url(
+        payload: dict, current_user: CurrentUser, session: SessionDep
+    ):
+        result = await _elevenlabs_post("/convai/knowledge-base/url", payload)
+        _record_knowledge_base_ownership(result, current_user, session)
+        return result
 
     @staticmethod
     async def update_knowledge_base_document(
-        documentation_id: str, payload: dict, _: CurrentUser
+        documentation_id: str, payload: dict, current_user: CurrentUser, session: SessionDep
     ):
-        return _elevenlabs_patch(f"/convai/knowledge-base/{documentation_id}", payload)
+        await _require_knowledge_base_access(documentation_id, current_user, session, write=True)
+        return await _elevenlabs_patch(f"/convai/knowledge-base/{documentation_id}", payload)
 
     @staticmethod
-    async def delete_knowledge_base_document(documentation_id: str, _: CurrentUser):
-        return _elevenlabs_delete(f"/convai/knowledge-base/{documentation_id}")
+    async def delete_knowledge_base_document(
+        documentation_id: str, current_user: CurrentUser, session: SessionDep
+    ):
+        await _require_knowledge_base_access(documentation_id, current_user, session, write=True)
+        result = await _elevenlabs_delete(f"/convai/knowledge-base/{documentation_id}")
+
+        ownership = session.exec(
+            select(UserKnowledgeBaseDocument).where(
+                UserKnowledgeBaseDocument.documentation_id == documentation_id
+            )
+        ).first()
+        if ownership:
+            session.delete(ownership)
+            session.commit()
+        return result
 
     @staticmethod
-    async def get_knowledge_base_rag_indexes(documentation_id: str, _: CurrentUser):
-        return _elevenlabs_get(f"/convai/knowledge-base/{documentation_id}/rag-index")
+    async def get_knowledge_base_rag_indexes(
+        documentation_id: str, current_user: CurrentUser, session: SessionDep
+    ):
+        await _require_knowledge_base_access(documentation_id, current_user, session, write=False)
+        return await _elevenlabs_get(f"/convai/knowledge-base/{documentation_id}/rag-index")
 
     @staticmethod
     async def compute_knowledge_base_rag_index(
-        documentation_id: str, payload: dict, _: CurrentUser
+        documentation_id: str, payload: dict, current_user: CurrentUser, session: SessionDep
     ):
-        return _elevenlabs_post(f"/convai/knowledge-base/{documentation_id}/rag-index", payload)
+        await _require_knowledge_base_access(documentation_id, current_user, session, write=False)
+        return await _elevenlabs_post(
+            f"/convai/knowledge-base/{documentation_id}/rag-index", payload
+        )
 
     @staticmethod
     async def list_tools(current_user: CurrentUser, session: SessionDep):
@@ -1518,11 +1926,13 @@ class AgentController:
         if not is_super_admin and not owned_tool_ids:
             return {"tools": []}
 
-        data = _elevenlabs_get(
-            "/convai/tools",
-            params={
-                "types": "webhook",
-            },
+        data = _redact_voice_tool_token(
+            await _elevenlabs_get(
+                "/convai/tools",
+                params={
+                    "types": "webhook",
+                },
+            )
         )
 
         if isinstance(data, dict):
@@ -1629,7 +2039,8 @@ class AgentController:
                 detail="api_schema.url es requerido para herramientas webhook",
             )
 
-        result = _elevenlabs_post("/convai/tools", payload)
+        _inject_voice_tool_token(tool_config)
+        result = await _elevenlabs_post("/convai/tools", payload)
 
         tool_id = result.get("id")
         if isinstance(tool_id, str) and tool_id:
@@ -1646,7 +2057,7 @@ class AgentController:
                 )
                 session.commit()
 
-        return result
+        return _redact_voice_tool_token(result)
 
     @staticmethod
     async def delete_tool(tool_id: str, current_user: CurrentUser, session: SessionDep):
@@ -1672,7 +2083,7 @@ class AgentController:
             )
 
         try:
-            _elevenlabs_delete(f"/convai/tools/{tool_id}")
+            await _elevenlabs_delete(f"/convai/tools/{tool_id}")
         except HTTPException as exc:
             if exc.status_code != status.HTTP_404_NOT_FOUND:
                 raise
@@ -1687,7 +2098,7 @@ class AgentController:
         agent_id: str, current_user: CurrentUser, session: SessionDep
     ):
         _require_owned_agent(agent_id, current_user, session)
-        return _elevenlabs_get(f"/convai/agents/{agent_id}/widget")
+        return await _elevenlabs_get(f"/convai/agents/{agent_id}/widget")
 
     @staticmethod
     async def list_phone_numbers(
@@ -1698,7 +2109,28 @@ class AgentController:
         scoped_user_id = _resolve_user_scope(current_user, user_id)
         is_super_admin = is_super_admin_user(current_user)
 
-        el_data = _elevenlabs_get("/convai/phone-numbers")
+        # Consultar la BD antes que ElevenLabs: sin numeros (ni agentes que puedan
+        # auto-adoptar uno) no hay nada que mostrar.
+        if is_super_admin:
+            number_rows_statement = select(UserPhoneNumber)
+            if scoped_user_id:
+                number_rows_statement = number_rows_statement.where(
+                    UserPhoneNumber.user_id == scoped_user_id
+                )
+            phone_number_rows = session.exec(number_rows_statement).all()
+            if not phone_number_rows:
+                return {"phone_numbers": []}
+        else:
+            owned_numbers_rows = session.exec(
+                select(UserPhoneNumber).where(UserPhoneNumber.user_id == current_user.id)
+            ).all()
+            owned_agents_rows = session.exec(
+                select(UserAgent).where(UserAgent.user_id == current_user.id)
+            ).all()
+            if not owned_numbers_rows and not owned_agents_rows:
+                return {"phone_numbers": []}
+
+        el_data = await _elevenlabs_get("/convai/phone-numbers")
         if isinstance(el_data, list):
             all_numbers_raw = el_data
         elif isinstance(el_data, dict):
@@ -1708,16 +2140,6 @@ class AgentController:
             all_numbers_raw = []
 
         if is_super_admin:
-            number_rows_statement = select(UserPhoneNumber)
-            if scoped_user_id:
-                number_rows_statement = number_rows_statement.where(
-                    UserPhoneNumber.user_id == scoped_user_id
-                )
-
-            phone_number_rows = session.exec(number_rows_statement).all()
-            if not phone_number_rows:
-                return {"phone_numbers": []}
-
             owner_by_phone_number = {
                 row.phone_number_id: row.user_id for row in phone_number_rows
             }
@@ -1749,14 +2171,7 @@ class AgentController:
 
             return {"phone_numbers": visible_numbers}
 
-        owned_numbers_rows = session.exec(
-            select(UserPhoneNumber).where(UserPhoneNumber.user_id == current_user.id)
-        ).all()
         owned_number_ids = {row.phone_number_id for row in owned_numbers_rows}
-
-        owned_agents_rows = session.exec(
-            select(UserAgent).where(UserAgent.user_id == current_user.id)
-        ).all()
         owned_agent_ids = {row.agent_id for row in owned_agents_rows}
 
         should_commit = False
@@ -1823,7 +2238,7 @@ class AgentController:
         if isinstance(agent_id, str) and agent_id:
             _require_owned_agent(agent_id, current_user, session)
 
-        result = _elevenlabs_post("/convai/phone-numbers", payload)
+        result = await _elevenlabs_post("/convai/phone-numbers", payload)
         phone_number_id = result.get("phone_number_id")
 
         if isinstance(phone_number_id, str) and phone_number_id:
@@ -1851,7 +2266,7 @@ class AgentController:
         agent_id = payload.get("agent_id")
         if isinstance(agent_id, str) and agent_id:
             _require_owned_agent(agent_id, current_user, session)
-        return _elevenlabs_patch(f"/convai/phone-numbers/{phone_number_id}", payload)
+        return await _elevenlabs_patch(f"/convai/phone-numbers/{phone_number_id}", payload)
 
     @staticmethod
     async def create_twilio_outbound_call(
@@ -1938,11 +2353,11 @@ class AgentController:
                 outbound_payload["telephony_call_config"] = telephony_call_config
 
         try:
-            return _elevenlabs_post("/convai/twilio/outbound-call", outbound_payload)
+            return await _elevenlabs_post("/convai/twilio/outbound-call", outbound_payload)
         except HTTPException as exc:
             # Some versions expose the same endpoint using an underscore style.
             if exc.status_code == status.HTTP_404_NOT_FOUND:
-                return _elevenlabs_post("/convai/twilio/outbound_call", outbound_payload)
+                return await _elevenlabs_post("/convai/twilio/outbound_call", outbound_payload)
             raise
 
     @staticmethod
@@ -1960,7 +2375,7 @@ class AgentController:
                     detail="Agente no encontrado o sin permisos",
                 )
 
-            _elevenlabs_delete(f"/convai/agents/{agent_id}")
+            await _elevenlabs_delete(f"/convai/agents/{agent_id}")
 
             for row in rows:
                 session.delete(row)
@@ -1970,7 +2385,7 @@ class AgentController:
 
         row = _require_owned_agent(agent_id, current_user, session)
 
-        _elevenlabs_delete(f"/convai/agents/{agent_id}")
+        await _elevenlabs_delete(f"/convai/agents/{agent_id}")
 
         session.delete(row)
         session.commit()

@@ -33,7 +33,8 @@ def authenticate(
         ) from exc
 
     user_id = payload.get("id")
-    if not isinstance(user_id, str):
+    # Purpose-scoped tokens (e.g. the MFA challenge) must never grant API access.
+    if not isinstance(user_id, str) or payload.get("purpose"):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token invalido",
@@ -41,7 +42,12 @@ def authenticate(
         )
 
     user = session.get(User, user_id)
-    if not user:
+    token_version = payload.get("tv", 0)
+    if (
+        not user
+        or user.deleted_at is not None
+        or token_version != (user.token_version or 0)
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="No autorizado",

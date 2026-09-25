@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import timedelta
+from datetime import timedelta, timezone
 from typing import Any
 
 from app.models.TextAppointment import TextAppointment
@@ -36,7 +36,13 @@ def _load_service_account_info() -> dict[str, Any] | None:
 
 
 def _build_event_payload(appointment: TextAppointment) -> dict[str, Any]:
+    # appointment_date se guarda como UTC naive: se envia con offset explicito para que
+    # Google no la interprete como hora local de `timeZone`.
     start_at = appointment.appointment_date
+    if start_at.tzinfo is None:
+        start_at = start_at.replace(tzinfo=timezone.utc)
+    else:
+        start_at = start_at.astimezone(timezone.utc)
     end_at = start_at + timedelta(minutes=45)
 
     contact_target = (

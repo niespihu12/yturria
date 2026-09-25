@@ -24,9 +24,13 @@ GOOGLE_CLIENT_ID = os.getenv("GOOGLE_OAUTH_CLIENT_ID", "").strip()
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET", "").strip()
 FRONTEND_URL = (
     os.getenv("FRONTEND_PUBLIC_URL") or os.getenv("FRONTEND_URL") or "http://localhost:5173"
-).strip().rstrip("/")
+).split(",")[0].strip().rstrip("/")
 
 SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
+
+
+def generate_pkce_verifier() -> str:
+    return _generate_pkce_verifier()
 
 
 def _generate_pkce_verifier() -> str:
@@ -136,12 +140,35 @@ def exchange_code(*, code: str, code_verifier: str = "") -> dict[str, Any]:
     }
 
 
+def _is_invalid_grant(exc: Exception) -> bool:
+    return "invalid_grant" in str(exc).lower()
+
+
+def _mark_connection_needs_reauth(conn: UserCalendarConnection, exc: Exception) -> None:
+    """Google revoco el refresh token: se desactiva la conexion para forzar reconexion.
+    El caller debe hacer commit de la sesion para persistirlo."""
+    logger.warning(
+        "Conexion de Google Calendar %s desactivada (requiere reconectar): %s",
+        conn.id,
+        exc,
+    )
+    conn.active = False
+    conn.is_default = False
+    conn.updated_at = datetime.utcnow()
+
+
 def _build_credentials_from_connection(conn: UserCalendarConnection) -> Credentials | None:
     if not conn.access_token_encrypted:
         return None
 
-    access_token = decrypt_secret(conn.access_token_encrypted)
-    refresh_token = decrypt_secret(conn.refresh_token_encrypted) if conn.refresh_token_encrypted else None
+    try:
+        access_token = decrypt_secret(conn.access_token_encrypted)
+        refresh_token = (
+            decrypt_secret(conn.refresh_token_encrypted) if conn.refresh_token_encrypted else None
+        )
+    except ValueError as exc:
+        logger.warning("No se pudieron descifrar los tokens de la conexion %s: %s", conn.id, exc)
+        return None
 
     creds = Credentials(
         token=access_token,
@@ -163,10 +190,150 @@ def _build_credentials_from_connection(conn: UserCalendarConnection) -> Credenti
             conn.token_expires_at = datetime.fromtimestamp(creds.expiry.timestamp(), tz=timezone.utc).replace(tzinfo=None) if creds.expiry else None
             conn.updated_at = datetime.utcnow()
         except Exception as exc:
-            logger.warning("No se pudo refrescar token de Google Calendar: %s", exc)
+            if _is_invalid_grant(exc):
+                _mark_connection_needs_reauth(conn, exc)
+            else:
+                logger.warning("No se pudo refrescar token de Google Calendar: %s", exc)
             return None
 
     return creds
+
+
+def _handle_api_error(conn: UserCalendarConnection, exc: Exception, message: str) -> None:
+    # google-auth refresca de forma transparente durante execute(); si el refresh token
+    # fue revocado el error llega aqui como invalid_grant.
+    if _is_invalid_grant(exc):
+        _mark_connection_needs_reauth(conn, exc)
+    else:
+        logger.warning("%s: %s", message, exc)
+
+
+def _as_utc(dt: datetime) -> datetime:
+    """Normaliza a UTC con tzinfo. Asume UTC si viene naive (asi guardamos las fechas)."""
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _parse_rfc3339(value: str | None) -> datetime | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(raw)
+    except ValueError:
+        try:
+            dt = datetime.fromisoformat(raw + "T00:00:00+00:00")  # evento de dia completo (YYYY-MM-DD)
+        except ValueError:
+            return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def list_events(
+    conn: UserCalendarConnection,
+    time_min: datetime,
+    time_max: datetime,
+) -> list[dict[str, Any]]:
+    """Lista eventos del calendario del usuario en el rango dado (para mostrar en la app)."""
+    creds = _build_credentials_from_connection(conn)
+    if not creds:
+        return []
+
+    cal_id = conn.calendar_id or "primary"
+    try:
+        service = build("calendar", "v3", credentials=creds, cache_discovery=False)
+        result = (
+            service.events()
+            .list(
+                calendarId=cal_id,
+                timeMin=_as_utc(time_min).isoformat(),
+                timeMax=_as_utc(time_max).isoformat(),
+                singleEvents=True,
+                orderBy="startTime",
+                maxResults=250,
+            )
+            .execute()
+        )
+    except Exception as exc:
+        _handle_api_error(conn, exc, "Error listando eventos de Google Calendar")
+        return []
+
+    events: list[dict[str, Any]] = []
+    for item in result.get("items", []):
+        if item.get("status") == "cancelled":
+            continue
+        start_raw = item.get("start") or {}
+        end_raw = item.get("end") or {}
+        start_dt = _parse_rfc3339(start_raw.get("dateTime") or start_raw.get("date"))
+        if not start_dt:
+            continue
+        end_dt = _parse_rfc3339(end_raw.get("dateTime") or end_raw.get("date"))
+        events.append(
+            {
+                "id": item.get("id", ""),
+                "summary": item.get("summary") or "(Sin titulo)",
+                "start_unix": int(start_dt.timestamp()),
+                "end_unix": int(end_dt.timestamp()) if end_dt else None,
+                "all_day": "date" in start_raw,
+            }
+        )
+    return events
+
+
+def get_busy_intervals(
+    conn: UserCalendarConnection,
+    time_min: datetime,
+    time_max: datetime,
+    *,
+    exclude_event_ids: set[str] | None = None,
+) -> list[tuple[datetime, datetime]]:
+    """Devuelve las franjas ocupadas para verificar disponibilidad real.
+
+    Se construye a partir de events.list (funciona con el scope calendar.events).
+    No usamos la API freeBusy porque requiere el scope calendar.readonly.
+    Se ignoran eventos de dia completo, los marcados como "libre" (transparency) y los
+    de `exclude_event_ids` (p. ej. el evento de la cita que se esta reprogramando).
+    """
+    creds = _build_credentials_from_connection(conn)
+    if not creds:
+        return []
+
+    cal_id = conn.calendar_id or "primary"
+    try:
+        service = build("calendar", "v3", credentials=creds, cache_discovery=False)
+        result = (
+            service.events()
+            .list(
+                calendarId=cal_id,
+                timeMin=_as_utc(time_min).isoformat(),
+                timeMax=_as_utc(time_max).isoformat(),
+                singleEvents=True,
+                orderBy="startTime",
+                maxResults=250,
+            )
+            .execute()
+        )
+    except Exception as exc:
+        _handle_api_error(conn, exc, "Error consultando disponibilidad de Google Calendar")
+        return []
+
+    intervals: list[tuple[datetime, datetime]] = []
+    for item in result.get("items", []):
+        if item.get("status") == "cancelled" or item.get("transparency") == "transparent":
+            continue
+        if exclude_event_ids and item.get("id") in exclude_event_ids:
+            continue
+        start_raw = item.get("start") or {}
+        end_raw = item.get("end") or {}
+        if "dateTime" not in start_raw:  # ignorar eventos de dia completo
+            continue
+        start_dt = _parse_rfc3339(start_raw.get("dateTime"))
+        end_dt = _parse_rfc3339(end_raw.get("dateTime")) or start_dt
+        if start_dt and end_dt:
+            intervals.append((start_dt, end_dt))
+    return intervals
 
 
 def list_user_calendars(conn: UserCalendarConnection) -> list[dict[str, str]]:
@@ -184,7 +351,7 @@ def list_user_calendars(conn: UserCalendarConnection) -> list[dict[str, str]]:
             if item.get("id")
         ]
     except Exception as exc:
-        logger.warning("Error listando calendarios: %s", exc)
+        _handle_api_error(conn, exc, "Error listando calendarios")
         return []
 
 
@@ -243,6 +410,7 @@ def sync_appointment_via_oauth(
             "error": "",
         }
     except Exception as exc:
+        _handle_api_error(conn, exc, "Error sincronizando cita con Google Calendar")
         return {
             "status": "error",
             "event_id": appointment.google_event_id or "",

@@ -5,6 +5,7 @@ import logging
 import os
 from datetime import datetime, timedelta
 
+from sqlalchemy import update
 from sqlmodel import Session, select
 
 from app.models.AuditTrailEvent import AuditTrailEvent
@@ -20,10 +21,12 @@ except ValueError:
 
 
 def run_due_renewal_reminders(session: Session, *, days_ahead: int | None = None) -> int:
-    """Marca recordatorios de renovación pendientes y deja trazabilidad de auditoría.
+    """Marca renovaciones próximas como 'reminder_due' y deja trazabilidad de auditoría.
 
-    Esta rutina es idempotente: una conversación solo se procesa si
-    renewal_reminder_sent_at es NULL.
+    Aún no existe un canal de envío: NO se marca 'reminder_sent'. El asesor ve el
+    estado 'reminder_due' y contacta al cliente. renewal_reminder_sent_at se usa como
+    marca de procesado; la actualización condicional evita duplicados entre
+    ejecuciones y entre workers concurrentes.
 
     days_ahead=None usa RENEWAL_REMINDER_DAYS_AHEAD (env RENEWAL_REMINDER_DAYS_AHEAD, default 30).
     """
@@ -48,12 +51,27 @@ def run_due_renewal_reminders(session: Session, *, days_ahead: int | None = None
         if not conversation.renewal_date:
             continue
 
-        conversation.renewal_reminder_sent_at = now
-        if conversation.renewal_status in {"", "none", "scheduled", "contacted"}:
-            conversation.renewal_status = "reminder_sent"
+        next_status = (
+            "reminder_due"
+            if conversation.renewal_status in {"", "none", "scheduled", "contacted"}
+            else conversation.renewal_status
+        )
+        claimed = session.exec(
+            update(TextConversation)
+            .where(
+                TextConversation.id == conversation.id,
+                TextConversation.renewal_reminder_sent_at == None,
+            )
+            .values(renewal_reminder_sent_at=now, renewal_status=next_status)
+            .execution_options(synchronize_session=False)
+        )
+        if not claimed.rowcount:
+            continue
 
-        session.add(conversation)
+        conversation.renewal_reminder_sent_at = now
+        conversation.renewal_status = next_status
         session.add(
+
             AuditTrailEvent(
                 event_type="renewal_reminder_scheduled",
                 actor_user_id=None,

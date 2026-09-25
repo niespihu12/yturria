@@ -1,16 +1,20 @@
+# Despliegue: ver la sección "Despliegue con Docker" de backend/README.md.
+# Variables de la base de datos (MYSQL_*) se leen del entorno o de un .env en la
+# raíz del repo; el resto de la configuración del backend vive en backend/.env.
+# MYSQL_PASSWORD va dentro de DATABASE_URL: solo letras y números (sin "@" ni "%").
 services:
   db:
     image: mysql:8.4
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpass}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Define MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-omnicanal}
       MYSQL_USER: ${MYSQL_USER:-app}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-apppass}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Define MYSQL_PASSWORD}
     volumes:
       - db_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-rootpass}"]
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p\"$$MYSQL_ROOT_PASSWORD\""]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -23,23 +27,19 @@ services:
       context: .
       dockerfile: Dockerfile.backend
     restart: unless-stopped
+    env_file:
+      - path: backend/.env
+        required: true
     environment:
-      DATABASE_URL: mysql://${MYSQL_USER:-app}:${MYSQL_PASSWORD:-apppass}@db:3306/${MYSQL_DATABASE:-omnicanal}
-      JWT_SECRET: ${JWT_SECRET}
-      FRONTEND_URL: ${FRONTEND_URL:-http://localhost}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
-      MAIL_USER: ${MAIL_USER:-}
-      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
-      MAIL_SERVER: ${MAIL_SERVER:-smtp.gmail.com}
-      MAIL_PORT: ${MAIL_PORT:-465}
-      MAIL_FROM_NAME: ${MAIL_FROM_NAME:-Yturria}
-      MAIL_FROM_EMAIL: ${MAIL_FROM_EMAIL:-}
+      DATABASE_URL: mysql://${MYSQL_USER:-app}:${MYSQL_PASSWORD}@db:3306/${MYSQL_DATABASE:-omnicanal}
+      # Solo nginx (red interna) llega al backend; confía en su X-Forwarded-For.
+      FORWARDED_ALLOW_IPS: "*"
     depends_on:
       db:
         condition: service_healthy
+    # Publicado solo en localhost para diagnóstico; el tráfico público entra por nginx (/api).
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 30s
@@ -55,7 +55,7 @@ services:
       context: .
       dockerfile: Dockerfile.frontend
       args:
-        VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+        VITE_API_URL: ${VITE_API_URL:-/api}
     restart: unless-stopped
     ports:
       - "80:80"
@@ -75,8 +75,8 @@ services:
     restart: "no"
     profiles: ["backup"]
     environment:
-      DATABASE_URL: mysql://${MYSQL_USER:-app}:${MYSQL_PASSWORD:-apppass}@db:3306/${MYSQL_DATABASE:-omnicanal}
-      BACKUP_ENCRYPT_PASSPHRASE: ${BACKUP_ENCRYPT_PASSPHRASE}
+      DATABASE_URL: mysql://${MYSQL_USER:-app}:${MYSQL_PASSWORD}@db:3306/${MYSQL_DATABASE:-omnicanal}
+      BACKUP_ENCRYPT_PASSPHRASE: ${BACKUP_ENCRYPT_PASSPHRASE:-}
       AWS_S3_BUCKET: ${AWS_S3_BUCKET:-}
       GCS_BUCKET: ${GCS_BUCKET:-}
       RETAIN_DAYS: ${RETAIN_DAYS:-7}

@@ -3,13 +3,16 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import os
 import urllib.parse
 from base64 import b64encode
 from types import SimpleNamespace
+from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response, status
-from sqlmodel import select
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request, Response, status
+from fastapi.concurrency import run_in_threadpool
+from sqlmodel import Session, select
 
 from app.controllers.AgentController import AgentController
 from app.controllers.TextAgentController import (
@@ -26,17 +29,23 @@ from app.services.whatsapp_service import has_valid_credentials, send_whatsapp_m
 from app.utils.crypto import decrypt_secret
 
 webhooks_router = APIRouter(prefix="/webhooks", tags=["Webhooks"])
+logger = logging.getLogger(__name__)
 
 _XML_EMPTY = '<?xml version="1.0"?><Response></Response>'
 VOICE_TOOL_TOKEN = os.getenv("VOICE_AGENT_TOOL_TOKEN", "").strip()
+
+
+def _allow_unsigned_webhooks() -> bool:
+    """Solo para desarrollo: acepta webhooks de WhatsApp sin secreto configurado."""
+    return os.getenv("WHATSAPP_ALLOW_UNSIGNED_WEBHOOKS", "false").strip().lower() == "true"
 
 
 def _validate_twilio_signature(auth_token: str, url: str, params: dict[str, str], signature: str) -> bool:
     """HMAC-SHA1 sobre url + sorted(params). Ver docs.twilio.com/docs/usage/security."""
     s = url + "".join(f"{k}{v}" for k, v in sorted(params.items()))
     mac = hmac.new(auth_token.encode(), s.encode(), hashlib.sha1)
-    expected = b64encode(mac.digest()).decode()
-    return hmac.compare_digest(expected, signature)
+    expected = b64encode(mac.digest())
+    return hmac.compare_digest(expected, str(signature or "").strip().encode("utf-8"))
 
 
 def _validate_meta_signature(app_secret: str, raw_body: bytes, signature_header: str) -> bool:
@@ -44,7 +53,157 @@ def _validate_meta_signature(app_secret: str, raw_body: bytes, signature_header:
     if not signature_header.startswith("sha256="):
         return False
     expected = hmac.new(app_secret.encode(), raw_body, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected, signature_header[7:])
+    provided = signature_header[7:].strip().lower()
+    return hmac.compare_digest(expected.encode("utf-8"), provided.encode("utf-8"))
+
+
+def _public_request_url(request: Request) -> str:
+    """URL pública que firmó Twilio; detrás de proxy/túnel request.url es la interna."""
+    base = os.getenv("BACKEND_PUBLIC_URL", "").strip().rstrip("/")
+    if not base:
+        return str(request.url)
+    path = request.url.path
+    if base.endswith("/api") and (path == "/api" or path.startswith("/api/")):
+        path = path[len("/api"):]
+    url = base + path
+    if request.url.query:
+        url += "?" + request.url.query
+    return url
+
+
+def _verify_meta_request(config: TextAgentWhatsApp, raw_body: bytes, request: Request) -> None:
+    """Falla cerrado: sin app_secret o con error al descifrarlo se rechaza la petición."""
+    app_secret_enc = str(getattr(config, "app_secret_encrypted", "") or "")
+    if not app_secret_enc:
+        if _allow_unsigned_webhooks():
+            logger.warning(
+                "Webhook Meta %s aceptado SIN firma (WHATSAPP_ALLOW_UNSIGNED_WEBHOOKS=true)",
+                config.id,
+            )
+            return
+        logger.warning("Webhook Meta %s rechazado: no hay app_secret configurado", config.id)
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Webhook sin app_secret configurado",
+        )
+
+    try:
+        app_secret = decrypt_secret(app_secret_enc)
+    except Exception:
+        logger.error("No se pudo descifrar el app_secret de Meta (config %s)", config.id)
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Firma de Meta inválida",
+        )
+
+    sig = request.headers.get("X-Hub-Signature-256", "")
+    if not sig or not _validate_meta_signature(app_secret, raw_body, sig):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Firma de Meta inválida",
+        )
+
+
+def _twilio_request_is_authentic(
+    config: TextAgentWhatsApp,
+    request: Request,
+    params: dict[str, str],
+) -> bool:
+    if not config.auth_token_encrypted:
+        if _allow_unsigned_webhooks():
+            logger.warning(
+                "Webhook Twilio %s aceptado SIN firma (WHATSAPP_ALLOW_UNSIGNED_WEBHOOKS=true)",
+                config.id,
+            )
+            return True
+        logger.warning("Webhook Twilio %s rechazado: no hay auth_token configurado", config.id)
+        return False
+
+    try:
+        auth_token = decrypt_secret(config.auth_token_encrypted)
+    except Exception:
+        logger.error("No se pudo descifrar el auth_token de Twilio (config %s)", config.id)
+        return False
+
+    sig = request.headers.get("X-Twilio-Signature", "")
+    if not sig:
+        return False
+
+    candidate_urls = dict.fromkeys([_public_request_url(request), str(request.url)])
+    return any(
+        _validate_twilio_signature(auth_token, url, params, sig) for url in candidate_urls
+    )
+
+
+def _extract_meta_text_messages(body: Any, phone_number_id: str = "") -> list[dict[str, str]]:
+    """Todos los mensajes de texto del payload (Meta puede agrupar varios entries/changes)."""
+    items: list[dict[str, str]] = []
+    if not isinstance(body, dict):
+        return items
+
+    for entry in body.get("entry") or []:
+        if not isinstance(entry, dict):
+            continue
+        for change in entry.get("changes") or []:
+            if not isinstance(change, dict):
+                continue
+            value = change.get("value")
+            if not isinstance(value, dict):
+                continue
+
+            metadata = value.get("metadata")
+            target_number_id = (
+                str(metadata.get("phone_number_id") or "").strip()
+                if isinstance(metadata, dict)
+                else ""
+            )
+            if phone_number_id and target_number_id and target_number_id != phone_number_id:
+                logger.info("Webhook Meta para otro phone_number_id (%s) ignorado", target_number_id)
+                continue
+
+            for msg in value.get("messages") or []:
+                if not isinstance(msg, dict) or msg.get("type") != "text":
+                    continue
+                text_payload = msg.get("text")
+                text = (
+                    str(text_payload.get("body") or "").strip()
+                    if isinstance(text_payload, dict)
+                    else ""
+                )
+                sender = str(msg.get("from") or "").strip()
+                if not text or not sender:
+                    continue
+                items.append(
+                    {"id": str(msg.get("id") or "").strip(), "from": sender, "text": text}
+                )
+    return items
+
+
+async def _process_meta_messages(bind: Any, config_id: str, items: list[dict[str, str]]) -> None:
+    """Procesa mensajes de Meta fuera del ciclo de la petición, con su propia sesión."""
+    for item in items:
+        try:
+            with Session(bind, expire_on_commit=False) as session:
+                reply = await TextAgentController.handle_whatsapp_incoming(
+                    config_id,
+                    item["from"],
+                    item["text"],
+                    session,
+                    external_id=item.get("id") or None,
+                )
+                if not reply:
+                    continue
+                config = session.get(TextAgentWhatsApp, config_id)
+                if not config or not config.access_token_encrypted or not config.phone_number_id:
+                    continue
+                access_token = decrypt_secret(config.access_token_encrypted)
+                phone_number_id = config.phone_number_id
+
+            await run_in_threadpool(
+                _send_meta_message, access_token, phone_number_id, item["from"], reply
+            )
+        except Exception:
+            logger.exception("Error procesando mensaje de WhatsApp (Meta) %s", item.get("id"))
 
 
 def _validate_voice_tool_token(request: Request) -> None:
@@ -84,7 +243,15 @@ async def meta_webhook_verify(
     if not config:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Config no encontrada")
 
-    if hub_mode == "subscribe" and hub_verify_token == config.webhook_verify_token:
+    expected_token = str(config.webhook_verify_token or "")
+    if (
+        hub_mode == "subscribe"
+        and expected_token
+        and hmac.compare_digest(
+            str(hub_verify_token or "").encode("utf-8"),
+            expected_token.encode("utf-8"),
+        )
+    ):
         return Response(content=hub_challenge, media_type="text/plain")
 
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Token de verificacion invalido")
@@ -95,62 +262,27 @@ async def meta_webhook_message(
     config_id: str,
     request: Request,
     session: SessionDep,
+    background_tasks: BackgroundTasks,
 ):
     config = session.get(TextAgentWhatsApp, config_id)
     if not config or not config.active or config.provider != "meta":
         return {"status": "ignored"}
 
     raw_body = await request.body()
-
-    app_secret_enc = getattr(config, "app_secret_encrypted", "")
-    if app_secret_enc:
-        sig = request.headers.get("X-Hub-Signature-256", "")
-        try:
-            app_secret = decrypt_secret(app_secret_enc)
-            if not sig or not _validate_meta_signature(app_secret, raw_body, sig):
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Firma de Meta inválida",
-                )
-        except HTTPException:
-            raise
-        except Exception:
-            pass
+    _verify_meta_request(config, raw_body, request)
 
     try:
         body = json.loads(raw_body)
     except Exception:
         return {"status": "ignored"}
 
-    try:
-        entry = body.get("entry", [{}])[0]
-        changes = entry.get("changes", [{}])[0]
-        value = changes.get("value", {})
-        messages = value.get("messages", [])
-        if not messages:
-            return {"status": "no_messages"}
+    items = _extract_meta_text_messages(body, str(config.phone_number_id or "").strip())
+    if not items:
+        return {"status": "no_messages"}
 
-        msg = messages[0]
-        sender = msg.get("from", "")
-        msg_type = msg.get("type", "")
-        if msg_type != "text":
-            return {"status": "non_text"}
-
-        text = msg.get("text", {}).get("body", "").strip()
-        if not text:
-            return {"status": "empty"}
-    except Exception:
-        return {"status": "parse_error"}
-
-    reply = await TextAgentController.handle_whatsapp_incoming(config_id, sender, text, session)
-
-    if reply and config.access_token_encrypted and config.phone_number_id:
-        try:
-            access_token = decrypt_secret(config.access_token_encrypted)
-            _send_meta_message(access_token, config.phone_number_id, sender, reply)
-        except Exception:
-            pass
-
+    # Se confirma a Meta de inmediato (200) y se procesa en segundo plano; los
+    # reintentos de Meta se deduplican por wamid en handle_whatsapp_incoming.
+    background_tasks.add_task(_process_meta_messages, session.get_bind(), config_id, items)
     return {"status": "ok"}
 
 
@@ -165,30 +297,31 @@ async def twilio_webhook_message(
         return Response(content=_XML_EMPTY, media_type="application/xml")
 
     raw_body = await request.body()
+    try:
+        # Twilio firma todos los parámetros, incluidos los vacíos.
+        params = dict(urllib.parse.parse_qsl(raw_body.decode("utf-8"), keep_blank_values=True))
+    except UnicodeDecodeError:
+        return Response(content=_XML_EMPTY, media_type="application/xml", status_code=400)
 
-    if config.auth_token_encrypted:
-        sig = request.headers.get("X-Twilio-Signature", "")
-        try:
-            auth_token = decrypt_secret(config.auth_token_encrypted)
-            # request.url reflects internal URL; behind a TLS proxy set
-            # FORWARDED / X-Forwarded-Proto middleware so this matches Twilio's URL.
-            url = str(request.url)
-            params = dict(urllib.parse.parse_qsl(raw_body.decode("utf-8")))
-            if not sig or not _validate_twilio_signature(auth_token, url, params, sig):
-                return Response(content=_XML_EMPTY, media_type="application/xml", status_code=403)
-        except Exception:
-            pass
+    if not _twilio_request_is_authentic(config, request, params):
+        return Response(content=_XML_EMPTY, media_type="application/xml", status_code=403)
 
-    params = dict(urllib.parse.parse_qsl(raw_body.decode("utf-8")))
     From = params.get("From", "")
     Body = params.get("Body", "").strip()
+    message_sid = str(params.get("MessageSid") or params.get("SmsMessageSid") or "").strip()
 
     sender = From.replace("whatsapp:", "").strip()
 
     if not Body:
         return Response(content=_XML_EMPTY, media_type="application/xml")
 
-    reply = await TextAgentController.handle_whatsapp_incoming(config_id, sender, Body, session)
+    try:
+        reply = await TextAgentController.handle_whatsapp_incoming(
+            config_id, sender, Body, session, external_id=message_sid or None
+        )
+    except Exception:
+        logger.exception("Error procesando mensaje de WhatsApp (Twilio) %s", message_sid)
+        reply = ""
 
     if not reply:
         return Response(content=_XML_EMPTY, media_type="application/xml")
@@ -349,7 +482,8 @@ async def voice_tool_take_message(request: Request, session: SessionDep):
                     f"*Resumen:* {message_summary or 'No proporcionado'}\n\n"
                     f"*Agente:* {agent_id}"
                 )
-                send_whatsapp_message(
+                await run_in_threadpool(
+                    send_whatsapp_message,
                     wa_config,
                     to_number=advisor_number,
                     message=msg_body,
@@ -359,7 +493,7 @@ async def voice_tool_take_message(request: Request, session: SessionDep):
                 voice_message.whatsapp_sent = True
                 voice_message.whatsapp_sent_at = datetime.utcnow()
             except Exception:
-                pass
+                logger.exception("No se pudo enviar el recado de voz por WhatsApp")
 
     session.commit()
     return {

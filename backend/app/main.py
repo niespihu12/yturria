@@ -136,10 +136,12 @@ def _ensure_column_varchar_not_null(
 
 def ensure_user_auth_columns() -> None:
     columns = {
-        "role": f"VARCHAR(20) NOT NULL DEFAULT 'agent'",
+        # SQLAlchemy Enum persiste el NOMBRE del miembro (AGENT), no su valor ('agent').
+        "role": f"VARCHAR(20) NOT NULL DEFAULT 'AGENT'",
         "mfa_enabled": "BOOLEAN NOT NULL DEFAULT FALSE",
         "mfa_failed_attempts": "INT NOT NULL DEFAULT 0",
         "mfa_locked_until": f"{_ts_ddl()} NULL",
+        "token_version": "INT NOT NULL DEFAULT 0",
     }
     with Session(engine) as session:
         connection = session.connection()
@@ -150,109 +152,47 @@ def ensure_user_auth_columns() -> None:
 
 
 def _ensure_userrole_enum_has_super_admin() -> None:
-    """Idempotently add 'super_admin' to the PostgreSQL userrole enum."""
+    """Idempotently add SUPER_ADMIN to the PostgreSQL userrole enum.
+
+    SQLAlchemy persiste los miembros de UserRole por NOMBRE ('SUPER_ADMIN'); la etiqueta
+    'super_admin' que agregaban versiones anteriores provoca LookupError al leer."""
     if _dialect() != "postgresql":
         return
+    from app.models.User import UserRole
+
+    label = UserRole.SUPER_ADMIN.name
     with Session(engine) as session:
         connection = session.connection()
-        result = connection.execute(
-            text(
-                """
-                SELECT EXISTS (
-                    SELECT 1 FROM pg_enum
-                    WHERE enumtypid = (SELECT oid FROM pg_type WHERE typname = 'userrole')
-                    AND enumlabel = 'super_admin'
-                )
-                """
-            )
-        ).scalar()
-        if not result:
-            connection.execute(text("ALTER TYPE userrole ADD VALUE 'super_admin'"))
-        session.commit()
-
-
-def ensure_contacts_table() -> None:
-    with Session(engine) as session:
-        connection = session.connection()
-        if not _table_exists(connection, "contacts"):
+        labels = set(
             connection.execute(
                 text(
-                    """
-                    CREATE TABLE contacts (
-                        id VARCHAR(36) PRIMARY KEY,
-                        user_id VARCHAR(36) NOT NULL,
-                        name VARCHAR(255) NOT NULL,
-                        last_name VARCHAR(255) NOT NULL DEFAULT '',
-                        specialty VARCHAR(255) NOT NULL DEFAULT '',
-                        phone VARCHAR(50) NOT NULL DEFAULT '',
-                        email VARCHAR(255) NOT NULL DEFAULT '',
-                        whatsapp VARCHAR(50) NOT NULL DEFAULT '',
-                        active BOOLEAN NOT NULL DEFAULT TRUE,
-                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                        INDEX ix_contacts_user_id (user_id),
-                        INDEX ix_contacts_name (name),
-                        INDEX ix_contacts_specialty (specialty)
-                    )
-                    """
+                    "SELECT enumlabel FROM pg_enum WHERE enumtypid = "
+                    "(SELECT oid FROM pg_type WHERE typname = 'userrole')"
                 )
-            )
+            ).scalars().all()
+        )
+        if labels and label not in labels:
+            connection.execute(text(f"ALTER TYPE userrole ADD VALUE '{label}'"))
         session.commit()
 
-
-def ensure_voice_messages_table() -> None:
-    with Session(engine) as session:
-        connection = session.connection()
-        if not _table_exists(connection, "voice_messages"):
-            connection.execute(
-                text(
-                    """
-                    CREATE TABLE voice_messages (
-                        id VARCHAR(36) PRIMARY KEY,
-                        user_id VARCHAR(36) NOT NULL,
-                        voice_agent_id VARCHAR(255) NOT NULL,
-                        caller_number VARCHAR(50) NOT NULL,
-                        requested_person VARCHAR(255) NOT NULL DEFAULT '',
-                        message_summary TEXT NOT NULL DEFAULT '',
-                        full_transcript TEXT NOT NULL DEFAULT '',
-                        whatsapp_sent BOOLEAN NOT NULL DEFAULT FALSE,
-                        whatsapp_sent_at TIMESTAMP NULL,
-                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                        INDEX ix_voice_messages_user_id (user_id),
-                        INDEX ix_voice_messages_voice_agent_id (voice_agent_id)
-                    )
-                    """
-                )
+    if "super_admin" in labels:
+        # Nuevo valor de enum: solo utilizable en una transaccion posterior.
+        with Session(engine) as session:
+            session.connection().execute(
+                text(f"UPDATE users SET role = '{label}' WHERE role::text = 'super_admin'")
             )
-        session.commit()
+            session.commit()
 
 
 def ensure_user_calendar_connections_table() -> None:
-    with Session(engine) as session:
-        connection = session.connection()
-        if not _table_exists(connection, "user_calendar_connections"):
-            connection.execute(
-                text(
-                    """
-                    CREATE TABLE user_calendar_connections (
-                        id VARCHAR(36) PRIMARY KEY,
-                        user_id VARCHAR(36) NOT NULL,
-                        provider VARCHAR(50) NOT NULL DEFAULT 'google',
-                        calendar_id VARCHAR(255) NOT NULL DEFAULT 'primary',
-                        calendar_name VARCHAR(255) NOT NULL DEFAULT '',
-                        access_token_encrypted TEXT NOT NULL DEFAULT '',
-                        refresh_token_encrypted TEXT NOT NULL DEFAULT '',
-                        token_expires_at TIMESTAMP NULL,
-                        is_default BOOLEAN NOT NULL DEFAULT FALSE,
-                        active BOOLEAN NOT NULL DEFAULT TRUE,
-                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                        INDEX ix_user_calendar_connections_user_id (user_id)
-                    )
-                    """
-                )
-            )
-        session.commit()
+    # create_all crea la tabla; aqui solo se amplian los tokens cifrados, que en
+    # esquemas anteriores quedaron como VARCHAR(255) y truncaban/rechazaban el token.
+    _widen_columns_to_text(
+        [
+            ("user_calendar_connections", "access_token_encrypted"),
+            ("user_calendar_connections", "refresh_token_encrypted"),
+        ]
+    )
 
 
 def ensure_platform_super_admin_role() -> None:
@@ -268,9 +208,15 @@ def ensure_platform_super_admin_role() -> None:
         ):
             session.commit()
             return
+        from app.models.User import UserRole
+
+        # Enum persistido por NOMBRE (ver _ensure_userrole_enum_has_super_admin).
         for email in PLATFORM_SUPER_ADMIN_EMAILS:
             connection.execute(
-                text("UPDATE users SET role = 'super_admin' WHERE LOWER(TRIM(email)) = :email"),
+                text(
+                    f"UPDATE users SET role = '{UserRole.SUPER_ADMIN.name}' "
+                    "WHERE LOWER(TRIM(email)) = :email"
+                ),
                 {"email": normalize_email(email)},
             )
         session.commit()
@@ -302,8 +248,12 @@ def ensure_text_agents_content_columns() -> None:
             col_type_str = _get_column_type_str(connection, table_name, column_name)
             if not col_type_str:
                 continue
-            # TEXT / MEDIUMTEXT / LONGTEXT (MySQL) and TEXT (PostgreSQL) are already large enough.
-            is_large_text = any(t in col_type_str for t in ("TEXT", "CLOB"))
+            # MySQL TEXT tops out at 64 KB: only MEDIUMTEXT/LONGTEXT are large enough.
+            # PostgreSQL TEXT is unlimited.
+            if _dialect() == "mysql":
+                is_large_text = "LONGTEXT" in col_type_str or "MEDIUMTEXT" in col_type_str
+            else:
+                is_large_text = any(t in col_type_str for t in ("TEXT", "CLOB"))
             if not is_large_text:
                 _make_column_not_null_text(connection, table_name, column_name)
         session.commit()
@@ -582,6 +532,70 @@ def ensure_text_conversations_channel_column() -> None:
         session.commit()
 
 
+def ensure_text_messages_external_id_column() -> None:
+    with Session(engine) as session:
+        connection = session.connection()
+        if not _table_exists(connection, "text_messages"):
+            session.commit()
+            return
+        if not _column_exists(connection, "text_messages", "external_id"):
+            connection.execute(
+                text("ALTER TABLE text_messages ADD COLUMN external_id VARCHAR(255) NULL")
+            )
+        if not _index_exists(connection, "text_messages", "ix_text_messages_external_id"):
+            connection.execute(
+                text(
+                    "CREATE UNIQUE INDEX ix_text_messages_external_id "
+                    "ON text_messages (external_id)"
+                )
+            )
+        session.commit()
+
+
+def ensure_text_conversations_uncertainty_column() -> None:
+    with Session(engine) as session:
+        connection = session.connection()
+        if not _table_exists(connection, "text_conversations"):
+            session.commit()
+            return
+        if not _column_exists(connection, "text_conversations", "sofia_uncertainty_count"):
+            connection.execute(
+                text(
+                    "ALTER TABLE text_conversations "
+                    "ADD COLUMN sofia_uncertainty_count INT NOT NULL DEFAULT 0"
+                )
+            )
+        session.commit()
+
+
+def _widen_columns_to_text(targets: list[tuple[str, str]]) -> None:
+    """create_all no altera tablas existentes: pasa a TEXT/LONGTEXT las columnas que
+    quedaron como VARCHAR(n) (idempotente: omite las que ya son de tipo texto)."""
+    with Session(engine) as session:
+        connection = session.connection()
+        for table_name, column_name in targets:
+            if not _table_exists(connection, table_name):
+                continue
+            col_type_str = _get_column_type_str(connection, table_name, column_name)
+            # En MySQL, TEXT (64 KB) tambien se amplia; solo MEDIUM/LONGTEXT cuentan como grandes.
+            large_types = ("MEDIUMTEXT", "LONGTEXT") if _dialect() == "mysql" else ("TEXT", "CLOB")
+            if not col_type_str or any(t in col_type_str for t in large_types):
+                continue
+            _make_column_not_null_text(connection, table_name, column_name)
+        session.commit()
+
+
+def ensure_voice_text_columns() -> None:
+    _widen_columns_to_text(
+        [
+            ("voice_messages", "message_summary"),
+            ("voice_messages", "full_transcript"),
+            ("text_appointments", "notes"),
+            ("text_appointments", "google_sync_error"),
+        ]
+    )
+
+
 # ── Background scheduler ───────────────────────────────────────────────────────
 
 async def _renewal_scheduler_loop(stop_event: asyncio.Event) -> None:
@@ -623,9 +637,10 @@ async def lifespan(_: FastAPI):
         ensure_text_conversations_channel_column()
         ensure_sofia_error_label_column()
         ensure_embed_customization_columns()
-        ensure_contacts_table()
-        ensure_voice_messages_table()
         ensure_user_calendar_connections_table()
+        ensure_voice_text_columns()
+        ensure_text_messages_external_id_column()
+        ensure_text_conversations_uncertainty_column()
 
     scheduler_stop = asyncio.Event()
     scheduler_task = asyncio.create_task(_renewal_scheduler_loop(scheduler_stop))
@@ -642,8 +657,10 @@ async def lifespan(_: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 register_exception_handlers(app)
-add_cors_middleware(app)
 app.add_middleware(RateLimiterMiddleware)
+# CORS is registered last so it is the outermost middleware and also decorates
+# the 429 responses produced by the rate limiter.
+add_cors_middleware(app)
 
 app.include_router(auth_router, prefix="/api")
 app.include_router(agents_router, prefix="/api")

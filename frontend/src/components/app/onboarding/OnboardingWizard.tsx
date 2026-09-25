@@ -10,11 +10,11 @@ import {
   CheckCircleIcon,
   XMarkIcon,
   ExclamationCircleIcon,
-  ChatBubbleLeftRightIcon,
 } from '@heroicons/react/24/outline'
 import { updateTextAgent, upsertWhatsAppConfig, getWhatsAppConfig, getTextAgentEmbedConfig, createTextKnowledgeBaseDocumentFromFile, attachKnowledgeBaseDocument } from '@/api/TextAgentsAPI'
 import type { WhatsAppProvider } from '@/types/textAgent'
 import ChannelSelectionStep from './ChannelSelectionStep'
+import { absoluteApiBaseUrl } from '@/lib/apiUrl'
 
 type Props = {
   agentId: string
@@ -89,7 +89,7 @@ export default function OnboardingWizard({ agentId, onComplete }: Props) {
   })
 
   const wpConfig = wpQueryData?.config ?? null
-  const API_BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? ''
+  const API_BASE = absoluteApiBaseUrl()
   const webhookUrl = wpConfig
     ? `${API_BASE}/webhooks/whatsapp/${wpConfig.id}/${wpConfig.provider}`
     : ''
@@ -288,7 +288,7 @@ export default function OnboardingWizard({ agentId, onComplete }: Props) {
                         // Subir PDF si existe
                         if (data.presentation_file) {
                           createTextKnowledgeBaseDocumentFromFile(data.presentation_file, data.presentation_file.name)
-                            .then((doc) => attachKnowledgeBaseDocument(agentId, doc.id))
+                            .then((doc) => attachKnowledgeBaseDocument(agentId, doc.id, 'auto'))
                             .then(() => toast.success('Presentación subida correctamente'))
                             .catch((e: Error) => toast.error(e.message))
                         }

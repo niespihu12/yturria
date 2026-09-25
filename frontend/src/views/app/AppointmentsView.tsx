@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useSearchParams } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import {
   CalendarDaysIcon,
@@ -27,7 +28,13 @@ import {
   updateVoiceAgentAppointment,
 } from '@/api/VoiceRuntimeAPI'
 import type { TextAppointment, TextAppointmentStatus } from '@/types/textAgent'
-import { getCalendarConnections, getGoogleAuthUrl, disconnectCalendar } from '@/api/CalendarsAPI'
+import {
+  getCalendarConnections,
+  getGoogleAuthUrl,
+  disconnectCalendar,
+  getGoogleCalendarEvents,
+} from '@/api/CalendarsAPI'
+import type { GoogleCalendarEvent } from '@/api/CalendarsAPI'
 
 type Channel = 'text' | 'voice'
 type ChannelFilter = 'all' | Channel
@@ -84,8 +91,8 @@ const STATUS_OPTIONS: Array<{ value: TextAppointmentStatus; label: string }> = [
 const STATUS_BADGE: Record<TextAppointmentStatus, string> = {
   scheduled: 'bg-amber-50 text-amber-700 ring-amber-200',
   confirmed: 'bg-blue-50 text-blue-700 ring-blue-200',
-  completed: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
-  cancelled: 'bg-rose-50 text-rose-700 ring-rose-200',
+  completed: 'bg-accent-50 text-accent-700 ring-accent-200',
+  cancelled: 'bg-danger-50 text-danger-700 ring-rose-200',
   no_show: 'bg-slate-100 text-slate-600 ring-slate-200',
 }
 
@@ -237,6 +244,24 @@ function channelChipClass(channel: Channel): string {
 
 export default function AppointmentsView() {
   const queryClient = useQueryClient()
+  const [searchParams, setSearchParams] = useSearchParams()
+
+  // Resultado del flujo OAuth de Google Calendar (el backend redirige con estos params).
+  useEffect(() => {
+    const connected = searchParams.get('calendar_connected')
+    const error = searchParams.get('calendar_error')
+    if (!connected && !error) return
+    if (connected) {
+      toast.success('Google Calendar conectado')
+      queryClient.invalidateQueries({ queryKey: ['calendar-connections'] })
+    } else {
+      toast.error('No se pudo conectar Google Calendar. Intenta de nuevo.')
+    }
+    const next = new URLSearchParams(searchParams)
+    next.delete('calendar_connected')
+    next.delete('calendar_error')
+    setSearchParams(next, { replace: true })
+  }, [searchParams, setSearchParams, queryClient])
 
   const [channelFilter, setChannelFilter] = useState<ChannelFilter>('all')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
@@ -356,11 +381,51 @@ export default function AppointmentsView() {
 
   const monthCells = useMemo(() => buildMonthCells(currentMonth), [currentMonth])
 
+  const monthRange = useMemo(() => {
+    const first = monthCells[0]?.date ?? currentMonth
+    const last = monthCells[monthCells.length - 1]?.date ?? currentMonth
+    const fromUnix = Math.floor(
+      new Date(first.getFullYear(), first.getMonth(), first.getDate(), 0, 0, 0).getTime() / 1000
+    )
+    const toUnix = Math.floor(
+      new Date(last.getFullYear(), last.getMonth(), last.getDate(), 23, 59, 59).getTime() / 1000
+    )
+    return { fromUnix, toUnix }
+  }, [monthCells, currentMonth])
+
+  const { data: googleEventsData } = useQuery({
+    queryKey: ['google-events', monthRange.fromUnix, monthRange.toUnix],
+    queryFn: () => getGoogleCalendarEvents(monthRange.fromUnix, monthRange.toUnix),
+    enabled: hasGoogleCalendar,
+  })
+
+  const googleEventsByDay = useMemo(() => {
+    const grouped = new Map<string, GoogleCalendarEvent[]>()
+    for (const event of googleEventsData?.events ?? []) {
+      const key = toDateKey(new Date(event.start_unix * 1000))
+      const current = grouped.get(key)
+      if (current) {
+        current.push(event)
+      } else {
+        grouped.set(key, [event])
+      }
+    }
+    for (const values of grouped.values()) {
+      values.sort((left, right) => left.start_unix - right.start_unix)
+    }
+    return grouped
+  }, [googleEventsData])
+
   const selectedDayDate = useMemo(() => parseDateKey(selectedDayKey), [selectedDayKey])
 
   const selectedDayAppointments = useMemo(
     () => appointmentsByDay.get(selectedDayKey) ?? [],
     [appointmentsByDay, selectedDayKey]
+  )
+
+  const selectedDayGoogleEvents = useMemo(
+    () => googleEventsByDay.get(selectedDayKey) ?? [],
+    [googleEventsByDay, selectedDayKey]
   )
 
   const monthTitle = useMemo(
@@ -576,19 +641,19 @@ export default function AppointmentsView() {
   return (
     <div className="h-full overflow-y-auto">
       <div className="w-full p-8">
-        <section className="section-enter mb-6 overflow-hidden rounded-[28px] border border-[#e4e0f5] bg-white px-6 py-6 shadow-sm">
+        <section className="section-enter mb-6 overflow-hidden rounded-3xl border border-border-default bg-surface px-6 py-6 shadow-sm">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[#271173]">Agenda</p>
-              <h1 className="mt-2 text-3xl font-bold text-black">Citas</h1>
-              <p className="mt-2 max-w-2xl text-sm text-black/60">
+              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-primary-600">Agenda</p>
+              <h1 className="mt-2 text-3xl font-bold text-text-primary">Citas</h1>
+              <p className="mt-2 max-w-2xl text-sm text-text-secondary">
                 Vista mensual para planear, crear y actualizar citas de agentes de texto y voz.
               </p>
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
               {hasGoogleCalendar ? (
-                <div className="inline-flex items-center gap-2 rounded-xl bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700">
+                <div className="inline-flex items-center gap-2 rounded-xl bg-accent-50 px-3 py-2 text-sm font-medium text-accent-700">
                   <CheckCircleIcon className="h-4 w-4" />
                   Google Calendar conectado
                   <button
@@ -596,7 +661,7 @@ export default function AppointmentsView() {
                       const conn = calendarConnectionsData?.connections.find((c) => c.provider === 'google')
                       if (conn) disconnectMutation.mutate(conn.id)
                     }}
-                    className="ml-1 text-xs text-emerald-600 underline hover:text-emerald-800"
+                    className="ml-1 text-xs text-accent-600 underline hover:text-emerald-800"
                   >
                     Desconectar
                   </button>
@@ -605,7 +670,7 @@ export default function AppointmentsView() {
                 <button
                   onClick={() => connectCalendarMutation.mutate('/citas')}
                   disabled={connectCalendarMutation.isPending}
-                  className="inline-flex items-center gap-2 rounded-xl bg-[#271173] px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-[#3a1d9e] disabled:opacity-50 transition-colors"
+                  className="inline-flex items-center gap-2 rounded-xl bg-primary-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-[#3a1d9e] disabled:opacity-50 transition-colors"
                 >
                   <LinkIcon className="h-4 w-4" />
                   Conectar Google Calendar
@@ -615,13 +680,13 @@ export default function AppointmentsView() {
 
             <div className="flex flex-wrap items-end gap-2">
               <div>
-                <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-black/45">
+                <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-text-muted">
                   Canal
                 </label>
                 <select
                   value={channelFilter}
                   onChange={(event) => setChannelFilter(event.target.value as ChannelFilter)}
-                  className="rounded-xl border border-[#e4e0f5] bg-white px-3 py-2 text-sm text-black focus:border-[#271173] focus:outline-none"
+                  className="rounded-xl border border-border-default bg-surface px-3 py-2 text-sm text-text-primary focus:border-primary-500 focus:outline-none"
                 >
                   <option value="all">Todos</option>
                   <option value="text">Texto</option>
@@ -630,13 +695,13 @@ export default function AppointmentsView() {
               </div>
 
               <div>
-                <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-black/45">
+                <label className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-text-muted">
                   Estado
                 </label>
                 <select
                   value={statusFilter}
                   onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}
-                  className="rounded-xl border border-[#e4e0f5] bg-white px-3 py-2 text-sm text-black focus:border-[#271173] focus:outline-none"
+                  className="rounded-xl border border-border-default bg-surface px-3 py-2 text-sm text-text-primary focus:border-primary-500 focus:outline-none"
                 >
                   <option value="all">Todos</option>
                   {STATUS_OPTIONS.map((option) => (
@@ -650,7 +715,7 @@ export default function AppointmentsView() {
               <button
                 type="button"
                 onClick={() => openCreateModal(selectedDayDate)}
-                className="inline-flex items-center gap-2 rounded-xl bg-[#271173] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#1f0d5a]"
+                className="inline-flex items-center gap-2 rounded-xl bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary-700"
               >
                 <PlusIcon className="h-4 w-4" />
                 Nueva cita
@@ -659,20 +724,20 @@ export default function AppointmentsView() {
           </div>
 
           {!isLoading && allAgents.length === 0 && (
-            <div className="mt-4 rounded-2xl border border-dashed border-[#d4cfee] bg-[#faf9ff] px-4 py-3 text-sm text-black/65">
+            <div className="mt-4 rounded-2xl border border-dashed border-[#d4cfee] bg-bg-secondary px-4 py-3 text-sm text-text-secondary">
               No hay agentes disponibles todavia. Crea al menos un agente de texto o voz para registrar citas.
             </div>
           )}
         </section>
 
         {isLoading && (
-          <div className="rounded-3xl border border-[#e4e0f5] bg-white p-6 text-sm text-black/60 shadow-sm">
+          <div className="rounded-3xl border border-border-default bg-surface p-6 text-sm text-text-secondary shadow-sm">
             Cargando calendario de citas...
           </div>
         )}
 
         {isError && (
-          <div className="rounded-3xl border border-rose-200 bg-rose-50 p-6 text-sm text-rose-700 shadow-sm">
+          <div className="rounded-3xl border border-danger-200 bg-danger-50 p-6 text-sm text-danger-700 shadow-sm">
             No se pudo cargar la agenda.
             {error instanceof Error ? ` ${error.message}` : ''}
           </div>
@@ -680,13 +745,13 @@ export default function AppointmentsView() {
 
         {!isLoading && !isError && (
           <section className="grid gap-4 xl:grid-cols-[1.7fr,1fr]">
-            <article className="rounded-3xl border border-[#e4e0f5] bg-white p-4 shadow-sm">
+            <article className="rounded-3xl border border-border-default bg-surface p-4 shadow-sm">
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#f5f3ff] text-[#271173]">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#f5f3ff] text-primary-600">
                     <CalendarDaysIcon className="h-4.5 w-4.5" />
                   </div>
-                  <h2 className="text-lg font-semibold text-black">{monthTitle}</h2>
+                  <h2 className="text-lg font-semibold text-text-primary">{monthTitle}</h2>
                 </div>
 
                 <div className="flex items-center gap-2">
@@ -697,7 +762,7 @@ export default function AppointmentsView() {
                         toMonthStart(new Date(previous.getFullYear(), previous.getMonth() - 1, 1))
                       )
                     }
-                    className="rounded-lg border border-[#e4e0f5] bg-white p-1.5 text-black/65 transition-colors hover:border-[#d4cfee] hover:bg-[#faf9ff] hover:text-[#271173]"
+                    className="rounded-lg border border-border-default bg-surface p-1.5 text-text-secondary transition-colors hover:border-[#d4cfee] hover:bg-bg-secondary hover:text-primary-600"
                     aria-label="Mes anterior"
                   >
                     <ChevronLeftIcon className="h-4 w-4" />
@@ -705,7 +770,7 @@ export default function AppointmentsView() {
                   <button
                     type="button"
                     onClick={() => setCurrentMonth(toMonthStart(new Date()))}
-                    className="rounded-lg border border-[#e4e0f5] bg-white px-3 py-1.5 text-xs font-semibold text-black/70 transition-colors hover:border-[#d4cfee] hover:bg-[#faf9ff]"
+                    className="rounded-lg border border-border-default bg-surface px-3 py-1.5 text-xs font-semibold text-black/70 transition-colors hover:border-[#d4cfee] hover:bg-bg-secondary"
                   >
                     Hoy
                   </button>
@@ -716,7 +781,7 @@ export default function AppointmentsView() {
                         toMonthStart(new Date(previous.getFullYear(), previous.getMonth() + 1, 1))
                       )
                     }
-                    className="rounded-lg border border-[#e4e0f5] bg-white p-1.5 text-black/65 transition-colors hover:border-[#d4cfee] hover:bg-[#faf9ff] hover:text-[#271173]"
+                    className="rounded-lg border border-border-default bg-surface p-1.5 text-text-secondary transition-colors hover:border-[#d4cfee] hover:bg-bg-secondary hover:text-primary-600"
                     aria-label="Mes siguiente"
                   >
                     <ChevronRightIcon className="h-4 w-4" />
@@ -728,7 +793,7 @@ export default function AppointmentsView() {
                 <div className="min-w-190">
                   <div className="grid grid-cols-7 gap-2">
                     {WEEKDAY_LABELS.map((dayLabel) => (
-                      <div key={dayLabel} className="px-2 pb-1 text-center text-xs font-semibold uppercase tracking-wide text-black/45">
+                      <div key={dayLabel} className="px-2 pb-1 text-center text-xs font-semibold uppercase tracking-wide text-text-muted">
                         {dayLabel}
                       </div>
                     ))}
@@ -738,6 +803,8 @@ export default function AppointmentsView() {
                     {monthCells.map((cell) => {
                       const dayAppointments = appointmentsByDay.get(cell.key) ?? []
                       const hiddenAppointments = Math.max(0, dayAppointments.length - 2)
+                      const dayGoogleEvents = googleEventsByDay.get(cell.key) ?? []
+                      const hiddenGoogleEvents = Math.max(0, dayGoogleEvents.length - 2)
                       const isSelected = cell.key === selectedDayKey
 
                       return (
@@ -756,16 +823,16 @@ export default function AppointmentsView() {
                             isSelected
                               ? 'border-[#271173] bg-[#f8f5ff]'
                               : cell.inCurrentMonth
-                              ? 'border-[#ece8fb] bg-white hover:bg-[#faf9ff]'
-                              : 'border-[#f1eefc] bg-[#fcfbff] text-black/45'
+                              ? 'border-[#ece8fb] bg-surface hover:bg-bg-secondary'
+                              : 'border-[#f1eefc] bg-bg-secondary text-text-muted'
                           }`}
                         >
                           <div className="flex items-center justify-between">
-                            <span className={`text-sm font-semibold ${cell.isToday ? 'text-[#271173]' : 'text-black/75'}`}>
+                            <span className={`text-sm font-semibold ${cell.isToday ? 'text-primary-600' : 'text-black/75'}`}>
                               {cell.date.getDate()}
                             </span>
                             {dayAppointments.length > 0 && (
-                              <span className="rounded-full bg-[#ede9ff] px-1.5 py-0.5 text-[10px] font-semibold text-[#271173]">
+                              <span className="rounded-full bg-primary-50 px-1.5 py-0.5 text-[10px] font-semibold text-primary-600">
                                 {dayAppointments.length}
                               </span>
                             )}
@@ -796,7 +863,30 @@ export default function AppointmentsView() {
                             ))}
 
                             {hiddenAppointments > 0 && (
-                              <p className="px-1 text-[10px] font-semibold text-black/45">+{hiddenAppointments} mas</p>
+                              <p className="px-1 text-[10px] font-semibold text-text-muted">+{hiddenAppointments} mas</p>
+                            )}
+
+                            {dayGoogleEvents.slice(0, 2).map((event) => (
+                              <div
+                                key={`g-${event.id}`}
+                                className="flex w-full items-center gap-1 truncate rounded-md bg-slate-100 px-1.5 py-1 text-left text-[10px] font-medium text-slate-600 ring-1 ring-slate-200"
+                                title={`Google Calendar · ${event.summary}`}
+                              >
+                                <CalendarDaysIcon className="h-2.5 w-2.5 shrink-0 text-slate-400" />
+                                <span className="truncate">
+                                  {event.all_day
+                                    ? 'Todo el dia'
+                                    : new Date(event.start_unix * 1000).toLocaleTimeString('es-CO', {
+                                        hour: '2-digit',
+                                        minute: '2-digit',
+                                      })}{' '}
+                                  · {event.summary}
+                                </span>
+                              </div>
+                            ))}
+
+                            {hiddenGoogleEvents > 0 && (
+                              <p className="px-1 text-[10px] font-medium text-slate-400">+{hiddenGoogleEvents} de Google</p>
                             )}
                           </div>
                         </div>
@@ -807,17 +897,17 @@ export default function AppointmentsView() {
               </div>
             </article>
 
-            <article className="rounded-3xl border border-[#e4e0f5] bg-white p-4 shadow-sm">
+            <article className="rounded-3xl border border-border-default bg-surface p-4 shadow-sm">
               <div className="mb-3 flex items-center justify-between gap-2">
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-black/45">Dia seleccionado</p>
-                  <h3 className="mt-1 text-base font-semibold text-black">{selectedDayTitle}</h3>
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-text-muted">Dia seleccionado</p>
+                  <h3 className="mt-1 text-base font-semibold text-text-primary">{selectedDayTitle}</h3>
                 </div>
 
                 <button
                   type="button"
                   onClick={() => openCreateModal(selectedDayDate)}
-                  className="inline-flex items-center gap-1 rounded-lg bg-[#f5f3ff] px-2.5 py-1.5 text-xs font-semibold text-[#271173] transition-colors hover:bg-[#ede9ff]"
+                  className="inline-flex items-center gap-1 rounded-lg bg-[#f5f3ff] px-2.5 py-1.5 text-xs font-semibold text-primary-600 transition-colors hover:bg-primary-50"
                 >
                   <PlusIcon className="h-3.5 w-3.5" />
                   Crear
@@ -826,7 +916,7 @@ export default function AppointmentsView() {
 
               <div className="space-y-2">
                 {selectedDayAppointments.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-[#d4cfee] bg-[#faf9ff] p-4 text-sm text-black/55">
+                  <div className="rounded-xl border border-dashed border-[#d4cfee] bg-bg-secondary p-4 text-sm text-text-secondary">
                     No hay citas registradas para este dia con los filtros actuales.
                   </div>
                 ) : (
@@ -842,18 +932,18 @@ export default function AppointmentsView() {
                           openEditModal(appointment)
                         }
                       }}
-                      className="rounded-xl border border-[#ece8fb] bg-[#faf9ff] p-3 transition-colors hover:border-[#d9d2f5] hover:bg-white"
+                      className="rounded-xl border border-[#ece8fb] bg-bg-secondary p-3 transition-colors hover:border-[#d9d2f5] hover:bg-surface"
                     >
                       <div className="flex flex-wrap items-start justify-between gap-2">
                         <div>
-                          <p className="text-sm font-semibold text-black">
+                          <p className="text-sm font-semibold text-text-primary">
                             {appointment.contact_name || appointment.contact_phone || appointment.contact_email || 'Contacto sin nombre'}
                           </p>
-                          <p className="mt-1 inline-flex items-center gap-1 text-xs text-black/60">
+                          <p className="mt-1 inline-flex items-center gap-1 text-xs text-text-secondary">
                             <ClockIcon className="h-3.5 w-3.5" />
                             {formatDateTime(appointment.appointment_date_unix_secs)}
                           </p>
-                          <p className="mt-1 text-xs text-black/55">Agente: {appointment.agent_name}</p>
+                          <p className="mt-1 text-xs text-text-secondary">Agente: {appointment.agent_name}</p>
                         </div>
 
                         <div className="flex items-center gap-1.5">
@@ -873,14 +963,44 @@ export default function AppointmentsView() {
                       </div>
 
                       {appointment.notes && (
-                        <p className="mt-2 line-clamp-2 text-xs leading-5 text-black/60">{appointment.notes}</p>
+                        <p className="mt-2 line-clamp-2 text-xs leading-5 text-text-secondary">{appointment.notes}</p>
                       )}
                     </article>
                   ))
                 )}
               </div>
 
-              <div className="mt-4 border-t border-[#ece8fb] pt-3 text-xs text-black/50">
+              {selectedDayGoogleEvents.length > 0 && (
+                <div className="mt-4 border-t border-[#ece8fb] pt-3">
+                  <p className="mb-2 inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                    <CalendarDaysIcon className="h-3.5 w-3.5" />
+                    Ocupado en tu Google Calendar
+                  </p>
+                  <div className="space-y-1.5">
+                    {selectedDayGoogleEvents.map((event) => (
+                      <div
+                        key={`g-day-${event.id}`}
+                        className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2"
+                      >
+                        <span className="truncate text-sm text-slate-700">{event.summary}</span>
+                        <span className="shrink-0 text-xs font-medium text-slate-500">
+                          {event.all_day
+                            ? 'Todo el dia'
+                            : new Date(event.start_unix * 1000).toLocaleTimeString('es-CO', {
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="mt-2 text-[11px] leading-4 text-slate-400">
+                    Los agentes no agendaran citas sobre estos horarios.
+                  </p>
+                </div>
+              )}
+
+              <div className="mt-4 border-t border-[#ece8fb] pt-3 text-xs text-text-tertiary">
                 {filteredAppointments.length} cita(s) visibles en la agenda.
               </div>
             </article>
@@ -889,13 +1009,13 @@ export default function AppointmentsView() {
 
         {isModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 backdrop-blur-sm">
-            <div className="modal-content w-full max-w-2xl rounded-2xl border border-[#e4e0f5] bg-white p-6 shadow-xl">
+            <div className="modal-content w-full max-w-2xl rounded-2xl border border-border-default bg-surface p-6 shadow-xl">
               <div className="mb-5 flex items-center justify-between">
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-black/45">
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-text-muted">
                     {modalMode === 'create' ? 'Nueva cita' : 'Actualizar cita'}
                   </p>
-                  <h2 className="mt-1 text-lg font-semibold text-black">
+                  <h2 className="mt-1 text-lg font-semibold text-text-primary">
                     {modalMode === 'create' ? 'Crear cita en calendario' : 'Editar cita seleccionada'}
                   </h2>
                 </div>
@@ -903,7 +1023,7 @@ export default function AppointmentsView() {
                 <button
                   type="button"
                   onClick={closeModal}
-                  className="rounded-lg p-1.5 text-black/50 transition-colors hover:bg-[#f5f3ff] hover:text-black"
+                  className="rounded-lg p-1.5 text-text-tertiary transition-colors hover:bg-primary-50/60 hover:text-text-primary"
                   aria-label="Cerrar modal"
                 >
                   <XMarkIcon className="h-5 w-5" />
@@ -923,7 +1043,7 @@ export default function AppointmentsView() {
               >
                 <div className="grid gap-3 md:grid-cols-2">
                   <div>
-                    <label className="mb-1.5 block text-sm font-medium text-black/80">Canal</label>
+                    <label className="mb-1.5 block text-sm font-medium text-text-primary">Canal</label>
                     <select
                       value={modalForm.channel}
                       disabled={modalMode === 'edit'}
@@ -934,7 +1054,7 @@ export default function AppointmentsView() {
                           agentId: '',
                         }))
                       }
-                      className="w-full rounded-xl border border-[#e4e0f5] bg-white px-3 py-2.5 text-sm text-black transition-colors focus:border-[#271173] focus:outline-none disabled:cursor-not-allowed disabled:bg-[#fafafa]"
+                      className="w-full rounded-xl border border-border-default bg-surface px-3 py-2.5 text-sm text-text-primary transition-colors focus:border-primary-500 focus:outline-none disabled:cursor-not-allowed disabled:bg-[#fafafa]"
                     >
                       <option value="text">Agente de texto</option>
                       <option value="voice">Agente de voz</option>
@@ -942,12 +1062,12 @@ export default function AppointmentsView() {
                   </div>
 
                   <div>
-                    <label className="mb-1.5 block text-sm font-medium text-black/80">Agente</label>
+                    <label className="mb-1.5 block text-sm font-medium text-text-primary">Agente</label>
                     <select
                       value={modalForm.agentId}
                       disabled={modalMode === 'edit'}
                       onChange={(event) => setModalForm((prev) => ({ ...prev, agentId: event.target.value }))}
-                      className="w-full rounded-xl border border-[#e4e0f5] bg-white px-3 py-2.5 text-sm text-black transition-colors focus:border-[#271173] focus:outline-none disabled:cursor-not-allowed disabled:bg-[#fafafa]"
+                      className="w-full rounded-xl border border-border-default bg-surface px-3 py-2.5 text-sm text-text-primary transition-colors focus:border-primary-500 focus:outline-none disabled:cursor-not-allowed disabled:bg-[#fafafa]"
                     >
                       {createModeAgents.length === 0 ? (
                         <option value="">Sin agentes disponibles</option>
@@ -962,57 +1082,57 @@ export default function AppointmentsView() {
                   </div>
 
                   <div>
-                    <label className="mb-1.5 block text-sm font-medium text-black/80">Fecha y hora</label>
+                    <label className="mb-1.5 block text-sm font-medium text-text-primary">Fecha y hora</label>
                     <input
                       type="datetime-local"
                       value={modalForm.appointmentDate}
                       onChange={(event) => setModalForm((prev) => ({ ...prev, appointmentDate: event.target.value }))}
-                      className="w-full rounded-xl border border-[#e4e0f5] bg-white px-3 py-2.5 text-sm text-black transition-colors focus:border-[#271173] focus:outline-none"
+                      className="w-full rounded-xl border border-border-default bg-surface px-3 py-2.5 text-sm text-text-primary transition-colors focus:border-primary-500 focus:outline-none"
                     />
                   </div>
 
                   <div>
-                    <label className="mb-1.5 block text-sm font-medium text-black/80">Zona horaria</label>
+                    <label className="mb-1.5 block text-sm font-medium text-text-primary">Zona horaria</label>
                     <input
                       type="text"
                       value={modalForm.timezone}
                       onChange={(event) => setModalForm((prev) => ({ ...prev, timezone: event.target.value }))}
-                      className="w-full rounded-xl border border-[#e4e0f5] bg-white px-3 py-2.5 text-sm text-black transition-colors focus:border-[#271173] focus:outline-none"
+                      className="w-full rounded-xl border border-border-default bg-surface px-3 py-2.5 text-sm text-text-primary transition-colors focus:border-primary-500 focus:outline-none"
                     />
                   </div>
 
                   <div>
-                    <label className="mb-1.5 block text-sm font-medium text-black/80">Nombre contacto</label>
+                    <label className="mb-1.5 block text-sm font-medium text-text-primary">Nombre contacto</label>
                     <input
                       type="text"
                       value={modalForm.contactName}
                       onChange={(event) => setModalForm((prev) => ({ ...prev, contactName: event.target.value }))}
-                      className="w-full rounded-xl border border-[#e4e0f5] bg-white px-3 py-2.5 text-sm text-black transition-colors focus:border-[#271173] focus:outline-none"
+                      className="w-full rounded-xl border border-border-default bg-surface px-3 py-2.5 text-sm text-text-primary transition-colors focus:border-primary-500 focus:outline-none"
                     />
                   </div>
 
                   <div>
-                    <label className="mb-1.5 block text-sm font-medium text-black/80">Telefono</label>
+                    <label className="mb-1.5 block text-sm font-medium text-text-primary">Telefono</label>
                     <input
                       type="text"
                       value={modalForm.contactPhone}
                       onChange={(event) => setModalForm((prev) => ({ ...prev, contactPhone: event.target.value }))}
-                      className="w-full rounded-xl border border-[#e4e0f5] bg-white px-3 py-2.5 text-sm text-black transition-colors focus:border-[#271173] focus:outline-none"
+                      className="w-full rounded-xl border border-border-default bg-surface px-3 py-2.5 text-sm text-text-primary transition-colors focus:border-primary-500 focus:outline-none"
                     />
                   </div>
 
                   <div>
-                    <label className="mb-1.5 block text-sm font-medium text-black/80">Email</label>
+                    <label className="mb-1.5 block text-sm font-medium text-text-primary">Email</label>
                     <input
                       type="email"
                       value={modalForm.contactEmail}
                       onChange={(event) => setModalForm((prev) => ({ ...prev, contactEmail: event.target.value }))}
-                      className="w-full rounded-xl border border-[#e4e0f5] bg-white px-3 py-2.5 text-sm text-black transition-colors focus:border-[#271173] focus:outline-none"
+                      className="w-full rounded-xl border border-border-default bg-surface px-3 py-2.5 text-sm text-text-primary transition-colors focus:border-primary-500 focus:outline-none"
                     />
                   </div>
 
                   <div>
-                    <label className="mb-1.5 block text-sm font-medium text-black/80">Estado</label>
+                    <label className="mb-1.5 block text-sm font-medium text-text-primary">Estado</label>
                     <select
                       value={modalForm.status}
                       onChange={(event) =>
@@ -1021,7 +1141,7 @@ export default function AppointmentsView() {
                           status: event.target.value as TextAppointmentStatus,
                         }))
                       }
-                      className="w-full rounded-xl border border-[#e4e0f5] bg-white px-3 py-2.5 text-sm text-black transition-colors focus:border-[#271173] focus:outline-none"
+                      className="w-full rounded-xl border border-border-default bg-surface px-3 py-2.5 text-sm text-text-primary transition-colors focus:border-primary-500 focus:outline-none"
                     >
                       {STATUS_OPTIONS.map((option) => (
                         <option key={option.value} value={option.value}>
@@ -1032,12 +1152,12 @@ export default function AppointmentsView() {
                   </div>
 
                   <div className="md:col-span-2">
-                    <label className="mb-1.5 block text-sm font-medium text-black/80">Nota</label>
+                    <label className="mb-1.5 block text-sm font-medium text-text-primary">Nota</label>
                     <textarea
                       value={modalForm.notes}
                       onChange={(event) => setModalForm((prev) => ({ ...prev, notes: event.target.value }))}
                       rows={3}
-                      className="w-full rounded-xl border border-[#e4e0f5] bg-white px-3 py-2.5 text-sm text-black transition-colors focus:border-[#271173] focus:outline-none"
+                      className="w-full rounded-xl border border-border-default bg-surface px-3 py-2.5 text-sm text-text-primary transition-colors focus:border-primary-500 focus:outline-none"
                     />
                   </div>
                 </div>
@@ -1048,13 +1168,13 @@ export default function AppointmentsView() {
                       type="button"
                       disabled={isSaving || isDeleting}
                       onClick={() => deleteAppointment()}
-                      className="inline-flex items-center gap-1.5 rounded-xl bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 transition-colors hover:bg-rose-100 disabled:opacity-60"
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-danger-50 px-3 py-2 text-sm font-semibold text-danger-700 transition-colors hover:bg-rose-100 disabled:opacity-60"
                     >
                       <TrashIcon className="h-4 w-4" />
                       Eliminar cita
                     </button>
                   ) : (
-                    <span className="text-xs text-black/45">Completa al menos un dato de contacto.</span>
+                    <span className="text-xs text-text-muted">Completa al menos un dato de contacto.</span>
                   )}
 
                   <div className="ml-auto flex gap-2">
@@ -1062,14 +1182,14 @@ export default function AppointmentsView() {
                       type="button"
                       onClick={closeModal}
                       disabled={isSaving || isDeleting}
-                      className="rounded-xl bg-[#f5f3ff] px-4 py-2 text-sm font-medium text-black/80 transition-colors hover:bg-[#ede9ff] disabled:opacity-60"
+                      className="rounded-xl bg-[#f5f3ff] px-4 py-2 text-sm font-medium text-text-primary transition-colors hover:bg-primary-50 disabled:opacity-60"
                     >
                       Cancelar
                     </button>
                     <button
                       type="submit"
                       disabled={!canSubmit || isSaving || isDeleting}
-                      className="inline-flex items-center gap-2 rounded-xl bg-[#271173] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#1f0d5a] disabled:opacity-60"
+                      className="inline-flex items-center gap-2 rounded-xl bg-primary-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-primary-700 disabled:opacity-60"
                     >
                       <PlusIcon className="h-4 w-4" />
                       {isSaving

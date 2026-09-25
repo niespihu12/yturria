@@ -1107,10 +1107,10 @@ def test_acceptance_renewal_scheduler_targets_30d_window_without_spam() -> None:
         assert first_processed == 2
         assert second_processed == 0
 
-        assert due.renewal_status == "reminder_sent"
+        assert due.renewal_status == "reminder_due"
         assert due.renewal_reminder_sent_at is not None
 
-        assert edge.renewal_status == "reminder_sent"
+        assert edge.renewal_status == "reminder_due"
         assert edge.renewal_reminder_sent_at is not None
 
         assert out_of_range.renewal_reminder_sent_at is None
@@ -1181,10 +1181,10 @@ def test_acceptance_renewal_scheduler_respects_env_horizon(monkeypatch) -> None:
         assert second_run == 0, "Segunda ejecución debe ser 0 (idempotencia)"
 
         # Dentro del horizonte de 14 días
-        assert conv_inside.renewal_status == "reminder_sent"
+        assert conv_inside.renewal_status == "reminder_due"
         assert conv_inside.renewal_reminder_sent_at is not None
 
-        assert conv_edge.renewal_status == "reminder_sent"
+        assert conv_edge.renewal_status == "reminder_due"
         assert conv_edge.renewal_reminder_sent_at is not None
 
         # Fuera del horizonte → intacta

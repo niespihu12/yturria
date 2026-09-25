@@ -32,6 +32,29 @@ export async function getCalendarConnections(): Promise<{ connections: CalendarC
   }
 }
 
+export type GoogleCalendarEvent = {
+  id: string
+  summary: string
+  start_unix: number
+  end_unix: number | null
+  all_day: boolean
+}
+
+export async function getGoogleCalendarEvents(
+  fromUnix: number,
+  toUnix: number
+): Promise<{ events: GoogleCalendarEvent[] }> {
+  try {
+    const { data } = await api.get('/calendars/google/events', {
+      params: { from_unix: fromUnix, to_unix: toUnix },
+    })
+    return { events: Array.isArray(data?.events) ? (data.events as GoogleCalendarEvent[]) : [] }
+  } catch {
+    // No romper el calendario si Google falla; solo no mostramos eventos externos.
+    return { events: [] }
+  }
+}
+
 export async function getGoogleAuthUrl(redirectAfter?: string): Promise<{ auth_url: string }> {
   try {
     const { data } = await api.get('/calendars/google/auth', {

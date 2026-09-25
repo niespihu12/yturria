@@ -57,9 +57,9 @@ type EditableDataField = {
   description: string
 }
 
-const cardClass = 'rounded-xl border border-[#e4e0f5] bg-white'
+const cardClass = 'rounded-xl border border-border-default bg-surface'
 const inputClass =
-  'w-full rounded-lg border border-[#e4e0f5] bg-white px-3 py-2.5 text-sm text-black placeholder:text-black/50 transition-colors focus:border-[#271173] focus:outline-none'
+  'w-full rounded-lg border border-border-default bg-surface px-3 py-2.5 text-sm text-text-primary placeholder:text-text-tertiary transition-colors focus:border-primary-500 focus:outline-none'
 const textareaClass = `${inputClass} resize-none`
 
 type ConfigTab = 'criteria' | 'data' | 'language'
@@ -175,9 +175,9 @@ function StatusBadge({ status }: { status: string }) {
     done: 'border-green-200 bg-green-50 text-green-700',
     processing: 'border-amber-200 bg-amber-50 text-amber-700',
     failed: 'border-red-200 bg-red-50 text-red-600',
-    'in-progress': 'border-[#e4e0f5] bg-[#ede9ff] text-[#271173]',
+    'in-progress': 'border-border-default bg-primary-50 text-primary-600',
   }
-  const cls = map[status] ?? 'border-[#e4e0f5] bg-[#f5f3ff] text-black/70'
+  const cls = map[status] ?? 'border-border-default bg-[#f5f3ff] text-text-primary/70'
 
   return (
     <span
@@ -211,12 +211,12 @@ function TogglePill({ enabled, onToggle }: { enabled: boolean; onToggle: () => v
       type="button"
       onClick={onToggle}
       className={`relative h-5 w-10 cursor-pointer rounded-full transition-colors duration-200 ${
-        enabled ? 'bg-[#271173]' : 'bg-black/20'
+        enabled ? 'bg-primary-600' : 'bg-black/20'
       }`}
       aria-pressed={enabled}
     >
       <span
-        className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform duration-200 ${
+        className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-surface shadow transition-transform duration-200 ${
           enabled ? 'translate-x-5' : 'translate-x-0'
         }`}
       />
@@ -235,25 +235,25 @@ function AnalysisSummary({ detail }: { detail: ConversationDetail }) {
 
   return (
     <div className="space-y-4">
-      <div className="rounded-xl border border-[#e4e0f5] bg-linear-to-br from-[#ede9ff] to-[#f5f3ff] p-4">
-        <div className="mb-2 flex items-center gap-2 text-sm font-medium text-black">
-          <SparklesIcon className="h-4 w-4 text-[#271173]" />
+      <div className="rounded-xl border border-border-default bg-linear-to-br from-[#ede9ff] to-[#f5f3ff] p-4">
+        <div className="mb-2 flex items-center gap-2 text-sm font-medium text-text-primary">
+          <SparklesIcon className="h-4 w-4 text-primary-600" />
           Resumen del analisis
         </div>
         {analysis?.transcript_summary ? (
-          <p className="text-sm leading-relaxed text-black/85">
+          <p className="text-sm leading-relaxed text-text-primary/85">
             {analysis.transcript_summary}
           </p>
         ) : (
-          <p className="text-sm text-black/60">
+          <p className="text-sm text-text-secondary">
             Esta conversacion aun no tiene resumen disponible.
           </p>
         )}
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <div className="rounded-xl border border-[#e4e0f5] bg-[#f5f3ff] p-4">
-          <p className="mb-3 text-sm font-medium text-black">
+        <div className="rounded-xl border border-border-default bg-[#f5f3ff] p-4">
+          <p className="mb-3 text-sm font-medium text-text-primary">
             Criterios evaluados
           </p>
           <div className="space-y-3">
@@ -261,29 +261,29 @@ function AnalysisSummary({ detail }: { detail: ConversationDetail }) {
               criteriaResults.map((result, index) => (
                 <div
                   key={`${result.criteria_id ?? 'criterion'}-${index}`}
-                  className="rounded-lg border border-[#e4e0f5] bg-white p-3"
+                  className="rounded-lg border border-border-default bg-surface p-3"
                 >
                   <div className="mb-1 flex items-center justify-between gap-3">
-                    <p className="text-sm font-medium text-black">
+                    <p className="text-sm font-medium text-text-primary">
                       {result.criteria_id ?? `criterio_${index + 1}`}
                     </p>
                     <CriteriaResultBadge result={result.result ?? 'unknown'} />
                   </div>
-                  <p className="text-xs leading-relaxed text-black/70">
+                  <p className="text-xs leading-relaxed text-text-primary/70">
                     {result.rationale ?? 'Sin justificacion disponible.'}
                   </p>
                 </div>
               ))
             ) : (
-              <p className="text-sm text-black/60">
+              <p className="text-sm text-text-secondary">
                 Sin resultados de evaluacion todavia.
               </p>
             )}
           </div>
         </div>
 
-        <div className="rounded-xl border border-[#e4e0f5] bg-[#f5f3ff] p-4">
-          <p className="mb-3 text-sm font-medium text-black">
+        <div className="rounded-xl border border-border-default bg-[#f5f3ff] p-4">
+          <p className="mb-3 text-sm font-medium text-text-primary">
             Datos extraidos
           </p>
           <div className="space-y-3">
@@ -291,25 +291,25 @@ function AnalysisSummary({ detail }: { detail: ConversationDetail }) {
               dataResults.map(([key, result]) => (
                 <div
                   key={key}
-                  className="rounded-lg border border-[#e4e0f5] bg-white p-3"
+                  className="rounded-lg border border-border-default bg-surface p-3"
                 >
-                  <p className="text-xs uppercase tracking-wide text-black/60">
+                  <p className="text-xs uppercase tracking-wide text-text-secondary">
                     {key}
                   </p>
-                  <p className="mt-1 text-sm text-black">
+                  <p className="mt-1 text-sm text-text-primary">
                     {result.value === null || result.value === undefined
                       ? '-'
                       : String(result.value)}
                   </p>
                   {result.rationale && (
-                    <p className="mt-1 text-xs leading-relaxed text-black/70">
+                    <p className="mt-1 text-xs leading-relaxed text-text-primary/70">
                       {result.rationale}
                     </p>
                   )}
                 </div>
               ))
             ) : (
-              <p className="text-sm text-black/60">
+              <p className="text-sm text-text-secondary">
                 No hay datos extraidos para esta llamada.
               </p>
             )}
@@ -378,13 +378,13 @@ function ConversationDetailModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
-      <div className="mx-4 flex max-h-[85vh] w-full max-w-5xl flex-col rounded-xl border border-[#e4e0f5] bg-white shadow-lg">
-        <div className="flex items-center justify-between border-b border-[#e4e0f5] px-5 py-4">
+      <div className="mx-4 flex max-h-[85vh] w-full max-w-5xl flex-col rounded-xl border border-border-default bg-surface shadow-lg">
+        <div className="flex items-center justify-between border-b border-border-default px-5 py-4">
           <div>
-            <h3 className="text-sm font-medium text-black">
+            <h3 className="text-sm font-medium text-text-primary">
               Conversacion
             </h3>
-            <p className="font-mono text-xs text-black/60">
+            <p className="font-mono text-xs text-text-secondary">
               {conversationId}
             </p>
           </div>
@@ -393,7 +393,7 @@ function ConversationDetailModal({
               type="button"
               onClick={() => rerunAnalysis()}
               disabled={isReanalyzing}
-              className="inline-flex items-center gap-2 rounded-lg border border-[#271173]/30 px-3 py-2 text-xs font-medium text-[#271173] transition-colors hover:border-[#271173]/50 hover:bg-[#ede9ff] disabled:opacity-60"
+              className="inline-flex items-center gap-2 rounded-lg border border-[#271173]/30 px-3 py-2 text-xs font-medium text-primary-600 transition-colors hover:border-[#271173]/50 hover:bg-primary-50 disabled:opacity-60"
             >
               <ArrowPathIcon
                 className={`h-4 w-4 ${isReanalyzing ? 'animate-spin' : ''}`}
@@ -403,7 +403,7 @@ function ConversationDetailModal({
             <button
               type="button"
               onClick={onClose}
-              className="text-black/60 transition-colors hover:text-[#271173]"
+              className="text-text-secondary transition-colors hover:text-primary-600"
             >
               <XMarkIcon className="h-5 w-5" />
             </button>
@@ -411,25 +411,25 @@ function ConversationDetailModal({
         </div>
 
         <div className="grid flex-1 gap-0 overflow-hidden lg:grid-cols-[1.2fr_1fr]">
-          <div className="overflow-y-auto border-b border-[#e4e0f5] p-5 lg:border-b-0 lg:border-r">
+          <div className="overflow-y-auto border-b border-border-default p-5 lg:border-b-0 lg:border-r">
             {isLoading ? (
-              <div className="flex h-32 items-center justify-center text-sm text-black/70">
+              <div className="flex h-32 items-center justify-center text-sm text-text-primary/70">
                 Cargando conversacion...
               </div>
             ) : (
               <div className="space-y-3">
                 {conversationAudioUrl ? (
-                  <div className="overflow-hidden rounded-2xl border border-[#dcd7f0] bg-white shadow-sm">
+                  <div className="overflow-hidden rounded-2xl border border-[#dcd7f0] bg-surface shadow-sm">
                     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#ece8f9] bg-linear-to-r from-[#f8f5ff] to-[#f1ecff] px-4 py-3">
                       <div className="flex items-center gap-3">
-                        <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-[#271173]/10 text-[#271173]">
+                        <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-primary-600/10 text-primary-600">
                           <SpeakerWaveIcon className="h-5 w-5" />
                         </span>
                         <div>
-                          <p className="text-xs font-semibold uppercase tracking-[0.15em] text-[#271173]">
+                          <p className="text-xs font-semibold uppercase tracking-[0.15em] text-primary-600">
                             Audio de la llamada
                           </p>
-                          <p className="text-xs text-black/60">
+                          <p className="text-xs text-text-secondary">
                             Reproduce y valida esta conversacion sin salir del analisis.
                           </p>
                         </div>
@@ -437,13 +437,13 @@ function ConversationDetailModal({
 
                       <div className="inline-flex flex-wrap items-center gap-2">
                         {callDurationSecs !== undefined && (
-                          <span className="inline-flex items-center gap-1 rounded-full border border-[#d9d3ef] bg-white px-2.5 py-1 text-[11px] font-medium text-black/70">
-                            <ClockIcon className="h-3.5 w-3.5 text-[#271173]" />
+                          <span className="inline-flex items-center gap-1 rounded-full border border-[#d9d3ef] bg-surface px-2.5 py-1 text-[11px] font-medium text-text-primary/70">
+                            <ClockIcon className="h-3.5 w-3.5 text-primary-600" />
                             {formatDuration(callDurationSecs)}
                           </span>
                         )}
                         {audioSourceLabel && (
-                          <span className="inline-flex items-center rounded-full border border-[#d9d3ef] bg-white px-2.5 py-1 text-[11px] font-medium text-black/70">
+                          <span className="inline-flex items-center rounded-full border border-[#d9d3ef] bg-surface px-2.5 py-1 text-[11px] font-medium text-text-primary/70">
                             Fuente: {audioSourceLabel}
                           </span>
                         )}
@@ -461,14 +461,14 @@ function ConversationDetailModal({
                           href={conversationAudioUrl}
                           target="_blank"
                           rel="noreferrer"
-                          className="inline-flex items-center gap-1.5 rounded-lg border border-[#271173]/30 bg-white px-3 py-1.5 text-xs font-medium text-[#271173] transition-colors hover:bg-[#f5f3ff]"
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-[#271173]/30 bg-surface px-3 py-1.5 text-xs font-medium text-primary-600 transition-colors hover:bg-primary-50/60"
                         >
                           Abrir en pestana
                         </a>
                         <a
                           href={conversationAudioUrl}
                           download={`conversation-${conversationId}.audio`}
-                          className="inline-flex items-center gap-1.5 rounded-lg border border-[#271173]/30 bg-white px-3 py-1.5 text-xs font-medium text-[#271173] transition-colors hover:bg-[#f5f3ff]"
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-[#271173]/30 bg-surface px-3 py-1.5 text-xs font-medium text-primary-600 transition-colors hover:bg-primary-50/60"
                         >
                           <ArrowDownTrayIcon className="h-3.5 w-3.5" />
                           Descargar
@@ -483,13 +483,13 @@ function ConversationDetailModal({
                       <div className="h-11 w-full rounded-xl bg-[#e8e3f8]" />
                       <div className="h-7 w-36 rounded-lg bg-[#e8e3f8]" />
                     </div>
-                    <p className="mt-3 text-xs text-black/60">
+                    <p className="mt-3 text-xs text-text-secondary">
                       Cargando audio de la conversacion...
                     </p>
                   </div>
                 ) : (
-                  <div className="rounded-2xl border border-dashed border-[#dcd7f0] bg-[#faf9ff] p-4 text-xs text-black/60">
-                    <p className="font-medium text-black/70">Audio no disponible</p>
+                  <div className="rounded-2xl border border-dashed border-[#dcd7f0] bg-bg-secondary p-4 text-xs text-text-secondary">
+                    <p className="font-medium text-text-primary/70">Audio no disponible</p>
                     <p className="mt-1">
                       Esta conversacion no incluye archivo de audio o no fue posible recuperarlo.
                     </p>
@@ -504,8 +504,8 @@ function ConversationDetailModal({
                     <div
                       className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-medium ${
                         msg.role === 'agent'
-                          ? 'bg-[#271173] text-white'
-                          : 'bg-gray-100 text-black/70'
+                          ? 'bg-primary-600 text-white'
+                          : 'bg-gray-100 text-text-primary/70'
                       }`}
                     >
                       {msg.role === 'agent' ? 'A' : 'U'}
@@ -513,16 +513,16 @@ function ConversationDetailModal({
                     <div
                       className={`max-w-[78%] rounded-xl px-3.5 py-2.5 text-sm ${
                         msg.role === 'agent'
-                          ? 'bg-[#f5f3ff] text-black'
-                          : 'border border-gray-200 bg-gray-50 text-black/85'
+                          ? 'bg-[#f5f3ff] text-text-primary'
+                          : 'border border-gray-200 bg-gray-50 text-text-primary/85'
                       }`}
                     >
                       <div className="mb-1 flex items-center justify-between gap-2">
-                        <span className="text-[11px] font-medium uppercase tracking-wide text-black/45">
+                        <span className="text-[11px] font-medium uppercase tracking-wide text-text-muted">
                           {msg.role === 'agent' ? 'Agente' : 'Usuario'}
                         </span>
                         {msg.time_in_call_secs !== undefined && (
-                          <span className="rounded-full border border-[#e4e0f5] bg-white px-2 py-0.5 text-[11px] font-medium text-black/60">
+                          <span className="rounded-full border border-border-default bg-surface px-2 py-0.5 text-[11px] font-medium text-text-secondary">
                             {formatDuration(msg.time_in_call_secs)}
                           </span>
                         )}
@@ -532,7 +532,7 @@ function ConversationDetailModal({
                   </div>
                 ))}
                 {!data?.transcript?.length && (
-                  <p className="py-8 text-center text-sm text-black/60">
+                  <p className="py-8 text-center text-sm text-text-secondary">
                     Sin transcripcion disponible.
                   </p>
                 )}
@@ -542,7 +542,7 @@ function ConversationDetailModal({
 
           <div className="overflow-y-auto p-5">
             {isLoading || !data ? (
-              <div className="flex h-32 items-center justify-center text-sm text-black/70">
+              <div className="flex h-32 items-center justify-center text-sm text-text-primary/70">
                 Cargando analisis...
               </div>
             ) : (
@@ -725,12 +725,12 @@ export default function AnalysisTab({ agentId, agent, onUpdate, isClient = false
     <div className="space-y-6">
       {!isClient && (
       <div className={`${cardClass} p-5`}>
-        <div className="mb-5 flex flex-col gap-3 border-b border-[#e4e0f5] pb-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="mb-5 flex flex-col gap-3 border-b border-border-default pb-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h3 className="text-sm font-medium text-black">
+            <h3 className="text-sm font-medium text-text-primary">
               Configuracion de analisis
             </h3>
-            <p className="mt-1 text-xs text-black/60">
+            <p className="mt-1 text-xs text-text-secondary">
               Guarda criterios de evaluacion, campos de extraccion y el idioma
               de los resumentes post-llamada usando la configuracion actual de
               la plataforma.
@@ -740,7 +740,7 @@ export default function AnalysisTab({ agentId, agent, onUpdate, isClient = false
             type="button"
             onClick={() => saveAnalysis()}
             disabled={isSaving}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#271173] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#1f0d5a] disabled:opacity-60"
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary-700 disabled:opacity-60"
           >
             {isSaving && (
               <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
@@ -750,7 +750,7 @@ export default function AnalysisTab({ agentId, agent, onUpdate, isClient = false
         </div>
 
         <div className="space-y-6">
-          <div className="inline-flex rounded-xl border border-[#e4e0f5] bg-[#f5f3ff] p-1">
+          <div className="inline-flex rounded-xl border border-border-default bg-[#f5f3ff] p-1">
             {([
               { id: 'criteria', label: 'Criterios' },
               { id: 'data', label: 'Datos' },
@@ -762,8 +762,8 @@ export default function AnalysisTab({ agentId, agent, onUpdate, isClient = false
                 onClick={() => setActiveConfigTab(tab.id)}
                 className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
                   activeConfigTab === tab.id
-                    ? 'bg-[#271173] text-white'
-                    : 'text-black/60 hover:text-[#271173]'
+                    ? 'bg-primary-600 text-white'
+                    : 'text-text-secondary hover:text-primary-600'
                 }`}
               >
                 {tab.label}
@@ -775,12 +775,12 @@ export default function AnalysisTab({ agentId, agent, onUpdate, isClient = false
             <div className="space-y-4">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <p className="text-sm font-medium text-black">
+                  <p className="text-sm font-medium text-text-primary">
                     Criterios de evaluacion
                   </p>
-                  <p className="mt-1 text-xs text-black/60">
+                  <p className="mt-1 text-xs text-text-secondary">
                     Cada criterio se guarda en
-                    <span className="mx-1 rounded bg-[#f0edff] px-1.5 py-0.5 font-mono text-[11px] text-black/70">
+                    <span className="mx-1 rounded bg-[#f0edff] px-1.5 py-0.5 font-mono text-[11px] text-text-primary/70">
                       platform_settings.evaluation.criteria
                     </span>
                   </p>
@@ -790,7 +790,7 @@ export default function AnalysisTab({ agentId, agent, onUpdate, isClient = false
                   onClick={() =>
                     setCriteria((prev) => [...prev, createEmptyCriterion()])
                   }
-                  className="inline-flex items-center gap-2 rounded-lg border border-[#271173]/30 px-3 py-2 text-xs font-medium text-[#271173] transition-colors hover:border-[#271173]/50 hover:bg-[#ede9ff]"
+                  className="inline-flex items-center gap-2 rounded-lg border border-[#271173]/30 px-3 py-2 text-xs font-medium text-primary-600 transition-colors hover:border-[#271173]/50 hover:bg-primary-50"
                 >
                   <PlusIcon className="h-4 w-4" />
                   Agregar criterio
@@ -802,13 +802,13 @@ export default function AnalysisTab({ agentId, agent, onUpdate, isClient = false
                   const isConversationScope = criterion.scope === 'conversation'
 
                   return (
-                    <div key={criterion.localId} className="rounded-xl border border-[#e4e0f5] bg-[#f5f3ff] p-4">
+                    <div key={criterion.localId} className="rounded-xl border border-border-default bg-[#f5f3ff] p-4">
                       <div className="mb-3 flex items-center justify-between gap-3">
                         <div className="flex items-center gap-2.5">
-                          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#271173] text-xs font-bold text-white">
+                          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary-600 text-xs font-bold text-white">
                             {index + 1}
                           </span>
-                          <p className="text-sm font-medium text-black">Criterio</p>
+                          <p className="text-sm font-medium text-text-primary">Criterio</p>
                         </div>
                         <button
                           type="button"
@@ -819,7 +819,7 @@ export default function AnalysisTab({ agentId, agent, onUpdate, isClient = false
                                 : prev.filter((item) => item.localId !== criterion.localId)
                             )
                           }
-                          className="rounded-md p-1.5 text-black/60 transition-colors hover:bg-rose-50 hover:text-rose-600"
+                          className="rounded-md p-1.5 text-text-secondary transition-colors hover:bg-danger-50 hover:text-danger-600"
                         >
                           <TrashIcon className="h-4 w-4" />
                         </button>
@@ -827,7 +827,7 @@ export default function AnalysisTab({ agentId, agent, onUpdate, isClient = false
 
                       <div className="grid gap-3 lg:grid-cols-[1fr_220px]">
                         <div>
-                          <label className="mb-1.5 block text-xs font-medium text-black/70">
+                          <label className="mb-1.5 block text-xs font-medium text-text-primary/70">
                             Identificador
                           </label>
                           <input
@@ -848,10 +848,10 @@ export default function AnalysisTab({ agentId, agent, onUpdate, isClient = false
                         </div>
 
                         <div>
-                          <label className="mb-1.5 block text-xs font-medium text-black/70">
+                          <label className="mb-1.5 block text-xs font-medium text-text-primary/70">
                             Scope
                           </label>
-                          <div className="inline-flex rounded-xl border border-[#e4e0f5] bg-white p-1">
+                          <div className="inline-flex rounded-xl border border-border-default bg-surface p-1">
                             <button
                               type="button"
                               onClick={() =>
@@ -865,8 +865,8 @@ export default function AnalysisTab({ agentId, agent, onUpdate, isClient = false
                               }
                               className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
                                 isConversationScope
-                                  ? 'bg-[#271173] text-white'
-                                  : 'text-black/60 hover:text-[#271173]'
+                                  ? 'bg-primary-600 text-white'
+                                  : 'text-text-secondary hover:text-primary-600'
                               }`}
                             >
                               conversation
@@ -884,8 +884,8 @@ export default function AnalysisTab({ agentId, agent, onUpdate, isClient = false
                               }
                               className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
                                 !isConversationScope
-                                  ? 'bg-[#271173] text-white'
-                                  : 'text-black/60 hover:text-[#271173]'
+                                  ? 'bg-primary-600 text-white'
+                                  : 'text-text-secondary hover:text-primary-600'
                               }`}
                             >
                               turn
@@ -895,7 +895,7 @@ export default function AnalysisTab({ agentId, agent, onUpdate, isClient = false
                       </div>
 
                       <div className="mt-3">
-                        <label className="mb-1.5 block text-xs font-medium text-black/70">
+                        <label className="mb-1.5 block text-xs font-medium text-text-primary/70">
                           Instruccion de evaluacion
                         </label>
                         <textarea
@@ -915,8 +915,8 @@ export default function AnalysisTab({ agentId, agent, onUpdate, isClient = false
                         />
                       </div>
 
-                      <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-[#e4e0f5] bg-white px-3 py-2.5">
-                        <p className="text-xs text-black/70">
+                      <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-border-default bg-surface px-3 py-2.5">
+                        <p className="text-xs text-text-primary/70">
                           Usar knowledge base durante esta evaluacion
                         </p>
                         <TogglePill
@@ -946,10 +946,10 @@ export default function AnalysisTab({ agentId, agent, onUpdate, isClient = false
             <div className="space-y-4">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <p className="text-sm font-medium text-black">
+                  <p className="text-sm font-medium text-text-primary">
                     Recopilacion de datos
                   </p>
-                  <p className="mt-1 text-xs text-black/60">
+                  <p className="mt-1 text-xs text-text-secondary">
                     la plataforma soporta tipos string, boolean, integer y number
                     para la extraccion estructurada.
                   </p>
@@ -959,7 +959,7 @@ export default function AnalysisTab({ agentId, agent, onUpdate, isClient = false
                   onClick={() =>
                     setDataCollection((prev) => [...prev, createEmptyDataField()])
                   }
-                  className="inline-flex items-center gap-2 rounded-lg border border-[#271173]/30 px-3 py-2 text-xs font-medium text-[#271173] transition-colors hover:border-[#271173]/50 hover:bg-[#ede9ff]"
+                  className="inline-flex items-center gap-2 rounded-lg border border-[#271173]/30 px-3 py-2 text-xs font-medium text-primary-600 transition-colors hover:border-[#271173]/50 hover:bg-primary-50"
                 >
                   <PlusIcon className="h-4 w-4" />
                   Agregar campo
@@ -968,9 +968,9 @@ export default function AnalysisTab({ agentId, agent, onUpdate, isClient = false
 
               <div className="space-y-3">
                 {dataCollection.map((field, index) => (
-                  <div key={field.localId} className="rounded-xl border border-[#e4e0f5] bg-[#f5f3ff] p-4">
+                  <div key={field.localId} className="rounded-xl border border-border-default bg-[#f5f3ff] p-4">
                     <div className="mb-3 flex items-center justify-between gap-3">
-                      <p className="text-sm font-medium text-black">
+                      <p className="text-sm font-medium text-text-primary">
                         Campo {index + 1}
                       </p>
                       <button
@@ -982,7 +982,7 @@ export default function AnalysisTab({ agentId, agent, onUpdate, isClient = false
                               : prev.filter((item) => item.localId !== field.localId)
                           )
                         }
-                        className="rounded-md p-1.5 text-black/60 transition-colors hover:bg-rose-50 hover:text-rose-600"
+                        className="rounded-md p-1.5 text-text-secondary transition-colors hover:bg-danger-50 hover:text-danger-600"
                       >
                         <TrashIcon className="h-4 w-4" />
                       </button>
@@ -990,7 +990,7 @@ export default function AnalysisTab({ agentId, agent, onUpdate, isClient = false
 
                     <div className="grid gap-3 lg:grid-cols-[1fr_260px]">
                       <div>
-                        <label className="mb-1.5 block text-xs font-medium text-black/70">
+                        <label className="mb-1.5 block text-xs font-medium text-text-primary/70">
                           Identificador
                         </label>
                         <input
@@ -1011,10 +1011,10 @@ export default function AnalysisTab({ agentId, agent, onUpdate, isClient = false
                       </div>
 
                       <div>
-                        <label className="mb-1.5 block text-xs font-medium text-black/70">
+                        <label className="mb-1.5 block text-xs font-medium text-text-primary/70">
                           Tipo
                         </label>
-                        <div className="inline-flex flex-wrap rounded-xl border border-[#e4e0f5] bg-white p-1">
+                        <div className="inline-flex flex-wrap rounded-xl border border-border-default bg-surface p-1">
                           {DATA_COLLECTION_TYPES.map((option) => (
                             <button
                               key={option.value}
@@ -1024,8 +1024,8 @@ export default function AnalysisTab({ agentId, agent, onUpdate, isClient = false
                               }
                               className={`rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all duration-150 ${
                                 field.type === option.value
-                                  ? 'bg-[#271173] text-white'
-                                  : 'bg-[#f5f3ff] text-black/60'
+                                  ? 'bg-primary-600 text-white'
+                                  : 'bg-[#f5f3ff] text-text-secondary'
                               } ${
                                 animatingTypeFieldId === field.localId && field.type === option.value
                                   ? 'scale-95'
@@ -1040,7 +1040,7 @@ export default function AnalysisTab({ agentId, agent, onUpdate, isClient = false
                     </div>
 
                     <div className="mt-3">
-                      <label className="mb-1.5 block text-xs font-medium text-black/70">
+                      <label className="mb-1.5 block text-xs font-medium text-text-primary/70">
                         Descripcion
                       </label>
                       <textarea
@@ -1067,12 +1067,12 @@ export default function AnalysisTab({ agentId, agent, onUpdate, isClient = false
 
           {activeConfigTab === 'language' && (
             <div className="max-w-sm">
-              <label className="mb-1.5 block text-sm font-medium text-black">
+              <label className="mb-1.5 block text-sm font-medium text-text-primary">
                 Idioma del analisis
               </label>
-              <p className="mb-3 text-xs text-black/60">
+              <p className="mb-3 text-xs text-text-secondary">
                 Se guarda en
-                <span className="mx-1 rounded bg-[#f0edff] px-1.5 py-0.5 font-mono text-[11px] text-black/70">
+                <span className="mx-1 rounded bg-[#f0edff] px-1.5 py-0.5 font-mono text-[11px] text-text-primary/70">
                   platform_settings.summary_language
                 </span>
                 para definir el idioma del resumen post-conversacion.
@@ -1097,18 +1097,18 @@ export default function AnalysisTab({ agentId, agent, onUpdate, isClient = false
 
       <div>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-          <h3 className="text-sm font-medium text-black/85">
+          <h3 className="text-sm font-medium text-text-primary/85">
             Historial de llamadas
           </h3>
           <div className="inline-flex items-center gap-2">
-            <span className="text-xs text-black/60">
+            <span className="text-xs text-text-secondary">
               Pagina {currentPage}
             </span>
             <button
               type="button"
               onClick={goToPreviousPage}
               disabled={!hasPreviousPage || isFetching}
-              className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-[#e4e0f5] text-black/60 transition-colors hover:bg-[#f5f3ff] hover:text-[#271173] disabled:cursor-not-allowed disabled:opacity-40"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-border-default text-text-secondary transition-colors hover:bg-primary-50/60 hover:text-primary-600 disabled:cursor-not-allowed disabled:opacity-40"
               aria-label="Pagina anterior"
             >
               <ChevronLeftIcon className="h-4 w-4" />
@@ -1117,7 +1117,7 @@ export default function AnalysisTab({ agentId, agent, onUpdate, isClient = false
               type="button"
               onClick={goToNextPage}
               disabled={!hasNextPage || isFetching}
-              className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-[#e4e0f5] text-black/60 transition-colors hover:bg-[#f5f3ff] hover:text-[#271173] disabled:cursor-not-allowed disabled:opacity-40"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-border-default text-text-secondary transition-colors hover:bg-primary-50/60 hover:text-primary-600 disabled:cursor-not-allowed disabled:opacity-40"
               aria-label="Pagina siguiente"
             >
               <ChevronRightIcon className="h-4 w-4" />
@@ -1126,34 +1126,34 @@ export default function AnalysisTab({ agentId, agent, onUpdate, isClient = false
         </div>
         <div className={`${cardClass} overflow-hidden`}>
           {isLoading ? (
-            <div className="flex h-32 items-center justify-center gap-2 text-sm text-black/70">
+            <div className="flex h-32 items-center justify-center gap-2 text-sm text-text-primary/70">
               <div className="h-4 w-4 animate-spin rounded-full border-2 border-[#271173] border-t-transparent" />
               Cargando llamadas...
             </div>
           ) : conversations.length === 0 ? (
             <div className="flex h-32 flex-col items-center justify-center gap-2">
-              <ChatBubbleLeftRightIcon className="h-7 w-7 text-black/50" />
-              <p className="text-sm text-black/60">Sin llamadas registradas</p>
+              <ChatBubbleLeftRightIcon className="h-7 w-7 text-text-tertiary" />
+              <p className="text-sm text-text-secondary">Sin llamadas registradas</p>
             </div>
           ) : (
             <table className="w-full">
               <thead>
-                <tr className="border-b border-[#e4e0f5]">
-                  <th className="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-black/60">
+                <tr className="border-b border-border-default">
+                  <th className="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-text-secondary">
                     ID
                   </th>
-                  <th className="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-black/60">
+                  <th className="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-text-secondary">
                     Inicio
                   </th>
-                  <th className="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-black/60">
+                  <th className="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-text-secondary">
                     Duracion
                   </th>
                   {hasMessagesColumn && (
-                    <th className="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-black/60">
+                    <th className="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-text-secondary">
                       Mensajes
                     </th>
                   )}
-                  <th className="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-black/60">
+                  <th className="px-5 py-3 text-left text-xs font-medium uppercase tracking-wider text-text-secondary">
                     Estado
                   </th>
                   <th className="px-5 py-3" />
@@ -1163,29 +1163,29 @@ export default function AnalysisTab({ agentId, agent, onUpdate, isClient = false
                 {conversations.map((conv) => (
                   <tr
                     key={conv.conversation_id}
-                    className="cursor-pointer transition-colors hover:bg-[#f5f3ff]"
+                    className="cursor-pointer transition-colors hover:bg-primary-50/60"
                     onClick={() => setSelectedConv(conv.conversation_id)}
                   >
                     <td className="px-5 py-3.5">
                       <div className="flex items-center gap-2">
-                        <PhoneIcon className="h-3.5 w-3.5 text-black/60" />
-                        <span className="font-mono text-xs text-black/70" title={conv.conversation_id}>
+                        <PhoneIcon className="h-3.5 w-3.5 text-text-secondary" />
+                        <span className="font-mono text-xs text-text-primary/70" title={conv.conversation_id}>
                           {conv.conversation_id.slice(0, 8)}...
                         </span>
                       </div>
                     </td>
-                    <td className="px-5 py-3.5 text-sm text-black/70">
+                    <td className="px-5 py-3.5 text-sm text-text-primary/70">
                       {formatDate(conv.start_time_unix_secs)}
                     </td>
                     <td className="px-5 py-3.5">
                       <div className="space-y-1">
-                        <div className="flex items-center gap-1.5 text-sm text-black/70">
+                        <div className="flex items-center gap-1.5 text-sm text-text-primary/70">
                           <ClockIcon className="h-3.5 w-3.5" />
                           {formatDuration(conv.call_duration_secs)}
                         </div>
-                        <div className="h-0.5 w-full max-w-30 rounded-full bg-[#271173]/30">
+                        <div className="h-0.5 w-full max-w-30 rounded-full bg-primary-600/30">
                           <div
-                            className="h-full rounded-full bg-[#271173]"
+                            className="h-full rounded-full bg-primary-600"
                             style={{
                               width: `${Math.max(
                                 4,
@@ -1199,7 +1199,7 @@ export default function AnalysisTab({ agentId, agent, onUpdate, isClient = false
                       </div>
                     </td>
                     {hasMessagesColumn && (
-                      <td className="px-5 py-3.5 text-sm text-black/70">
+                      <td className="px-5 py-3.5 text-sm text-text-primary/70">
                         {getConversationMessageCount(conv) ?? '-'}
                       </td>
                     )}
@@ -1207,7 +1207,7 @@ export default function AnalysisTab({ agentId, agent, onUpdate, isClient = false
                       <StatusBadge status={conv.status} />
                     </td>
                     <td className="px-5 py-3.5 text-right">
-                      <ChevronRightIcon className="inline h-4 w-4 text-black/60" />
+                      <ChevronRightIcon className="inline h-4 w-4 text-text-secondary" />
                     </td>
                   </tr>
                 ))}

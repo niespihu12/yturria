@@ -19,8 +19,9 @@ Construida con **FastAPI + SQLModel + LangGraph**. Soporta agentes de voz (Eleve
 10. [Variables de entorno](#variables-de-entorno)
 11. [Migración de esquema](#migración-de-esquema)
 12. [Operación en producción](#operación-en-producción)
-13. [Suite de pruebas](#suite-de-pruebas)
-14. [Checklist de salida](#checklist-de-salida)
+13. [Despliegue con Docker](#despliegue-con-docker)
+14. [Suite de pruebas](#suite-de-pruebas)
+15. [Checklist de salida](#checklist-de-salida)
 
 ---
 
@@ -390,9 +391,16 @@ cp .env.example .env   # editar DATABASE_URL, SECRET_KEY, FERNET_KEY, …
 # Arrancar (desarrollo)
 uv run uvicorn app.main:app --reload --port 8000
 
-# Arrancar (producción)
-uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
+# Arrancar (producción) — UN solo worker: el rate limiter y el scheduler de
+# renovaciones viven en memoria del proceso. Para escalar horizontalmente hace
+# falta mover ambos a un store compartido (p. ej. Redis) antes.
+uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers
 ```
+
+Al arrancar, el lifespan aplica migraciones idempotentes (`ensure_*` en `main.py`).
+Algunas amplían columnas `TEXT` a `LONGTEXT` en MySQL: en tablas grandes el
+`ALTER TABLE` reconstruye la tabla, así que conviene hacer backup y arrancar la
+nueva versión en una ventana de mantenimiento.
 
 ### Scheduler de renovaciones
 
@@ -428,10 +436,49 @@ Sofia graph error                         ← error en LangGraph
 
 ---
 
-## Suite de pruebas
+## Despliegue con Docker
+
+`docker-compose.yml` levanta MySQL 8.4, el backend (uvicorn, usuario no-root) y el
+frontend (nginx). nginx sirve el SPA y reenvía `/api/` al backend, así que el
+navegador usa un solo origen y el frontend se compila con `VITE_API_URL=/api`.
 
 ```bash
-uv run pytest                          # todos los tests
+# 1. Configuración del backend (secretos reales; nunca se copian a la imagen)
+cp backend/.env.example backend/.env      # APP_ENV=production, JWT_SECRET, TEXT_AGENTS_SECRET_KEY, ...
+
+# 2. Variables de la base de datos para compose (.env en la raíz del repo o entorno).
+#    MYSQL_PASSWORD se inserta en DATABASE_URL: usar solo letras y números
+#    (una "@" o un "%" rompen la URL). Por ejemplo: openssl rand -hex 24
+export MYSQL_ROOT_PASSWORD=...  MYSQL_PASSWORD=...
+
+# 3. Construir y levantar
+docker compose up -d --build
+
+# Backup cifrado bajo demanda
+BACKUP_ENCRYPT_PASSPHRASE=... docker compose --profile backup run --rm backup
+```
+
+Notas de producción:
+
+- Poner TLS delante (balanceador, Cloudflare o nginx del host) y definir
+  `FRONTEND_URL`, `CORS_ORIGINS` y `BACKEND_PUBLIC_URL` con las URLs públicas https.
+- `BACKEND_PUBLIC_URL` (con `/api`) es el redirect de Google OAuth y la URL que
+  firma Twilio; los webhooks de Meta/Twilio apuntan a `https://<dominio>/api/webhooks/...`.
+- Los webhooks de WhatsApp exigen firma: configurar el **App Secret** de Meta o el
+  **Auth Token** de Twilio en cada agente (o `WHATSAPP_ALLOW_UNSIGNED_WEBHOOKS=true` solo en desarrollo).
+- El backend solo se publica en `127.0.0.1:8000`; todo el tráfico público entra por nginx.
+
+---
+
+## Suite de pruebas
+
+Las pruebas nunca tocan la base real ni servicios pagos: `tests/conftest.py` fuerza
+SQLite en memoria, bloquea toda llamada HTTP saliente y reemplaza el LLM de Sofía
+por uno determinista.
+
+```bash
+uv run pytest                          # todos los tests (unitarios + API HTTP)
+uv run pytest tests/api -v             # integración HTTP (TestClient + SQLite)
 uv run pytest tests/ -v                # con detalle
 uv run pytest -k acceptance            # solo suite de aceptación
 uv run pytest -k legal_notice         # cumplimiento legal
@@ -452,6 +499,20 @@ uv run pytest -k escalation_threshold # threshold configurable
 | `test_sofia_datetime_parser_unit.py` | Parser de fechas para citas |
 | `test_appointment_unix_timezone_unit.py` | Conversión de zonas horarias |
 | `test_google_calendar_service_unit.py` | Integración Google Calendar |
+| `tests/api/test_api_auth.py`, `test_api_security.py` | Registro, login, MFA, reset, revocación de sesiones, rate limit, privacidad, auditoría, CORS |
+| `tests/api/test_api_voice_*.py`, `test_api_calendar_oauth.py` | Aislamiento de tenants en KB de voz, allow-list de agentes, contactos E.164, citas, OAuth de Google |
+| `tests/api/test_api_text_agents_fixes.py`, `test_api_webhooks_whatsapp.py` | SSRF en tools, subida a KB (PDF), firma e idempotencia de webhooks |
+
+### Pruebas end-to-end (Playwright)
+
+Levantan el backend real contra una SQLite desechable (`backend/e2e.db`, sembrada por
+`scripts/seed_e2e.py`) y el frontend en modo dev; las claves externas quedan vacías
+y el LLM apunta a un puerto cerrado.
+
+```bash
+cd frontend
+npm run test:e2e          # usa el Chrome instalado; en CI, el Chromium de Playwright
+```
 
 ### Matriz de cobertura — suite de aceptación
 
@@ -477,6 +538,7 @@ uv run pytest -k escalation_threshold # threshold configurable
 ### Antes de merge a `main`
 
 - [ ] `uv run pytest` — 0 fallos
+- [ ] `npm run lint`, `npm run build` y `npm run test:e2e` en `frontend/` — 0 fallos
 - [ ] `test_zzz_pipeline_compliance_rate` — tasa ≥ 90%
 - [ ] Variables de entorno de producción actualizadas (`.env` / secrets manager)
 - [ ] `RENEWAL_REMINDER_DAYS_AHEAD` revisado para el horizonte de negocio

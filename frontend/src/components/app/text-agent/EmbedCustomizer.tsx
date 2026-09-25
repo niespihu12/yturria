@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'react-toastify'
 import { ClipboardDocumentIcon, CheckIcon, ArrowPathIcon } from '@heroicons/react/24/outline'
@@ -117,13 +117,6 @@ export default function EmbedCustomizer({ agentId, config }: Props) {
   const [position, setPosition] = useState(config.embed_position || 'bottom-right')
   const [logoUrl, setLogoUrl] = useState(config.embed_logo_url || '')
   const [isDirty, setIsDirty] = useState(false)
-
-  useEffect(() => {
-    setColor(config.embed_primary_color || '#271173')
-    setPosition(config.embed_position || 'bottom-right')
-    setLogoUrl(config.embed_logo_url || '')
-    setIsDirty(false)
-  }, [config.agent_id])
 
   const { mutate: save, isPending } = useMutation({
     mutationFn: () =>

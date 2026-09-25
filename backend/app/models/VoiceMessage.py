@@ -1,7 +1,12 @@
 from datetime import datetime
 from uuid import uuid4
 
+from sqlalchemy import Column, Text
+from sqlalchemy.dialects.mysql import LONGTEXT
 from sqlmodel import Field, SQLModel
+
+# TEXT en MySQL solo admite 64 KB; transcripciones y notas pueden superarlo.
+LONG_TEXT = Text().with_variant(LONGTEXT(), "mysql")
 
 
 class VoiceMessage(SQLModel, table=True):
@@ -12,8 +17,8 @@ class VoiceMessage(SQLModel, table=True):
     voice_agent_id: str = Field(index=True, nullable=False)
     caller_number: str = Field(nullable=False)
     requested_person: str = Field(default="", nullable=False)
-    message_summary: str = Field(default="", nullable=False)
-    full_transcript: str = Field(default="", nullable=False)
+    message_summary: str = Field(default="", sa_column=Column(LONG_TEXT, nullable=False))
+    full_transcript: str = Field(default="", sa_column=Column(LONG_TEXT, nullable=False))
     whatsapp_sent: bool = Field(default=False, nullable=False)
     whatsapp_sent_at: datetime | None = Field(default=None, nullable=True)
     created_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)

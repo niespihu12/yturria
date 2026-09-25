@@ -9,7 +9,7 @@ import {
   ChevronDownIcon,
   ChevronUpIcon,
 } from '@heroicons/react/24/outline'
-import { getTextAgents, getSofiaErrors, updateSofiaErrorLabel, getSofiaErrorsExportUrl } from '@/api/TextAgentsAPI'
+import { getTextAgents, getSofiaErrors, updateSofiaErrorLabel, downloadSofiaErrorsCsv } from '@/api/TextAgentsAPI'
 import type { TextAgentSummary, SofiaError, SofiaErrorLabel } from '@/types/textAgent'
 
 function formatDate(unixSecs: number) {
@@ -158,7 +158,7 @@ export default function SofiaErrorsView() {
   })
 
   const handleExport = () => {
-    window.open(getSofiaErrorsExportUrl(selectedAgentId), '_blank')
+    downloadSofiaErrorsCsv(selectedAgentId).catch((error: Error) => toast.error(error.message))
   }
 
   return (

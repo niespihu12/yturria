@@ -66,6 +66,10 @@ _OPTIONAL_WARN: dict[str, str] = {
     "MAIL_PASSWORD": (
         "Necesaria para envío de correo (confirmación, reset de contraseña)"
     ),
+    "TEXT_AGENTS_SECRET_KEY": (
+        "Clave dedicada para cifrar credenciales (WhatsApp, proveedores, Google). "
+        "Sin ella se deriva de JWT_SECRET y rotar JWT_SECRET impide descifrarlas"
+    ),
 }
 
 _JWT_MIN_LENGTH = 32

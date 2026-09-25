@@ -31,7 +31,7 @@ def get_email_settings() -> EmailSettings:
     mail_password = os.getenv("MAIL_PASSWORD") or os.getenv("SMTP_PASS", "")
     mail_server = os.getenv("MAIL_SERVER") or os.getenv("SMTP_HOST", "")
     mail_port = int(os.getenv("MAIL_PORT") or os.getenv("SMTP_PORT") or "465")
-    from_name = os.getenv("MAIL_FROM_NAME", "UpTask")
+    from_name = os.getenv("MAIL_FROM_NAME", "AOS")
     from_email = os.getenv("MAIL_FROM_EMAIL", mail_user)
 
     return EmailSettings(

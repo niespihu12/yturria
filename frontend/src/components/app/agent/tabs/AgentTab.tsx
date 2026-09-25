@@ -33,12 +33,12 @@ type Props = {
 }
 
 const inputClass =
-  'w-full bg-white border border-[#e4e0f5] text-black rounded-xl px-3 py-2.5 text-sm placeholder:text-black/40 focus:outline-none focus:border-[#271173] transition-colors resize-none'
+  'w-full bg-surface border border-border-default text-text-primary rounded-xl px-3 py-2.5 text-sm placeholder:text-text-primary/40 focus:outline-none focus:border-primary-500 transition-colors resize-none'
 
-const labelClass = 'block text-sm font-medium text-black/80 mb-1.5'
+const labelClass = 'block text-sm font-medium text-text-primary mb-1.5'
 
 const selectClass =
-  'w-full bg-white border border-[#e4e0f5] text-black rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-[#271173] transition-colors appearance-none'
+  'w-full bg-surface border border-border-default text-text-primary rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-primary-500 transition-colors appearance-none'
 
 const LLM_DESCRIPTIONS: Record<string, string> = {
   'gemini-2.5-flash': 'Rapido y eficiente para tareas generales.',
@@ -76,7 +76,7 @@ const TTS_MODEL_DESCRIPTION: Record<string, string> = {
 }
 
 const ChevronDown = () => (
-  <svg className="w-4 h-4 text-black/40" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+  <svg className="w-4 h-4 text-text-primary/40" fill="none" viewBox="0 0 24 24" stroke="currentColor">
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
   </svg>
 )
@@ -92,12 +92,12 @@ function SectionHeader({
 }) {
   return (
     <div className="mb-5 flex items-start gap-3">
-      <div className="rounded-lg border border-[#e4e0f5] bg-[#f5f3ff] p-2">
-        <Icon className="h-4 w-4 text-[#271173]" />
+      <div className="rounded-lg border border-border-default bg-[#f5f3ff] p-2">
+        <Icon className="h-4 w-4 text-primary-600" />
       </div>
       <div>
-        <h3 className="text-sm font-semibold text-black">{title}</h3>
-        <p className="mt-1 text-xs text-black/55">{description}</p>
+        <h3 className="text-sm font-semibold text-text-primary">{title}</h3>
+        <p className="mt-1 text-xs text-text-secondary">{description}</p>
       </div>
     </div>
   )
@@ -114,11 +114,11 @@ function TogglePill({
     <div
       onClick={onClick}
       className={`relative h-5 w-10 cursor-pointer rounded-full transition-colors duration-200 ${
-        enabled ? 'bg-[#271173]' : 'bg-black/20'
+        enabled ? 'bg-primary-600' : 'bg-black/20'
       }`}
     >
       <div
-        className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform duration-200 ${
+        className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-surface shadow transition-transform duration-200 ${
           enabled ? 'translate-x-5' : 'translate-x-0'
         }`}
       />
@@ -255,7 +255,7 @@ export default function AgentTab({
           <div>
             <label className={labelClass}>
               Mensaje del sistema
-              <span className="ml-1.5 text-xs text-black/45 font-normal">
+              <span className="ml-1.5 text-xs text-text-muted font-normal">
                 Define la personalidad y contexto del agente
               </span>
             </label>
@@ -263,17 +263,17 @@ export default function AgentTab({
               rows={10}
               placeholder="Eres un asistente de voz amigable y profesional. Tu objetivo es..."
               className={`${inputClass} ${
-                isClient ? 'cursor-not-allowed bg-[#fafafa] text-black/65' : ''
+                isClient ? 'cursor-not-allowed bg-[#fafafa] text-text-secondary' : ''
               }`}
               readOnly={isClient}
               {...register('prompt')}
             />
             {isClient && (
-              <p className="mt-1 text-xs text-black/45">
+              <p className="mt-1 text-xs text-text-muted">
                 Este campo está bloqueado por política para cliente final.
               </p>
             )}
-            <p className="mt-1 text-right text-xs text-black/40">{promptLength} caracteres</p>
+            <p className="mt-1 text-right text-xs text-text-primary/40">{promptLength} caracteres</p>
             {errors.prompt && (
               <p className="text-red-500 text-xs mt-1">{errors.prompt.message}</p>
             )}
@@ -282,7 +282,7 @@ export default function AgentTab({
           <div>
             <label className={labelClass}>
               Primer mensaje
-              <span className="ml-1.5 text-xs text-black/45 font-normal">
+              <span className="ml-1.5 text-xs text-text-muted font-normal">
                 Lo primero que dira el agente al iniciar la conversacion
               </span>
             </label>
@@ -290,27 +290,27 @@ export default function AgentTab({
               rows={3}
               placeholder="Hola, en que puedo ayudarte hoy?"
               className={`${inputClass} ${
-                isClient ? 'cursor-not-allowed bg-[#fafafa] text-black/65' : ''
+                isClient ? 'cursor-not-allowed bg-[#fafafa] text-text-secondary' : ''
               }`}
               readOnly={isClient}
               {...register('first_message')}
             />
             {isClient && (
-              <p className="mt-1 text-xs text-black/45">
+              <p className="mt-1 text-xs text-text-muted">
                 Este saludo está bloqueado por política para cliente final.
               </p>
             )}
           </div>
 
-          <div className="space-y-4 rounded-xl border border-[#e4e0f5] bg-[#f8f7ff] p-4">
+          <div className="space-y-4 rounded-xl border border-border-default bg-[#f8f7ff] p-4">
             <div>
-              <p className="text-sm font-medium text-black">Escalacion y WhatsApp</p>
-              <p className="mt-1 text-xs text-black/55">
+              <p className="text-sm font-medium text-text-primary">Escalacion y WhatsApp</p>
+              <p className="mt-1 text-xs text-text-secondary">
                 Permite que este agente escale por llamada o por WhatsApp segun tu configuracion.
               </p>
             </div>
 
-            <label className="inline-flex items-center gap-2 rounded-lg bg-white px-3 py-2 text-sm text-black/80">
+            <label className="inline-flex items-center gap-2 rounded-lg bg-surface px-3 py-2 text-sm text-text-primary">
               <input
                 type="checkbox"
                 checked={runtimeForm.whatsapp_enabled}
@@ -325,7 +325,7 @@ export default function AgentTab({
             </label>
 
             <div className="grid gap-4 md:grid-cols-2">
-              <label className="flex flex-col gap-1.5 text-sm font-medium text-black/80">
+              <label className="flex flex-col gap-1.5 text-sm font-medium text-text-primary">
                 Canal de escalacion por defecto
                 <select
                   className={selectClass}
@@ -343,7 +343,7 @@ export default function AgentTab({
                 </select>
               </label>
 
-              <label className="flex flex-col gap-1.5 text-sm font-medium text-black/80">
+              <label className="flex flex-col gap-1.5 text-sm font-medium text-text-primary">
                 Numero de transferencia (phone)
                 <input
                   type="text"
@@ -365,7 +365,7 @@ export default function AgentTab({
                 type="button"
                 onClick={() => saveRuntimeConfig()}
                 disabled={isSavingRuntimeConfig || !hasRuntimeChanges}
-                className="inline-flex items-center gap-2 rounded-xl bg-[#271173] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#1f0d5a] disabled:opacity-50"
+                className="inline-flex items-center gap-2 rounded-xl bg-primary-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-primary-700 disabled:opacity-50"
               >
                 {isSavingRuntimeConfig ? 'Guardando...' : 'Guardar escalacion'}
               </button>
@@ -373,10 +373,10 @@ export default function AgentTab({
           </div>
 
           {!isClient && (
-            <div className="flex items-center justify-between gap-4 rounded-xl border border-[#e4e0f5] bg-white p-4">
+            <div className="flex items-center justify-between gap-4 rounded-xl border border-border-default bg-surface p-4">
               <div>
-                <p className="text-sm font-medium text-black">Ignorar personalidad por defecto</p>
-                <p className="mt-1 text-xs text-black/50">
+                <p className="text-sm font-medium text-text-primary">Ignorar personalidad por defecto</p>
+                <p className="mt-1 text-xs text-text-tertiary">
                   El agente no adoptara la personalidad amigable predeterminada de la plataforma
                 </p>
               </div>
@@ -393,7 +393,7 @@ export default function AgentTab({
         </div>
       </section>
 
-      <section className="border-t border-[#e4e0f5] pt-8">
+      <section className="border-t border-border-default pt-8">
         <SectionHeader
           icon={SpeakerWaveIcon}
           title="Voz"
@@ -402,7 +402,7 @@ export default function AgentTab({
 
         <div className="space-y-6">
           <div>
-            <p className="mb-2 text-sm font-medium text-black">Seleccion de voz</p>
+            <p className="mb-2 text-sm font-medium text-text-primary">Seleccion de voz</p>
             <div className="flex items-start gap-3">
               <div className="relative flex-1">
                 <select
@@ -435,7 +435,7 @@ export default function AgentTab({
                 type="button"
                 disabled={!selectedVoiceId || previewing}
                 onClick={handleVoicePreview}
-                className="inline-flex h-10.5 min-w-35 items-center justify-center gap-2 rounded-xl border border-[#271173]/30 bg-white px-3 text-sm font-medium text-[#271173] transition-colors hover:bg-[#f5f3ff] disabled:cursor-not-allowed disabled:opacity-55"
+                className="inline-flex h-10.5 min-w-35 items-center justify-center gap-2 rounded-xl border border-[#271173]/30 bg-surface px-3 text-sm font-medium text-primary-600 transition-colors hover:bg-primary-50/60 disabled:cursor-not-allowed disabled:opacity-55"
               >
                 {previewing ? (
                   <>
@@ -448,8 +448,8 @@ export default function AgentTab({
               </button>
             </div>
             {selectedVoice && (
-              <div className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-[#e4e0f5] bg-[#f5f3ff] px-2.5 py-1 text-xs text-black/70">
-                <SpeakerWaveIcon className="h-3 w-3 text-[#271173]" />
+              <div className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-border-default bg-[#f5f3ff] px-2.5 py-1 text-xs text-text-primary/70">
+                <SpeakerWaveIcon className="h-3 w-3 text-primary-600" />
                 <span>{selectedVoice.name}</span>
               </div>
             )}
@@ -480,23 +480,23 @@ export default function AgentTab({
                   <ChevronDown />
                 </div>
               </div>
-              <div className="mt-2 inline-flex rounded-full bg-[#ede9ff] px-2 py-1 text-xs text-[#271173]">
+              <div className="mt-2 inline-flex rounded-full bg-primary-50 px-2 py-1 text-xs text-primary-600">
                 {selectedTtsDescription}
               </div>
             </div>
           )}
 
           {!isClient && (
-          <div className="space-y-5 rounded-xl border border-[#e4e0f5] bg-white p-4">
-            <p className="text-sm font-medium text-black">Parametros de voz</p>
+          <div className="space-y-5 rounded-xl border border-border-default bg-surface p-4">
+            <p className="text-sm font-medium text-text-primary">Parametros de voz</p>
 
             <div>
               <div className="mb-2 flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-medium text-black">Estabilidad</p>
-                  <p className="text-xs text-black/50">Mayor = mas uniforme, menos expresivo</p>
+                  <p className="text-sm font-medium text-text-primary">Estabilidad</p>
+                  <p className="text-xs text-text-tertiary">Mayor = mas uniforme, menos expresivo</p>
                 </div>
-                <span className="min-w-12 rounded-lg bg-[#ede9ff] px-2.5 py-1 text-center text-sm font-semibold text-[#271173]">
+                <span className="min-w-12 rounded-lg bg-primary-50 px-2.5 py-1 text-center text-sm font-semibold text-primary-600">
                   {stability.toFixed(2)}
                 </span>
               </div>
@@ -505,10 +505,10 @@ export default function AgentTab({
                 min={0}
                 max={1}
                 step={0.01}
-                className="w-full h-1.5 rounded-full appearance-none bg-[#e4e0f5] [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[#271173] [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:shadow-md"
+                className="w-full h-1.5 rounded-full appearance-none bg-[#e4e0f5] [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary-600 [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:shadow-md"
                 {...register('stability', { valueAsNumber: true })}
               />
-              <div className="mt-1 flex justify-between text-xs text-black/40">
+              <div className="mt-1 flex justify-between text-xs text-text-primary/40">
                 <span>Variable</span>
                 <span>Estable</span>
               </div>
@@ -517,10 +517,10 @@ export default function AgentTab({
             <div>
               <div className="mb-2 flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-medium text-black">Claridad y similitud</p>
-                  <p className="text-xs text-black/50">Que tanto adherirse a la voz original</p>
+                  <p className="text-sm font-medium text-text-primary">Claridad y similitud</p>
+                  <p className="text-xs text-text-tertiary">Que tanto adherirse a la voz original</p>
                 </div>
-                <span className="min-w-12 rounded-lg bg-[#ede9ff] px-2.5 py-1 text-center text-sm font-semibold text-[#271173]">
+                <span className="min-w-12 rounded-lg bg-primary-50 px-2.5 py-1 text-center text-sm font-semibold text-primary-600">
                   {similarityBoost.toFixed(2)}
                 </span>
               </div>
@@ -529,10 +529,10 @@ export default function AgentTab({
                 min={0}
                 max={1}
                 step={0.01}
-                className="w-full h-1.5 rounded-full appearance-none bg-[#e4e0f5] [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[#271173] [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:shadow-md"
+                className="w-full h-1.5 rounded-full appearance-none bg-[#e4e0f5] [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary-600 [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:shadow-md"
                 {...register('similarity_boost', { valueAsNumber: true })}
               />
-              <div className="mt-1 flex justify-between text-xs text-black/40">
+              <div className="mt-1 flex justify-between text-xs text-text-primary/40">
                 <span>Libre</span>
                 <span>Fiel</span>
               </div>
@@ -541,10 +541,10 @@ export default function AgentTab({
             <div>
               <div className="mb-2 flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-medium text-black">Exageracion de estilo</p>
-                  <p className="text-xs text-black/50">Amplifica el estilo del hablante</p>
+                  <p className="text-sm font-medium text-text-primary">Exageracion de estilo</p>
+                  <p className="text-xs text-text-tertiary">Amplifica el estilo del hablante</p>
                 </div>
-                <span className="min-w-12 rounded-lg bg-[#ede9ff] px-2.5 py-1 text-center text-sm font-semibold text-[#271173]">
+                <span className="min-w-12 rounded-lg bg-primary-50 px-2.5 py-1 text-center text-sm font-semibold text-primary-600">
                   {style.toFixed(2)}
                 </span>
               </div>
@@ -553,10 +553,10 @@ export default function AgentTab({
                 min={0}
                 max={1}
                 step={0.01}
-                className="w-full h-1.5 rounded-full appearance-none bg-[#e4e0f5] [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[#271173] [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:shadow-md"
+                className="w-full h-1.5 rounded-full appearance-none bg-[#e4e0f5] [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary-600 [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:shadow-md"
                 {...register('style', { valueAsNumber: true })}
               />
-              <div className="mt-1 flex justify-between text-xs text-black/40">
+              <div className="mt-1 flex justify-between text-xs text-text-primary/40">
                 <span>Neutro</span>
                 <span>Exagerado</span>
               </div>
@@ -565,10 +565,10 @@ export default function AgentTab({
             <div>
               <div className="mb-2 flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-medium text-black">Velocidad de habla</p>
-                  <p className="text-xs text-black/50">Velocidad del agente al hablar</p>
+                  <p className="text-sm font-medium text-text-primary">Velocidad de habla</p>
+                  <p className="text-xs text-text-tertiary">Velocidad del agente al hablar</p>
                 </div>
-                <span className="min-w-12 rounded-lg bg-[#ede9ff] px-2.5 py-1 text-center text-sm font-semibold text-[#271173]">
+                <span className="min-w-12 rounded-lg bg-primary-50 px-2.5 py-1 text-center text-sm font-semibold text-primary-600">
                   {speed.toFixed(2)}
                 </span>
               </div>
@@ -577,10 +577,10 @@ export default function AgentTab({
                 min={0.7}
                 max={1.2}
                 step={0.05}
-                className="w-full h-1.5 rounded-full appearance-none bg-[#e4e0f5] [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[#271173] [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:shadow-md"
+                className="w-full h-1.5 rounded-full appearance-none bg-[#e4e0f5] [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary-600 [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:shadow-md"
                 {...register('speed', { valueAsNumber: true })}
               />
-              <div className="mt-1 flex justify-between text-xs text-black/40">
+              <div className="mt-1 flex justify-between text-xs text-text-primary/40">
                 <span>Lento</span>
                 <span>Rapido</span>
               </div>
@@ -591,7 +591,7 @@ export default function AgentTab({
         </div>
       </section>
 
-      <section className="border-t border-[#e4e0f5] pt-8">
+      <section className="border-t border-border-default pt-8">
         <SectionHeader
           icon={LanguageIcon}
           title="Idioma y LLM"
@@ -626,7 +626,7 @@ export default function AgentTab({
                 </div>
               </div>
               {autoLanguageDetection && !isClient && (
-                <p className="mt-1 text-xs text-black/45">
+                <p className="mt-1 text-xs text-text-muted">
                   Desactiva la deteccion automatica para fijar un idioma.
                 </p>
               )}
@@ -657,7 +657,7 @@ export default function AgentTab({
                     <ChevronDown />
                   </div>
                 </div>
-                <p className="mt-1.5 text-xs text-black/50">{llmDescription}</p>
+                <p className="mt-1.5 text-xs text-text-tertiary">{llmDescription}</p>
               </div>
             )}
           </div>
@@ -666,10 +666,10 @@ export default function AgentTab({
             <div>
               <div className="mb-2 flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-medium text-black">Temperatura</p>
-                  <p className="text-xs text-black/50">Mayor = respuestas mas creativas y variadas</p>
+                  <p className="text-sm font-medium text-text-primary">Temperatura</p>
+                  <p className="text-xs text-text-tertiary">Mayor = respuestas mas creativas y variadas</p>
                 </div>
-                <span className="min-w-12 rounded-lg bg-[#ede9ff] px-2.5 py-1 text-center text-sm font-semibold text-[#271173]">
+                <span className="min-w-12 rounded-lg bg-primary-50 px-2.5 py-1 text-center text-sm font-semibold text-primary-600">
                   {llmTemperature.toFixed(2)}
                 </span>
               </div>
@@ -678,10 +678,10 @@ export default function AgentTab({
                 min={0}
                 max={1}
                 step={0.05}
-                className="w-full h-1.5 rounded-full appearance-none bg-[#e4e0f5] [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[#271173] [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:shadow-md"
+                className="w-full h-1.5 rounded-full appearance-none bg-[#e4e0f5] [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary-600 [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:shadow-md"
                 {...register('llm_temperature', { valueAsNumber: true })}
               />
-              <div className="mt-1 flex justify-between text-xs text-black/40">
+              <div className="mt-1 flex justify-between text-xs text-text-primary/40">
                 <span>Preciso</span>
                 <span>Creativo</span>
               </div>
@@ -691,7 +691,7 @@ export default function AgentTab({
           {!isClient && (
             <div>
               <label className={labelClass}>Maximo de tokens</label>
-              <p className="mb-2 text-xs text-black/50">Limite de tokens por respuesta del LLM</p>
+              <p className="mb-2 text-xs text-text-tertiary">Limite de tokens por respuesta del LLM</p>
               <input
                 type="number"
                 min={-1}
@@ -706,7 +706,7 @@ export default function AgentTab({
       </section>
 
       {!isClient && (
-      <section className="border-t border-[#e4e0f5] pt-8">
+      <section className="border-t border-border-default pt-8">
         <SectionHeader
           icon={ChatBubbleLeftRightIcon}
           title="Conversacion"
@@ -714,10 +714,10 @@ export default function AgentTab({
         />
 
         <div className="space-y-4">
-          <div className="flex items-center justify-between gap-4 rounded-xl border border-[#e4e0f5] bg-white p-4">
+          <div className="flex items-center justify-between gap-4 rounded-xl border border-border-default bg-surface p-4">
             <div>
-              <p className="text-sm font-medium text-black">Deteccion de idioma automatica</p>
-              <p className="mt-1 text-xs text-black/50">
+              <p className="text-sm font-medium text-text-primary">Deteccion de idioma automatica</p>
+              <p className="mt-1 text-xs text-text-tertiary">
                 El agente detecta el idioma del usuario automaticamente
               </p>
             </div>
@@ -733,7 +733,7 @@ export default function AgentTab({
 
           <div>
             <label className={labelClass}>Silencio maximo (ms)</label>
-            <p className="mb-2 text-xs text-black/50">
+            <p className="mb-2 text-xs text-text-tertiary">
               Tiempo de silencio tras el cual el agente responde
             </p>
             <input
@@ -746,10 +746,10 @@ export default function AgentTab({
             />
           </div>
 
-          <div className="flex items-center justify-between gap-4 rounded-xl border border-[#e4e0f5] bg-white p-4">
+          <div className="flex items-center justify-between gap-4 rounded-xl border border-border-default bg-surface p-4">
             <div>
-              <p className="text-sm font-medium text-black">Grabacion de llamadas</p>
-              <p className="mt-1 text-xs text-black/50">
+              <p className="text-sm font-medium text-text-primary">Grabacion de llamadas</p>
+              <p className="mt-1 text-xs text-text-tertiary">
                 Guarda el audio de las conversaciones en la plataforma
               </p>
             </div>

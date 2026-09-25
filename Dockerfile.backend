@@ -2,10 +2,13 @@ FROM python:3.12-slim AS builder
 
 WORKDIR /app
 
-RUN pip install uv
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy
+
+RUN pip install --no-cache-dir uv
 
 COPY backend/pyproject.toml backend/uv.lock ./
-RUN uv sync --frozen --no-dev
+RUN uv sync --frozen --no-dev --no-install-project
 
 COPY backend/ .
 
@@ -17,18 +20,22 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     default-mysql-client \
     openssl \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --create-home --uid 10001 app
 
-COPY --from=builder /app /app
-COPY --from=builder /root/.local /root/.local
+COPY --from=builder --chown=app:app /app /app
 
-ENV PATH="/root/.local/bin:$PATH"
-ENV PYTHONUNBUFFERED=1
-ENV PYTHONDONTWRITEBYTECODE=1
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+USER app
 
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1
 
-CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Un solo worker: el rate limiter y el scheduler de renovaciones viven en memoria.
+# Las cabeceras de proxy se aceptan desde FORWARDED_ALLOW_IPS (ver docker-compose.yml).
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]

@@ -35,7 +35,13 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(HTTPException)
     async def http_exception_handler(_: Request, exc: HTTPException) -> JSONResponse:
         detail = exc.detail if isinstance(exc.detail, str) else "Hubo un error"
-        return JSONResponse(status_code=exc.status_code, content={"error": detail})
+        # Keep headers such as WWW-Authenticate: the frontend uses it to tell an
+        # expired session apart from a 401 for a wrong password.
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"error": detail},
+            headers=getattr(exc, "headers", None),
+        )
 
     @app.exception_handler(RequestValidationError)
     async def request_validation_exception_handler(

@@ -8,6 +8,11 @@ import os
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from dotenv import load_dotenv
+
+# Cargar .env aquí evita depender del orden de imports para leer el secreto real.
+load_dotenv()
+
 JWT_SECRET = os.getenv("JWT_SECRET", "change-me")
 JWT_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRE_MINUTES", "1440"))
 
@@ -53,13 +58,14 @@ def generate_jwt(payload: dict[str, Any], *, expires_minutes: int | None = None)
 def decode_jwt(token: str) -> dict[str, Any]:
     try:
         encoded_header, encoded_payload, encoded_signature = token.split(".", maxsplit=2)
-    except ValueError as exc:
+        signing_input = f"{encoded_header}.{encoded_payload}".encode("ascii")
+        signature_ok = hmac.compare_digest(
+            _sign(signing_input).encode("ascii"), encoded_signature.encode("ascii")
+        )
+    except (ValueError, TypeError) as exc:
         raise ValueError("Token invalido") from exc
 
-    signing_input = f"{encoded_header}.{encoded_payload}".encode("ascii")
-    expected_signature = _sign(signing_input)
-
-    if not hmac.compare_digest(expected_signature, encoded_signature):
+    if not signature_ok:
         raise ValueError("Token invalido")
 
     try:

@@ -522,25 +522,24 @@ export default function DashboardView() {
   return (
     <div
       className="h-full overflow-y-auto no-visible-scrollbar"
-      style={{ fontFamily: "'Sora', sans-serif" }}
     >
       <div className="mx-auto w-full max-w-360 space-y-6 px-8 py-8">
         {!isClientView && (
-          <section className="section-enter relative overflow-hidden rounded-[30px] border border-[#d8d3ee] bg-white p-8 shadow-sm">
-            <div className="pointer-events-none absolute -right-24 -top-24 h-64 w-64 rounded-full bg-[#271173]/10 blur-3xl" />
-            <div className="pointer-events-none absolute -bottom-28 left-1/3 h-72 w-72 rounded-full bg-[#0ea5e9]/10 blur-3xl" />
+          <section className="section-enter relative overflow-hidden rounded-3xl border border-border-default bg-surface p-8 shadow-sm">
+            <div className="pointer-events-none absolute -right-24 -top-24 h-64 w-64 rounded-full bg-primary-600/10 blur-3xl" />
+            <div className="pointer-events-none absolute -bottom-28 left-1/3 h-72 w-72 rounded-full bg-info-500/10 blur-3xl" />
 
             <div className="relative flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
               <div className="max-w-3xl">
-                <p className="inline-flex items-center gap-1.5 rounded-full border border-[#d8d3ee] bg-[#f7f5ff] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#271173]">
+                <p className="inline-flex items-center gap-1.5 rounded-full border border-primary-200 bg-primary-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-primary-700">
                   <SparklesIcon className="h-3.5 w-3.5" />
                   Pulse Control Center
                 </p>
-                <h1 className="mt-4 text-4xl font-semibold leading-tight text-[#1a1a2f]">
+                <h1 className="mt-4 text-4xl font-semibold leading-tight text-text-primary">
                   Dashboard operativo con data real,
-                  <span className="text-[#271173]"> en voz, texto y telefonia</span>
+                  <span className="text-primary-600"> en voz, texto y telefonia</span>
                 </h1>
-                <p className="mt-3 max-w-2xl text-sm leading-6 text-[#23233d]/70">
+                <p className="mt-3 max-w-2xl text-sm leading-6 text-text-secondary">
                   {computed.snapshotSummary}. Actualizacion automatica cada 45 segundos para
                   seguimiento continuo del estado operativo.
                 </p>
@@ -549,12 +548,12 @@ export default function DashboardView() {
               <div className="grid w-full gap-3 sm:grid-cols-2 lg:w-auto lg:grid-cols-1">
                 <button
                   onClick={() => refetch()}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#271173] px-4 py-2.5 text-sm font-semibold text-white transition-transform duration-200 ease-(--ease-out-strong) hover:-translate-y-px hover:bg-[#1f0d5a]"
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white transition-all duration-200 ease-out hover:-translate-y-px hover:bg-primary-700 shadow-sm"
                 >
                   <ArrowPathIcon className={`h-4 w-4 ${isFetching ? 'animate-spin' : ''}`} />
                   Refrescar metricas
                 </button>
-                <div className="inline-flex items-center justify-center rounded-xl border border-[#d8d3ee] bg-white px-4 py-2.5 text-sm font-semibold text-[#1a1a2f]">
+                <div className="inline-flex items-center justify-center rounded-xl border border-border-default bg-surface px-4 py-2.5 text-sm font-semibold text-text-primary shadow-sm">
                   Ultima carga: {computed.loadedAtText}
                 </div>
               </div>
@@ -563,13 +562,13 @@ export default function DashboardView() {
         )}
 
         {isLoading && (
-          <section className="rounded-2xl border border-[#e4e0f5] bg-white p-10 text-center text-sm text-[#1a1a2f]/60 shadow-sm">
+          <section className="rounded-2xl border border-border-default bg-surface p-10 text-center text-sm text-text-secondary shadow-sm">
             Cargando metricas reales del workspace...
           </section>
         )}
 
         {isError && (
-          <section className="rounded-2xl border border-rose-200 bg-rose-50 p-5 text-sm text-rose-700 shadow-sm">
+          <section className="rounded-2xl border border-danger-200 bg-danger-50 p-5 text-sm text-danger-700 shadow-sm">
             {error instanceof Error
               ? error.message
               : 'No fue posible cargar el dashboard con data real.'}
@@ -586,47 +585,47 @@ export default function DashboardView() {
               {computed.kpis.map((item, index) => (
                 <article
                   key={item.label}
-                  className="stagger-item rounded-2xl border border-[#e4e0f5] bg-white p-5 shadow-sm"
+                  className="stagger-item rounded-2xl border border-border-default bg-surface p-5 shadow-sm"
                   style={{ animationDelay: `${index * 50}ms` }}
                 >
-                  <p className="text-xs uppercase tracking-[0.12em] text-[#1a1a2f]/45">
+                  <p className="text-xs uppercase tracking-[0.12em] text-text-muted">
                     {item.label}
                   </p>
-                  <p className="mt-3 text-3xl font-semibold text-[#1a1a2f]">{item.value}</p>
-                  <p className="mt-2 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold text-[#1a1a2f] ring-1 ring-inset ring-[#d8d3ee]">
+                  <p className="mt-3 text-3xl font-semibold text-text-primary">{item.value}</p>
+                  <p className="mt-2 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold text-text-primary ring-1 ring-inset ring-border-default">
                     {item.trend === 'up' && (
-                      <ArrowTrendingUpIcon className="h-3.5 w-3.5 text-emerald-600" />
+                      <ArrowTrendingUpIcon className="h-3.5 w-3.5 text-accent-600" />
                     )}
                     {item.trend === 'down' && (
-                      <ArrowTrendingDownIcon className="h-3.5 w-3.5 text-rose-600" />
+                      <ArrowTrendingDownIcon className="h-3.5 w-3.5 text-danger-600" />
                     )}
                     {item.trend === 'stable' && (
-                      <ArrowPathIcon className="h-3.5 w-3.5 text-[#271173]" />
+                      <ArrowPathIcon className="h-3.5 w-3.5 text-primary-600" />
                     )}
                     {item.delta}
                   </p>
-                  <p className="mt-2 text-xs text-[#1a1a2f]/55">{item.subtitle}</p>
+                  <p className="mt-2 text-xs text-text-tertiary">{item.subtitle}</p>
                 </article>
               ))}
             </section>
 
             <section className="grid gap-4 xl:grid-cols-3">
-              <article className="stagger-item rounded-2xl border border-[#e4e0f5] bg-white p-5 shadow-sm xl:col-span-2">
+              <article className="stagger-item rounded-2xl border border-border-default bg-surface p-5 shadow-sm xl:col-span-2">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <p className="text-xs uppercase tracking-[0.12em] text-[#1a1a2f]/45">
+                    <p className="text-xs uppercase tracking-[0.12em] text-text-muted">
                       Actividad en tiempo real
                     </p>
-                    <h2 className="mt-1 text-xl font-semibold text-[#1a1a2f]">
+                    <h2 className="mt-1 text-xl font-semibold text-text-primary">
                       Conversaciones por hora (ultimas 12 horas)
                     </h2>
                   </div>
-                  <span className="rounded-full border border-[#d8d3ee] bg-[#f7f5ff] px-3 py-1 text-xs font-semibold text-[#271173]">
+                  <span className="rounded-full border border-primary-200 bg-primary-50 px-3 py-1 text-xs font-semibold text-primary-700">
                     Ventana movil
                   </span>
                 </div>
 
-                <div className="mt-5 overflow-hidden rounded-xl border border-[#ece8fb] bg-[#faf9ff] p-3">
+                <div className="mt-5 overflow-hidden rounded-xl border border-primary-100 bg-primary-50/30 p-3">
                   <svg
                     viewBox="0 0 760 280"
                     className="h-70 w-full"
@@ -635,8 +634,8 @@ export default function DashboardView() {
                   >
                     <defs>
                       <linearGradient id="pulse-fill" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#271173" stopOpacity="0.28" />
-                        <stop offset="100%" stopColor="#271173" stopOpacity="0" />
+                        <stop offset="0%" stopColor="#0369a1" stopOpacity="0.28" />
+                        <stop offset="100%" stopColor="#0369a1" stopOpacity="0" />
                       </linearGradient>
                     </defs>
 
@@ -649,7 +648,7 @@ export default function DashboardView() {
                           y1={y}
                           x2="732"
                           y2={y}
-                          stroke="#e6e1f8"
+                          stroke="#e0e7ff"
                           strokeWidth="1"
                           strokeDasharray="6 6"
                         />
@@ -660,7 +659,7 @@ export default function DashboardView() {
                     <path
                       d={chart.line}
                       fill="none"
-                      stroke="#271173"
+                      stroke="#0369a1"
                       strokeWidth="3"
                       strokeLinecap="round"
                       strokeLinejoin="round"
@@ -673,7 +672,7 @@ export default function DashboardView() {
                         cy={point.y}
                         r={index === chart.points.length - 1 ? 5 : 3.5}
                         fill={
-                          index === chart.points.length - 1 ? '#f97316' : '#271173'
+                          index === chart.points.length - 1 ? '#f59e0b' : '#0369a1'
                         }
                       />
                     ))}
@@ -681,23 +680,23 @@ export default function DashboardView() {
                 </div>
               </article>
 
-              <article className="stagger-item rounded-2xl border border-[#e4e0f5] bg-white p-5 shadow-sm">
-                <p className="text-xs uppercase tracking-[0.12em] text-[#1a1a2f]/45">
+              <article className="stagger-item rounded-2xl border border-border-default bg-surface p-5 shadow-sm">
+                <p className="text-xs uppercase tracking-[0.12em] text-text-muted">
                   Distribucion de canales
                 </p>
-                <h2 className="mt-1 text-xl font-semibold text-[#1a1a2f]">Mix de origen real</h2>
+                <h2 className="mt-1 text-xl font-semibold text-text-primary">Mix de origen real</h2>
 
                 <div className="mt-5 flex items-center justify-center">
                   <div
                     className="relative h-48 w-48 rounded-full"
                     style={{ background: computed.channelGradient }}
                   >
-                    <div className="absolute inset-5 rounded-full bg-white" />
+                    <div className="absolute inset-5 rounded-full bg-surface" />
                     <div className="absolute inset-0 flex flex-col items-center justify-center">
-                      <p className="text-3xl font-semibold text-[#1a1a2f]">
+                      <p className="text-3xl font-semibold text-text-primary">
                         {computed.channelHighlight.pct.toFixed(1)}%
                       </p>
-                      <p className="text-xs uppercase tracking-[0.12em] text-[#1a1a2f]/55">
+                      <p className="text-xs uppercase tracking-[0.12em] text-text-tertiary">
                         {computed.channelHighlight.label}
                       </p>
                     </div>
@@ -708,16 +707,16 @@ export default function DashboardView() {
                   {computed.channelLegend.map((item) => (
                     <div
                       key={item.label}
-                      className="flex items-center justify-between rounded-xl bg-[#faf9ff] px-3 py-2"
+                      className="flex items-center justify-between rounded-xl bg-primary-50/40 px-3 py-2"
                     >
-                      <p className="inline-flex items-center gap-2 text-[#1a1a2f]/75">
+                      <p className="inline-flex items-center gap-2 text-text-secondary">
                         <span
                           className="h-2.5 w-2.5 rounded-full"
                           style={{ backgroundColor: item.color }}
                         />
                         {item.label}
                       </p>
-                      <span className="font-semibold text-[#1a1a2f]">
+                      <span className="font-semibold text-text-primary">
                         {item.pct.toFixed(1)}% ({item.count})
                       </span>
                     </div>
@@ -727,31 +726,31 @@ export default function DashboardView() {
             </section>
 
             <section className="grid gap-4 xl:grid-cols-2">
-              <article className="stagger-item rounded-2xl border border-[#e4e0f5] bg-white p-5 shadow-sm">
+              <article className="stagger-item rounded-2xl border border-border-default bg-surface p-5 shadow-sm">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-xs uppercase tracking-[0.12em] text-[#1a1a2f]/45">
+                    <p className="text-xs uppercase tracking-[0.12em] text-text-muted">
                       Salud operativa
                     </p>
-                    <h2 className="mt-1 text-xl font-semibold text-[#1a1a2f]">
+                    <h2 className="mt-1 text-xl font-semibold text-text-primary">
                       Cobertura y resolucion
                     </h2>
                   </div>
-                  <UserGroupIcon className="h-5 w-5 text-[#271173]" />
+                  <UserGroupIcon className="h-5 w-5 text-primary-600" />
                 </div>
 
                 <div className="mt-5 space-y-3.5">
                   {computed.healthMetrics.map((item) => (
                     <div key={item.label}>
                       <div className="mb-1.5 flex items-center justify-between text-sm">
-                        <p className="font-medium text-[#1a1a2f]/80">{item.label}</p>
-                        <p className="font-semibold text-[#1a1a2f]">
+                        <p className="font-medium text-text-secondary">{item.label}</p>
+                        <p className="font-semibold text-text-primary">
                           {item.value}% · {item.detail}
                         </p>
                       </div>
-                      <div className="h-2.5 rounded-full bg-[#f1eefc]">
+                      <div className="h-2.5 rounded-full bg-primary-100/50">
                         <div
-                          className={`h-full rounded-full ${item.tone} transition-[width] duration-500 ease-(--ease-out-strong)`}
+                          className={`h-full rounded-full ${item.tone} transition-[width] duration-500 ease-out`}
                           style={{ width: `${item.value}%` }}
                         />
                       </div>
@@ -760,22 +759,22 @@ export default function DashboardView() {
                 </div>
               </article>
 
-              <article className="stagger-item rounded-2xl border border-[#e4e0f5] bg-white p-5 shadow-sm">
+              <article className="stagger-item rounded-2xl border border-border-default bg-surface p-5 shadow-sm">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-xs uppercase tracking-[0.12em] text-[#1a1a2f]/45">
+                    <p className="text-xs uppercase tracking-[0.12em] text-text-muted">
                       Bitacora operativa
                     </p>
-                    <h2 className="mt-1 text-xl font-semibold text-[#1a1a2f]">
+                    <h2 className="mt-1 text-xl font-semibold text-text-primary">
                       Ultima actividad
                     </h2>
                   </div>
-                  <CalendarDaysIcon className="h-5 w-5 text-[#271173]" />
+                  <CalendarDaysIcon className="h-5 w-5 text-primary-600" />
                 </div>
 
                 <div className="mt-5 space-y-4">
                   {computed.timeline.length === 0 && (
-                    <div className="rounded-xl border border-[#ece8fb] bg-[#faf9ff] p-3.5 text-sm text-[#1a1a2f]/60">
+                    <div className="rounded-xl border border-primary-100 bg-primary-50/30 p-3.5 text-sm text-text-secondary">
                       Todavia no hay conversaciones para mostrar en timeline.
                     </div>
                   )}
@@ -783,36 +782,36 @@ export default function DashboardView() {
                   {computed.timeline.map((item) => (
                     <div
                       key={`${item.time}-${item.title}`}
-                      className="relative rounded-xl border border-[#ece8fb] bg-[#faf9ff] p-3.5"
+                      className="relative rounded-xl border border-primary-100 bg-primary-50/30 p-3.5 transition-all duration-200 hover:border-primary-200 hover:shadow-sm"
                     >
                       <div className="mb-1 flex items-center justify-between gap-3">
-                        <p className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.08em] text-[#271173]">
+                        <p className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.08em] text-primary-700">
                           <ClockIcon className="h-3.5 w-3.5" />
                           {item.time}
                         </p>
-                        <span className="rounded-full bg-white px-2 py-0.5 text-[11px] font-semibold text-[#1a1a2f]/65 ring-1 ring-[#e0dbf5]">
+                        <span className="rounded-full bg-surface px-2 py-0.5 text-[11px] font-semibold text-text-tertiary ring-1 ring-border-default">
                           {item.tag}
                         </span>
                       </div>
-                      <p className="text-sm font-semibold text-[#1a1a2f]">{item.title}</p>
-                      <p className="mt-1 text-xs leading-5 text-[#1a1a2f]/60">{item.detail}</p>
+                      <p className="text-sm font-semibold text-text-primary">{item.title}</p>
+                      <p className="mt-1 text-xs leading-5 text-text-secondary">{item.detail}</p>
                     </div>
                   ))}
                 </div>
               </article>
             </section>
 
-            <section className="stagger-item rounded-2xl border border-[#d8d3ee] bg-white p-5 shadow-sm">
+            <section className="stagger-item rounded-2xl border border-border-default bg-surface p-5 shadow-sm">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <p className="text-xs uppercase tracking-[0.12em] text-[#1a1a2f]/45">
+                  <p className="text-xs uppercase tracking-[0.12em] text-text-muted">
                     Recomendacion inmediata
                   </p>
-                  <h2 className="mt-1 text-xl font-semibold text-[#1a1a2f]">
+                  <h2 className="mt-1 text-xl font-semibold text-text-primary">
                     {computed.recommendation}
                   </h2>
                 </div>
-                <p className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200">
+                <p className="inline-flex items-center gap-1.5 rounded-full bg-accent-50 px-3 py-1 text-xs font-semibold text-accent-700 ring-1 ring-accent-200">
                   <CheckCircleIcon className="h-4 w-4" />
                   {computed.recommendationBadge}
                 </p>

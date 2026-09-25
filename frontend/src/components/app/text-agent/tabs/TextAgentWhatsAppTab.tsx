@@ -10,6 +10,7 @@ import {
 } from '@heroicons/react/24/outline'
 import { deleteWhatsAppConfig, getWhatsAppConfig, upsertWhatsAppConfig } from '@/api/TextAgentsAPI'
 import { WHATSAPP_PROVIDER_OPTIONS, type WhatsAppProvider } from '@/types/textAgent'
+import { absoluteApiBaseUrl } from '@/lib/apiUrl'
 
 type Props = {
   agentId: string
@@ -21,7 +22,7 @@ const inputClass =
 const labelClass = 'mb-1.5 block text-xs font-semibold uppercase tracking-wide text-black/50'
 
 // Derive webhook base URL from VITE_API_URL (already contains /api)
-const API_BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? ''
+const API_BASE = absoluteApiBaseUrl()
 
 function CopyField({ label, value }: { label: string; value: string }) {
   const [copied, setCopied] = useState(false)

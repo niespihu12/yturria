@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { Suspense, useEffect, useRef, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { Navigate, Outlet } from 'react-router-dom'
 import { toast } from 'react-toastify'
@@ -55,12 +55,10 @@ export default function AppLayout() {
         const textError = result?.text?.error
         const voiceError = result?.voice?.error
 
-        // Only mark done when there are no errors so the next session retries.
         if (!textError && !voiceError) {
           sessionStorage.setItem(storageKey, 'done')
         }
 
-        // Show onboarding wizard the first time a text agent is created.
         const agentId = result?.text?.agent_id
         if (result?.text?.created && agentId) {
           const wizardKey = `onboarding-wizard:done:${agentId}`
@@ -77,7 +75,6 @@ export default function AppLayout() {
         }
       },
       onError: () => {
-        // Network/server error — don't mark done, will retry next session.
         toast.error('Error al inicializar tu cuenta. Recarga la página si el problema persiste.')
       },
       onSettled: () => {
@@ -91,17 +88,27 @@ export default function AppLayout() {
   if (!localStorage.getItem('AUTH_TOKEN')) return <Navigate to="/auth/login" replace />
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[#f5f3ff] text-black">
+    <div className="flex h-screen overflow-hidden bg-bg-secondary text-text-primary">
       <Sidebar />
       <main className="flex h-full min-h-0 min-w-0 flex-1 overflow-hidden">
         <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
-          <Outlet />
+          <Suspense
+            fallback={
+              <div className="flex h-full items-center justify-center">
+                <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary-600 border-t-transparent" />
+              </div>
+            }
+          >
+            <Outlet />
+          </Suspense>
         </div>
       </main>
       <ToastContainer
         pauseOnHover={false}
         pauseOnFocusLoss={false}
         theme="light"
+        toastClassName="!bg-surface !border !border-border-default !shadow-lg !rounded-xl !text-text-primary"
+        progressClassName="!bg-primary-500"
       />
       {wizardAgentId && (
         <OnboardingWizard

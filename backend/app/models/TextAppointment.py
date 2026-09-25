@@ -2,7 +2,12 @@ from datetime import datetime
 from typing import Optional
 from uuid import uuid4
 
+from sqlalchemy import Column, Text
+from sqlalchemy.dialects.mysql import LONGTEXT
 from sqlmodel import Field, SQLModel
+
+# TEXT en MySQL solo admite 64 KB; transcripciones y notas pueden superarlo.
+LONG_TEXT = Text().with_variant(LONGTEXT(), "mysql")
 
 
 class TextAppointment(SQLModel, table=True):
@@ -25,11 +30,11 @@ class TextAppointment(SQLModel, table=True):
     timezone: str = Field(default="America/Bogota", nullable=False)
     status: str = Field(default="scheduled", nullable=False)
     source: str = Field(default="manual", nullable=False)
-    notes: str = Field(default="", nullable=False)
+    notes: str = Field(default="", sa_column=Column(LONG_TEXT, nullable=False))
     google_event_id: str = Field(default="", nullable=False)
     google_calendar_id: str = Field(default="", nullable=False)
     google_sync_status: str = Field(default="not_configured", nullable=False)
-    google_sync_error: str = Field(default="", nullable=False)
+    google_sync_error: str = Field(default="", sa_column=Column(Text, nullable=False))
     deleted_at: Optional[datetime] = Field(default=None, nullable=True)
     created_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
     updated_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)

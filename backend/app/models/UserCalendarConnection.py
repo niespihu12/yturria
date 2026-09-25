@@ -1,6 +1,7 @@
 from datetime import datetime
 from uuid import uuid4
 
+from sqlalchemy import Column, Text
 from sqlmodel import Field, SQLModel
 
 
@@ -12,8 +13,8 @@ class UserCalendarConnection(SQLModel, table=True):
     provider: str = Field(default="google", nullable=False)  # google, microsoft, apple
     calendar_id: str = Field(default="primary", nullable=False)
     calendar_name: str = Field(default="", nullable=False)
-    access_token_encrypted: str = Field(default="", nullable=False)
-    refresh_token_encrypted: str = Field(default="", nullable=False)
+    access_token_encrypted: str = Field(default="", sa_column=Column(Text, nullable=False))
+    refresh_token_encrypted: str = Field(default="", sa_column=Column(Text, nullable=False))
     token_expires_at: datetime | None = Field(default=None, nullable=True)
     is_default: bool = Field(default=False, nullable=False)
     active: bool = Field(default=True, nullable=False)

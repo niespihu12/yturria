@@ -61,3 +61,10 @@ htmlcov/
 node_modules/
 frontend/dist/
 frontend/.vite/
+
+# Test & tooling artifacts
+.playwright-mcp/
+frontend/test-results/
+frontend/playwright-report/
+frontend/e2e/.auth/
+backend/e2e.db*

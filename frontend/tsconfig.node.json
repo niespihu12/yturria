@@ -23,5 +23,5 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true
   },
-  "include": ["vite.config.mjs"]
+  "include": ["vite.config.mjs", "playwright.config.ts", "e2e"]
 }

@@ -121,7 +121,7 @@ const PARAM_VALUE_SOURCES: Array<{
 ]
 
 const inputClass =
-  'w-full rounded-xl border border-[#e4e0f5] bg-white px-3.5 py-2.5 text-sm text-black placeholder:text-black/40 focus:border-[#271173] focus:outline-none transition-colors'
+  'w-full rounded-xl border border-border-default bg-surface px-3.5 py-2.5 text-sm text-text-primary placeholder:text-text-primary/40 focus:border-primary-500 focus:outline-none transition-colors'
 
 const SYSTEM_TOOL_TYPE_BY_NAME: Record<string, string> = {
   end_call: 'end_call',
@@ -144,13 +144,16 @@ function resolvePublicWebhookBaseUrl(): string {
     return ''
   }
 
-  return apiUrl.replace(/\/api\/?$/, '').replace(/\/$/, '')
+  // ElevenLabs necesita una URL absoluta; con VITE_API_URL=/api (mismo origen) se usa el dominio actual.
+  const absoluteApiUrl = new URL(apiUrl, window.location.origin).toString()
+  return absoluteApiUrl.replace(/\/api\/?$/, '').replace(/\/$/, '')
 }
 
 function buildSuggestedToolPayload(kind: 'send_whatsapp_message' | 'schedule_appointment'): CreateToolPayload {
   const baseUrl = resolvePublicWebhookBaseUrl()
-  const runtimeToken = String(import.meta.env.VITE_VOICE_TOOL_TOKEN ?? '').trim()
-  const requestHeaders = runtimeToken ? { 'X-Voice-Tool-Token': runtimeToken } : {}
+  // El backend inyecta X-Voice-Tool-Token al guardar la herramienta: el secreto
+  // nunca debe viajar en el bundle público.
+  const requestHeaders = {}
 
   if (kind === 'send_whatsapp_message') {
     return {
@@ -348,12 +351,12 @@ function ToolToggle({
       type="button"
       onClick={() => onChange(!active)}
       className={`relative h-5 w-10 cursor-pointer rounded-full transition-colors duration-200 ${
-        active ? 'bg-[#271173]' : 'bg-black/20'
+        active ? 'bg-primary-600' : 'bg-black/20'
       }`}
       aria-pressed={active}
     >
       <span
-        className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform duration-200 ${
+        className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-surface shadow transition-transform duration-200 ${
           active ? 'translate-x-5' : 'translate-x-0'
         }`}
       />
@@ -370,7 +373,7 @@ function getSystemToolIcon(toolName: string) {
 function EmptyState({ message }: { message: string }) {
   return (
     <div className="py-8 text-center">
-      <p className="text-sm text-black/50">{message}</p>
+      <p className="text-sm text-text-tertiary">{message}</p>
     </div>
   )
 }
@@ -800,10 +803,10 @@ function CreateToolModal({
     const prefix = `${options.section}.${row.id}`
 
     return (
-      <div key={row.id} className="space-y-3 rounded-xl border border-[#e4e0f5] bg-white p-3">
+      <div key={row.id} className="space-y-3 rounded-xl border border-border-default bg-surface p-3">
         <div className="grid gap-2 lg:grid-cols-4">
           <div>
-            <label className="mb-1 block text-[11px] font-medium uppercase tracking-[0.08em] text-black/50">
+            <label className="mb-1 block text-[11px] font-medium uppercase tracking-[0.08em] text-text-tertiary">
               Tipo de datos
             </label>
             <select
@@ -822,7 +825,7 @@ function CreateToolModal({
           </div>
 
           <div className="lg:col-span-2">
-            <label className="mb-1 block text-[11px] font-medium uppercase tracking-[0.08em] text-black/50">
+            <label className="mb-1 block text-[11px] font-medium uppercase tracking-[0.08em] text-text-tertiary">
               Identificador
             </label>
             <input
@@ -840,19 +843,19 @@ function CreateToolModal({
 
           <div className="flex items-end gap-2">
             {options.showRequired ? (
-              <label className="inline-flex flex-1 items-center gap-2 rounded-xl border border-[#e4e0f5] bg-[#f5f3ff] px-3 py-2.5 text-xs text-black/70">
+              <label className="inline-flex flex-1 items-center gap-2 rounded-xl border border-border-default bg-[#f5f3ff] px-3 py-2.5 text-xs text-text-primary/70">
                 <input
                   type="checkbox"
                   checked={row.required}
                   onChange={(event) =>
                     options.onChange(row.id, { required: event.target.checked })
                   }
-                  className="h-3.5 w-3.5 rounded border-[#c7c3e0] text-[#271173] focus:ring-[#271173]"
+                  className="h-3.5 w-3.5 rounded border-[#c7c3e0] text-primary-600 focus:ring-[#271173]"
                 />
                 Requerido
               </label>
             ) : (
-              <div className="inline-flex flex-1 items-center rounded-xl border border-[#e4e0f5] bg-[#f5f3ff] px-3 py-2.5 text-xs text-black/70">
+              <div className="inline-flex flex-1 items-center rounded-xl border border-border-default bg-[#f5f3ff] px-3 py-2.5 text-xs text-text-primary/70">
                 Requerido por URL
               </div>
             )}
@@ -861,7 +864,7 @@ function CreateToolModal({
               <button
                 type="button"
                 onClick={() => options.onRemove?.(row.id)}
-                className="rounded-xl border border-[#e4e0f5] p-2 text-black/50 transition-colors hover:bg-rose-50 hover:text-rose-600"
+                className="rounded-xl border border-border-default p-2 text-text-tertiary transition-colors hover:bg-danger-50 hover:text-danger-600"
                 title="Eliminar parametro"
               >
                 <TrashIcon className="h-4 w-4" />
@@ -871,7 +874,7 @@ function CreateToolModal({
         </div>
 
         <div className="space-y-2">
-          <label className="mb-1 block text-[11px] font-medium uppercase tracking-[0.08em] text-black/50">
+          <label className="mb-1 block text-[11px] font-medium uppercase tracking-[0.08em] text-text-tertiary">
             Tipo de valor
           </label>
           <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
@@ -890,13 +893,13 @@ function CreateToolModal({
                   className={`rounded-xl border px-3 py-2 text-left transition-colors ${
                     isActive
                       ? 'border-[#271173] bg-[#f5f3ff] shadow-[0_0_0_1px_rgba(39,17,115,0.08)]'
-                      : 'border-[#e4e0f5] bg-white hover:bg-[#faf9ff]'
+                      : 'border-border-default bg-surface hover:bg-bg-secondary'
                   }`}
                 >
-                  <p className={`text-xs font-semibold ${isActive ? 'text-[#271173]' : 'text-black/80'}`}>
+                  <p className={`text-xs font-semibold ${isActive ? 'text-primary-600' : 'text-text-primary'}`}>
                     {source.label}
                   </p>
-                  <p className="mt-1 text-[11px] leading-4 text-black/55">{source.description}</p>
+                  <p className="mt-1 text-[11px] leading-4 text-text-secondary">{source.description}</p>
                 </button>
               )
             })}
@@ -904,7 +907,7 @@ function CreateToolModal({
 
           {row.type === 'string' && (
             <div className="pt-1">
-              <label className="mb-1 block text-[11px] font-medium uppercase tracking-[0.08em] text-black/50">
+              <label className="mb-1 block text-[11px] font-medium uppercase tracking-[0.08em] text-text-tertiary">
                 Enum values (opcional)
               </label>
               <input
@@ -923,7 +926,7 @@ function CreateToolModal({
 
         {row.value_source === 'llm_prompt' && (
           <div>
-            <label className="mb-1 block text-[11px] font-medium uppercase tracking-[0.08em] text-black/50">
+            <label className="mb-1 block text-[11px] font-medium uppercase tracking-[0.08em] text-text-tertiary">
               Descripcion
             </label>
             <textarea
@@ -941,7 +944,7 @@ function CreateToolModal({
 
         {row.value_source === 'constant' && (
           <div>
-            <label className="mb-1 block text-[11px] font-medium uppercase tracking-[0.08em] text-black/50">
+            <label className="mb-1 block text-[11px] font-medium uppercase tracking-[0.08em] text-text-tertiary">
               Valor fijo
             </label>
             <input
@@ -961,7 +964,7 @@ function CreateToolModal({
 
         {row.value_source === 'dynamic_variable' && (
           <div>
-            <label className="mb-1 block text-[11px] font-medium uppercase tracking-[0.08em] text-black/50">
+            <label className="mb-1 block text-[11px] font-medium uppercase tracking-[0.08em] text-text-tertiary">
               Variable dinamica
             </label>
             <input
@@ -985,44 +988,44 @@ function CreateToolModal({
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-black/40 backdrop-blur-sm">
       <div className="flex min-h-full items-start justify-center p-4 sm:p-6">
-        <div className="w-full max-w-6xl overflow-hidden rounded-2xl border border-[#e4e0f5] bg-[#fcfbff] shadow-2xl">
+        <div className="w-full max-w-6xl overflow-hidden rounded-2xl border border-border-default bg-bg-secondary shadow-2xl">
           <form onSubmit={handleSubmit} className="flex max-h-[92vh] flex-col">
-            <div className="flex items-start justify-between border-b border-[#e4e0f5] bg-white px-4 py-4 sm:px-6">
+            <div className="flex items-start justify-between border-b border-border-default bg-surface px-4 py-4 sm:px-6">
               <div>
-                <h2 className="text-base font-semibold text-black">Anadir herramienta webhook</h2>
-                <p className="mt-1 text-xs text-black/55">
+                <h2 className="text-base font-semibold text-text-primary">Anadir herramienta webhook</h2>
+                <p className="mt-1 text-xs text-text-secondary">
                   Configura como y cuando el agente debe usar esta herramienta.
                 </p>
               </div>
               <button
                 type="button"
                 onClick={onClose}
-                className="rounded-lg p-1.5 text-black/50 transition-colors hover:bg-[#f5f3ff] hover:text-black"
+                className="rounded-lg p-1.5 text-text-tertiary transition-colors hover:bg-primary-50/60 hover:text-text-primary"
               >
                 <XMarkIcon className="h-5 w-5" />
               </button>
             </div>
 
             <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4 sm:px-6">
-              <section className="rounded-xl border border-[#e4e0f5] bg-white p-4 sm:p-5">
+              <section className="rounded-xl border border-border-default bg-surface p-4 sm:p-5">
                 <div className="mb-4">
-                  <h3 className="text-sm font-semibold text-black">Configuracion</h3>
-                  <p className="mt-1 text-xs text-black/55">
+                  <h3 className="text-sm font-semibold text-text-primary">Configuracion</h3>
+                  <p className="mt-1 text-xs text-text-secondary">
                     Describe al LLM como y cuando usar la herramienta.
                   </p>
                 </div>
 
                 <div className="space-y-3">
                   <div>
-                    <label className="mb-1.5 block text-xs font-medium text-black/65">Tipo</label>
-                    <div className="rounded-xl border border-[#271173]/20 bg-[#f5f3ff] px-3.5 py-2.5 text-sm font-medium text-[#271173]">
+                    <label className="mb-1.5 block text-xs font-medium text-text-secondary">Tipo</label>
+                    <div className="rounded-xl border border-[#271173]/20 bg-[#f5f3ff] px-3.5 py-2.5 text-sm font-medium text-primary-600">
                       Webhook HTTP
                     </div>
                   </div>
 
                   <div className="grid gap-3 lg:grid-cols-2">
                     <div>
-                      <label className="mb-1.5 block text-xs font-medium text-black/65">Nombre</label>
+                      <label className="mb-1.5 block text-xs font-medium text-text-secondary">Nombre</label>
                       <input
                         type="text"
                         value={form.name}
@@ -1034,7 +1037,7 @@ function CreateToolModal({
                     </div>
 
                     <div>
-                      <label className="mb-1.5 block text-xs font-medium text-black/65">Metodo</label>
+                      <label className="mb-1.5 block text-xs font-medium text-text-secondary">Metodo</label>
                       <select
                         value={form.method}
                         onChange={(event) =>
@@ -1052,7 +1055,7 @@ function CreateToolModal({
                   </div>
 
                   <div>
-                    <label className="mb-1.5 block text-xs font-medium text-black/65">Descripcion</label>
+                    <label className="mb-1.5 block text-xs font-medium text-text-secondary">Descripcion</label>
                     <textarea
                       rows={3}
                       value={form.description}
@@ -1066,7 +1069,7 @@ function CreateToolModal({
                   </div>
 
                   <div>
-                    <label className="mb-1.5 block text-xs font-medium text-black/65">URL</label>
+                    <label className="mb-1.5 block text-xs font-medium text-text-secondary">URL</label>
                     <input
                       type="url"
                       value={form.url}
@@ -1074,7 +1077,7 @@ function CreateToolModal({
                       placeholder="https://api.example.com/v1/orders/{order_id}"
                       className={inputClass}
                     />
-                    <p className="mt-1 text-[11px] text-black/45">
+                    <p className="mt-1 text-[11px] text-text-muted">
                       Escribe {'{{'} para usar una variable de entorno.
                     </p>
                     {errors.url && <p className="mt-1 text-xs text-red-500">{errors.url}</p>}
@@ -1082,17 +1085,17 @@ function CreateToolModal({
                 </div>
               </section>
 
-              <section className="rounded-xl border border-[#e4e0f5] bg-white p-4 sm:p-5">
+              <section className="rounded-xl border border-border-default bg-surface p-4 sm:p-5">
                 <div className="mb-4">
-                  <h3 className="text-sm font-semibold text-black">Runtime</h3>
-                  <p className="mt-1 text-xs text-black/55">
+                  <h3 className="text-sm font-semibold text-text-primary">Runtime</h3>
+                  <p className="mt-1 text-xs text-text-secondary">
                     Define como se ejecuta la herramienta durante la conversacion.
                   </p>
                 </div>
 
                 <div className="grid gap-3 lg:grid-cols-2">
                   <div>
-                    <label className="mb-1.5 block text-xs font-medium text-black/65">
+                    <label className="mb-1.5 block text-xs font-medium text-text-secondary">
                       Tiempo de espera de respuesta (segundos)
                     </label>
                     <input
@@ -1103,7 +1106,7 @@ function CreateToolModal({
                       onChange={(event) => set('response_timeout_secs', event.target.value)}
                       className={inputClass}
                     />
-                    <p className="mt-1 text-[11px] text-black/45">
+                    <p className="mt-1 text-[11px] text-text-muted">
                       El valor predeterminado recomendado es 20 segundos.
                     </p>
                     {errors.response_timeout_secs && (
@@ -1112,7 +1115,7 @@ function CreateToolModal({
                   </div>
 
                   <div>
-                    <label className="mb-1.5 block text-xs font-medium text-black/65">
+                    <label className="mb-1.5 block text-xs font-medium text-text-secondary">
                       Pre-tool speech
                     </label>
                     <select
@@ -1133,7 +1136,7 @@ function CreateToolModal({
 
                 <div className="mt-3 grid gap-3 lg:grid-cols-2">
                   <div>
-                    <label className="mb-1.5 block text-xs font-medium text-black/65">
+                    <label className="mb-1.5 block text-xs font-medium text-text-secondary">
                       Modo de ejecucion
                     </label>
                     <select
@@ -1152,7 +1155,7 @@ function CreateToolModal({
                   </div>
 
                   <div>
-                    <label className="mb-1.5 block text-xs font-medium text-black/65">
+                    <label className="mb-1.5 block text-xs font-medium text-text-secondary">
                       Manejo de errores
                     </label>
                     <select
@@ -1176,7 +1179,7 @@ function CreateToolModal({
 
                 <div className="mt-3 grid gap-3 lg:grid-cols-3">
                   <div>
-                    <label className="mb-1.5 block text-xs font-medium text-black/65">
+                    <label className="mb-1.5 block text-xs font-medium text-text-secondary">
                       Sonido de llamada de la herramienta
                     </label>
                     <select
@@ -1196,7 +1199,7 @@ function CreateToolModal({
                   </div>
 
                   <div>
-                    <label className="mb-1.5 block text-xs font-medium text-black/65">
+                    <label className="mb-1.5 block text-xs font-medium text-text-secondary">
                       Comportamiento del sonido
                     </label>
                     <select
@@ -1218,7 +1221,7 @@ function CreateToolModal({
                   </div>
 
                   <div>
-                    <label className="mb-1.5 block text-xs font-medium text-black/65">
+                    <label className="mb-1.5 block text-xs font-medium text-text-secondary">
                       Sonido personalizado
                     </label>
                     <input
@@ -1238,11 +1241,11 @@ function CreateToolModal({
                 </div>
 
                 <div className="mt-3 grid gap-3 lg:grid-cols-2">
-                  <div className="rounded-xl border border-[#e4e0f5] bg-[#f5f3ff] px-3.5 py-2.5">
+                  <div className="rounded-xl border border-border-default bg-[#f5f3ff] px-3.5 py-2.5">
                     <div className="flex items-center justify-between gap-3">
                       <div>
-                        <p className="text-xs font-medium text-black/70">Disable interruptions</p>
-                        <p className="text-[11px] text-black/50">
+                        <p className="text-xs font-medium text-text-primary/70">Disable interruptions</p>
+                        <p className="text-[11px] text-text-tertiary">
                           Deshabilita interrupciones mientras la herramienta se ejecuta.
                         </p>
                       </div>
@@ -1254,7 +1257,7 @@ function CreateToolModal({
                   </div>
 
                   <div>
-                    <label className="mb-1.5 block text-xs font-medium text-black/65">
+                    <label className="mb-1.5 block text-xs font-medium text-text-secondary">
                       Content-Type
                     </label>
                     <select
@@ -1274,18 +1277,18 @@ function CreateToolModal({
                 </div>
               </section>
 
-              <section className="rounded-xl border border-[#e4e0f5] bg-white p-4 sm:p-5">
+              <section className="rounded-xl border border-border-default bg-surface p-4 sm:p-5">
                 <div className="mb-4 flex items-center justify-between gap-3">
                   <div>
-                    <h3 className="text-sm font-semibold text-black">Encabezados</h3>
-                    <p className="mt-1 text-xs text-black/55">
+                    <h3 className="text-sm font-semibold text-text-primary">Encabezados</h3>
+                    <p className="mt-1 text-xs text-text-secondary">
                       Define los encabezados que se enviaran con la solicitud.
                     </p>
                   </div>
                   <button
                     type="button"
                     onClick={() => setHeaders((prev) => [...prev, createHeaderRow()])}
-                    className="rounded-lg border border-[#271173]/25 px-3 py-1.5 text-xs font-medium text-[#271173] transition-colors hover:bg-[#f5f3ff]"
+                    className="rounded-lg border border-[#271173]/25 px-3 py-1.5 text-xs font-medium text-primary-600 transition-colors hover:bg-primary-50/60"
                   >
                     Anadir encabezado
                   </button>
@@ -1316,7 +1319,7 @@ function CreateToolModal({
                       <button
                         type="button"
                         onClick={() => removeHeaderRow(header.id)}
-                        className="rounded-xl border border-[#e4e0f5] p-2 text-black/50 transition-colors hover:bg-rose-50 hover:text-rose-600"
+                        className="rounded-xl border border-border-default p-2 text-text-tertiary transition-colors hover:bg-danger-50 hover:text-danger-600"
                         title="Eliminar encabezado"
                       >
                         <TrashIcon className="h-4 w-4" />
@@ -1326,10 +1329,10 @@ function CreateToolModal({
                 </div>
               </section>
 
-              <section className="rounded-xl border border-[#e4e0f5] bg-white p-4 sm:p-5">
+              <section className="rounded-xl border border-border-default bg-surface p-4 sm:p-5">
                 <div className="mb-4">
-                  <h3 className="text-sm font-semibold text-black">Parametros de ruta</h3>
-                  <p className="mt-1 text-xs text-black/55">
+                  <h3 className="text-sm font-semibold text-text-primary">Parametros de ruta</h3>
+                  <p className="mt-1 text-xs text-text-secondary">
                     Anade la ruta entre llaves en la URL para configurarlos aqui.
                   </p>
                 </div>
@@ -1346,24 +1349,24 @@ function CreateToolModal({
                     )}
                   </div>
                 ) : (
-                  <div className="rounded-xl border border-dashed border-[#d8d3ee] bg-[#faf9ff] px-3.5 py-3 text-xs text-black/55">
+                  <div className="rounded-xl border border-dashed border-border-default bg-bg-secondary px-3.5 py-3 text-xs text-text-secondary">
                     No se detectaron parametros de ruta. Usa llaves en la URL, por ejemplo {'{order_id}'}.
                   </div>
                 )}
               </section>
 
-              <section className="rounded-xl border border-[#e4e0f5] bg-white p-4 sm:p-5">
+              <section className="rounded-xl border border-border-default bg-surface p-4 sm:p-5">
                 <div className="mb-4 flex items-center justify-between gap-3">
                   <div>
-                    <h3 className="text-sm font-semibold text-black">Parametros de consulta</h3>
-                    <p className="mt-1 text-xs text-black/55">
+                    <h3 className="text-sm font-semibold text-text-primary">Parametros de consulta</h3>
+                    <p className="mt-1 text-xs text-text-secondary">
                       Define los parametros que seran recopilados por el LLM y enviados como query.
                     </p>
                   </div>
                   <button
                     type="button"
                     onClick={() => setQueryParams((prev) => [...prev, createToolParamRow()])}
-                    className="rounded-lg border border-[#271173]/25 px-3 py-1.5 text-xs font-medium text-[#271173] transition-colors hover:bg-[#f5f3ff]"
+                    className="rounded-lg border border-[#271173]/25 px-3 py-1.5 text-xs font-medium text-primary-600 transition-colors hover:bg-primary-50/60"
                   >
                     Anadir parametro
                   </button>
@@ -1381,16 +1384,16 @@ function CreateToolModal({
                     )}
                   </div>
                 ) : (
-                  <div className="rounded-xl border border-dashed border-[#d8d3ee] bg-[#faf9ff] px-3.5 py-3 text-xs text-black/55">
+                  <div className="rounded-xl border border-dashed border-border-default bg-bg-secondary px-3.5 py-3 text-xs text-text-secondary">
                     No hay parametros de consulta definidos.
                   </div>
                 )}
               </section>
 
-              <section className="rounded-xl border border-[#e4e0f5] bg-white p-4 sm:p-5">
+              <section className="rounded-xl border border-border-default bg-surface p-4 sm:p-5">
                 <div className="mb-3">
-                  <h3 className="text-sm font-semibold text-black">Autenticacion</h3>
-                  <p className="mt-1 text-xs text-black/55">
+                  <h3 className="text-sm font-semibold text-text-primary">Autenticacion</h3>
+                  <p className="mt-1 text-xs text-text-secondary">
                     El workspace no tiene conexiones de autenticacion listadas desde este panel.
                     Si tienes una conexion, puedes referenciarla en JSON.
                   </p>
@@ -1407,10 +1410,10 @@ function CreateToolModal({
                 )}
               </section>
 
-              <section className="rounded-xl border border-[#e4e0f5] bg-white p-4 sm:p-5">
+              <section className="rounded-xl border border-border-default bg-surface p-4 sm:p-5">
                 <div className="mb-3">
-                  <h3 className="text-sm font-semibold text-black">Request body schema</h3>
-                  <p className="mt-1 text-xs text-black/55">
+                  <h3 className="text-sm font-semibold text-text-primary">Request body schema</h3>
+                  <p className="mt-1 text-xs text-text-secondary">
                     Para POST/PUT/PATCH define el cuerpo en formato JSON schema. Dejalo vacio para null.
                   </p>
                 </div>
@@ -1427,9 +1430,9 @@ function CreateToolModal({
               </section>
 
               <section className="grid gap-4 lg:grid-cols-3">
-                <div className="rounded-xl border border-[#e4e0f5] bg-white p-4 sm:p-5">
-                  <h3 className="text-sm font-semibold text-black">Variables dinamicas</h3>
-                  <p className="mt-1 text-xs text-black/55">
+                <div className="rounded-xl border border-border-default bg-surface p-4 sm:p-5">
+                  <h3 className="text-sm font-semibold text-text-primary">Variables dinamicas</h3>
+                  <p className="mt-1 text-xs text-text-secondary">
                     Placeholders reemplazados al iniciar la conversacion.
                   </p>
                   <textarea
@@ -1448,9 +1451,9 @@ function CreateToolModal({
                   )}
                 </div>
 
-                <div className="rounded-xl border border-[#e4e0f5] bg-white p-4 sm:p-5">
-                  <h3 className="text-sm font-semibold text-black">Asignaciones de variables</h3>
-                  <p className="mt-1 text-xs text-black/55">
+                <div className="rounded-xl border border-border-default bg-surface p-4 sm:p-5">
+                  <h3 className="text-sm font-semibold text-text-primary">Asignaciones de variables</h3>
+                  <p className="mt-1 text-xs text-text-secondary">
                     Configura que variables se actualizan desde la respuesta del webhook.
                   </p>
                   <textarea
@@ -1465,9 +1468,9 @@ function CreateToolModal({
                   )}
                 </div>
 
-                <div className="rounded-xl border border-[#e4e0f5] bg-white p-4 sm:p-5">
-                  <h3 className="text-sm font-semibold text-black">Simulaciones de respuesta</h3>
-                  <p className="mt-1 text-xs text-black/55">
+                <div className="rounded-xl border border-border-default bg-surface p-4 sm:p-5">
+                  <h3 className="text-sm font-semibold text-text-primary">Simulaciones de respuesta</h3>
+                  <p className="mt-1 text-xs text-text-secondary">
                     Respuestas mock para pruebas sin usar sistemas de produccion.
                   </p>
                   <textarea
@@ -1484,18 +1487,18 @@ function CreateToolModal({
               </section>
             </div>
 
-            <div className="flex gap-3 border-t border-[#e4e0f5] bg-white px-4 py-4 sm:px-6">
+            <div className="flex gap-3 border-t border-border-default bg-surface px-4 py-4 sm:px-6">
               <button
                 type="button"
                 onClick={onClose}
-                className="flex-1 rounded-xl bg-[#f5f3ff] px-4 py-2.5 text-sm font-medium text-black/80 transition-colors hover:bg-[#ede9ff]"
+                className="flex-1 rounded-xl bg-[#f5f3ff] px-4 py-2.5 text-sm font-medium text-text-primary transition-colors hover:bg-primary-50"
               >
                 Cancelar
               </button>
               <button
                 type="submit"
                 disabled={isPending}
-                className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-[#271173] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#1f0d5a] disabled:opacity-60"
+                className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary-700 disabled:opacity-60"
               >
                 {isPending && (
                   <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
@@ -1703,24 +1706,24 @@ export default function ToolsTab({
   return (
     <div className="space-y-5">
       {/* Search */}
-      <div className="rounded-xl border border-[#e4e0f5] bg-white p-4">
+      <div className="rounded-xl border border-border-default bg-surface p-4">
         <div className="relative">
-          <MagnifyingGlassIcon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-black/40" />
+          <MagnifyingGlassIcon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-primary/40" />
           <input
             type="text"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Buscar herramientas por nombre, tipo o descripcion..."
-            className="w-full rounded-xl border border-[#e4e0f5] bg-[#f5f3ff] py-2.5 pl-9 pr-3 text-sm text-black placeholder:text-black/40 transition-colors focus:border-[#271173] focus:outline-none"
+            className="w-full rounded-xl border border-border-default bg-[#f5f3ff] py-2.5 pl-9 pr-3 text-sm text-text-primary placeholder:text-text-primary/40 transition-colors focus:border-primary-500 focus:outline-none"
           />
         </div>
       </div>
 
-      <div className="rounded-xl border border-[#e4e0f5] bg-white p-4">
+      <div className="rounded-xl border border-border-default bg-surface p-4">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
-            <p className="text-sm font-medium text-black">Herramientas sugeridas de Voice</p>
-            <p className="mt-1 text-xs text-black/55">
+            <p className="text-sm font-medium text-text-primary">Herramientas sugeridas de Voice</p>
+            <p className="mt-1 text-xs text-text-secondary">
               Crea rapidamente send_whatsapp_message y schedule_appointment para invocarlas desde el agente.
             </p>
           </div>
@@ -1730,7 +1733,7 @@ export default function ToolsTab({
               type="button"
               onClick={() => handleCreateSuggestedTool('send_whatsapp_message')}
               disabled={isCreatingSuggestedTool || isClient}
-              className="rounded-xl border border-[#271173]/25 bg-[#f5f3ff] px-3 py-2 text-xs font-semibold text-[#271173] transition-colors hover:bg-[#ede9ff] disabled:opacity-50"
+              className="rounded-xl border border-[#271173]/25 bg-[#f5f3ff] px-3 py-2 text-xs font-semibold text-primary-600 transition-colors hover:bg-primary-50 disabled:opacity-50"
             >
               Crear send_whatsapp_message
             </button>
@@ -1738,7 +1741,7 @@ export default function ToolsTab({
               type="button"
               onClick={() => handleCreateSuggestedTool('schedule_appointment')}
               disabled={isCreatingSuggestedTool || isClient}
-              className="rounded-xl border border-[#271173]/25 bg-[#f5f3ff] px-3 py-2 text-xs font-semibold text-[#271173] transition-colors hover:bg-[#ede9ff] disabled:opacity-50"
+              className="rounded-xl border border-[#271173]/25 bg-[#f5f3ff] px-3 py-2 text-xs font-semibold text-primary-600 transition-colors hover:bg-primary-50 disabled:opacity-50"
             >
               Crear schedule_appointment
             </button>
@@ -1747,20 +1750,20 @@ export default function ToolsTab({
       </div>
 
       {/* System tools */}
-      <div className="overflow-hidden rounded-xl border border-[#e4e0f5] bg-white">
-        <div className="flex items-center justify-between border-b border-[#e4e0f5] bg-linear-to-r from-[#f5f3ff] to-white px-5 py-4">
+      <div className="overflow-hidden rounded-xl border border-border-default bg-surface">
+        <div className="flex items-center justify-between border-b border-border-default bg-linear-to-r from-[#f5f3ff] to-white px-5 py-4">
           <div className="flex items-center gap-2.5">
-            <CpuChipIcon className="h-4 w-4 text-[#271173]" />
+            <CpuChipIcon className="h-4 w-4 text-primary-600" />
             <div>
-              <p className="text-sm font-medium text-black">Herramientas del sistema</p>
-              <p className="text-xs text-black/50">Acciones nativas del runtime de la plataforma.</p>
+              <p className="text-sm font-medium text-text-primary">Herramientas del sistema</p>
+              <p className="text-xs text-text-tertiary">Acciones nativas del runtime de la plataforma.</p>
             </div>
           </div>
-          <div className="inline-flex items-center gap-2 rounded-full border border-[#e4e0f5] bg-white px-2 py-1">
-            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#271173] text-xs font-bold text-white">
+          <div className="inline-flex items-center gap-2 rounded-full border border-border-default bg-surface px-2 py-1">
+            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary-600 text-xs font-bold text-white">
               {enabledSystemTools.length}
             </span>
-            <span className="text-xs font-medium text-black/60">activas</span>
+            <span className="text-xs font-medium text-text-secondary">activas</span>
           </div>
         </div>
 
@@ -1793,18 +1796,18 @@ export default function ToolsTab({
               return (
                 <div
                   key={tool.name}
-                  className="px-5 py-3.5 transition-colors hover:bg-[#f5f3ff]"
+                  className="px-5 py-3.5 transition-colors hover:bg-primary-50/60"
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex min-w-0 items-start gap-2.5">
-                      <div className="mt-0.5 rounded-lg border border-[#e4e0f5] bg-white p-1.5">
-                        <SystemIcon className="h-4 w-4 text-[#271173]" />
+                      <div className="mt-0.5 rounded-lg border border-border-default bg-surface p-1.5">
+                        <SystemIcon className="h-4 w-4 text-primary-600" />
                       </div>
                       <div>
-                        <p className="text-sm text-black">{tool.label}</p>
-                        <p className="text-xs text-black/50">{tool.description}</p>
+                        <p className="text-sm text-text-primary">{tool.label}</p>
+                        <p className="text-xs text-text-tertiary">{tool.description}</p>
                         {isEnabled && needsConfig && (
-                          <p className="mt-1 text-[11px] text-[#271173]">
+                          <p className="mt-1 text-[11px] text-primary-600">
                             Requiere configuracion adicional para guardar correctamente.
                           </p>
                         )}
@@ -1818,11 +1821,11 @@ export default function ToolsTab({
                   </div>
 
                   {isEnabled && needsConfig && (
-                    <div className="mt-3 space-y-3 rounded-xl border border-[#e4e0f5] bg-white p-3">
+                    <div className="mt-3 space-y-3 rounded-xl border border-border-default bg-surface p-3">
                       {systemToolType === 'transfer_to_agent' && (
                         <div className="space-y-2.5">
                           <div className="flex items-center justify-between gap-3">
-                            <p className="text-xs font-medium text-black/70">
+                            <p className="text-xs font-medium text-text-primary/70">
                               Destinos de transferencia a agente
                             </p>
                             <button
@@ -1833,7 +1836,7 @@ export default function ToolsTab({
                                   { agent_id: '', condition: '' },
                                 ])
                               }
-                              className="rounded-lg border border-[#271173]/25 px-2.5 py-1 text-[11px] font-medium text-[#271173] hover:bg-[#f5f3ff]"
+                              className="rounded-lg border border-[#271173]/25 px-2.5 py-1 text-[11px] font-medium text-primary-600 hover:bg-primary-50/60"
                             >
                               + Agregar
                             </button>
@@ -1888,7 +1891,7 @@ export default function ToolsTab({
                                       : agentTransfers.filter((_, itemIndex) => itemIndex !== index)
                                   )
                                 }
-                                className="rounded-lg border border-[#e4e0f5] px-2 text-xs text-black/60 hover:bg-rose-50 hover:text-rose-600"
+                                className="rounded-lg border border-border-default px-2 text-xs text-text-secondary hover:bg-danger-50 hover:text-danger-600"
                               >
                                 Quitar
                               </button>
@@ -1903,8 +1906,8 @@ export default function ToolsTab({
                             ))}
                           </datalist>
 
-                          <div className="flex items-center justify-between rounded-lg border border-[#e4e0f5] bg-[#f5f3ff] px-3 py-2">
-                            <p className="text-[11px] text-black/60">Mensaje al cliente durante transferencia</p>
+                          <div className="flex items-center justify-between rounded-lg border border-border-default bg-[#f5f3ff] px-3 py-2">
+                            <p className="text-[11px] text-text-secondary">Mensaje al cliente durante transferencia</p>
                             <ToolToggle
                               active={Boolean(params.enable_client_message)}
                               onChange={(value) =>
@@ -1931,7 +1934,7 @@ export default function ToolsTab({
                             </div>
                           )}
                           <div className="flex items-center justify-between gap-3">
-                            <p className="text-xs font-medium text-black/70">
+                            <p className="text-xs font-medium text-text-primary/70">
                               Destinos de transferencia (E.164)
                             </p>
                             {!isClient && (
@@ -1943,7 +1946,7 @@ export default function ToolsTab({
                                     { phone_number: '', condition: '' },
                                   ])
                                 }
-                                className="rounded-lg border border-[#271173]/25 px-2.5 py-1 text-[11px] font-medium text-[#271173] hover:bg-[#f5f3ff]"
+                                className="rounded-lg border border-[#271173]/25 px-2.5 py-1 text-[11px] font-medium text-primary-600 hover:bg-primary-50/60"
                               >
                                 + Agregar
                               </button>
@@ -2003,7 +2006,7 @@ export default function ToolsTab({
                                       : numberTransfers.filter((_, itemIndex) => itemIndex !== index)
                                   )
                                 }
-                                className="rounded-lg border border-[#e4e0f5] px-2 text-xs text-black/60 hover:bg-rose-50 hover:text-rose-600"
+                                className="rounded-lg border border-border-default px-2 text-xs text-text-secondary hover:bg-danger-50 hover:text-danger-600"
                               >
                                 Quitar
                               </button>
@@ -2018,8 +2021,8 @@ export default function ToolsTab({
                             ))}
                           </datalist>
 
-                          <div className="flex items-center justify-between rounded-lg border border-[#e4e0f5] bg-[#f5f3ff] px-3 py-2">
-                            <p className="text-[11px] text-black/60">Mensaje al cliente durante transferencia</p>
+                          <div className="flex items-center justify-between rounded-lg border border-border-default bg-[#f5f3ff] px-3 py-2">
+                            <p className="text-[11px] text-text-secondary">Mensaje al cliente durante transferencia</p>
                             <ToolToggle
                               active={Boolean(params.enable_client_message)}
                               onChange={(value) =>
@@ -2035,8 +2038,8 @@ export default function ToolsTab({
 
                       {systemToolType === 'play_keypad_touch_tone' && (
                         <div className="space-y-2">
-                          <div className="flex items-center justify-between rounded-lg border border-[#e4e0f5] bg-[#f5f3ff] px-3 py-2">
-                            <p className="text-[11px] text-black/60">Enviar DTMF out-of-band (RFC4733)</p>
+                          <div className="flex items-center justify-between rounded-lg border border-border-default bg-[#f5f3ff] px-3 py-2">
+                            <p className="text-[11px] text-text-secondary">Enviar DTMF out-of-band (RFC4733)</p>
                             <ToolToggle
                               active={Boolean(params.use_out_of_band_dtmf)}
                               onChange={(value) =>
@@ -2047,8 +2050,8 @@ export default function ToolsTab({
                               }
                             />
                           </div>
-                          <div className="flex items-center justify-between rounded-lg border border-[#e4e0f5] bg-[#f5f3ff] px-3 py-2">
-                            <p className="text-[11px] text-black/60">Suprimir turno de voz despues del DTMF</p>
+                          <div className="flex items-center justify-between rounded-lg border border-border-default bg-[#f5f3ff] px-3 py-2">
+                            <p className="text-[11px] text-text-secondary">Suprimir turno de voz despues del DTMF</p>
                             <ToolToggle
                               active={Boolean(params.suppress_turn_after_dtmf)}
                               onChange={(value) =>
@@ -2064,7 +2067,7 @@ export default function ToolsTab({
 
                       {systemToolType === 'voicemail_detection' && (
                         <div>
-                          <label className="mb-1.5 block text-xs font-medium text-black/70">
+                          <label className="mb-1.5 block text-xs font-medium text-text-primary/70">
                             Mensaje opcional para dejar en buzon de voz
                           </label>
                           <textarea
@@ -2094,15 +2097,15 @@ export default function ToolsTab({
 
       {/* Workspace tools */}
       {!isClient && (
-      <div className="overflow-hidden rounded-xl border border-[#e4e0f5] bg-white">
-        <div className="flex items-center justify-between border-b border-[#e4e0f5] bg-linear-to-r from-[#f5f3ff] to-white px-5 py-4">
+      <div className="overflow-hidden rounded-xl border border-border-default bg-surface">
+        <div className="flex items-center justify-between border-b border-border-default bg-linear-to-r from-[#f5f3ff] to-white px-5 py-4">
           <div className="flex items-center gap-2.5">
-            <ServerIcon className="h-4 w-4 text-[#271173]" />
+            <ServerIcon className="h-4 w-4 text-primary-600" />
             <div>
-              <p className="text-sm font-medium text-black">Webhooks del workspace</p>
-              <p className="text-xs text-black/50">
+              <p className="text-sm font-medium text-text-primary">Webhooks del workspace</p>
+              <p className="text-xs text-text-tertiary">
                 Solo se listan herramientas webhook HTTP creadas por ti. Se adjuntan via{' '}
-                <span className="rounded bg-[#f0edff] px-1.5 py-0.5 font-mono text-[11px] text-black/70">
+                <span className="rounded bg-[#f0edff] px-1.5 py-0.5 font-mono text-[11px] text-text-primary/70">
                   tool_ids
                 </span>{' '}
                 y quedan persistentes al guardar.
@@ -2110,17 +2113,17 @@ export default function ToolsTab({
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <div className="inline-flex items-center gap-2 rounded-full border border-[#e4e0f5] bg-white px-2 py-1">
-              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#271173] text-xs font-bold text-white">
+            <div className="inline-flex items-center gap-2 rounded-full border border-border-default bg-surface px-2 py-1">
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary-600 text-xs font-bold text-white">
                 {attachedOwnedWebhookCount}
               </span>
-              <span className="text-xs font-medium text-black/60">adjuntas</span>
+              <span className="text-xs font-medium text-text-secondary">adjuntas</span>
             </div>
             {!isClient && (
               <button
                 type="button"
                 onClick={() => setShowCreateModal(true)}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-[#271173]/20 bg-[#f5f3ff] px-3 py-1.5 text-xs font-medium text-[#271173] transition-colors hover:bg-[#ede9ff]"
+                className="inline-flex items-center gap-1.5 rounded-xl border border-[#271173]/20 bg-[#f5f3ff] px-3 py-1.5 text-xs font-medium text-primary-600 transition-colors hover:bg-primary-50"
               >
                 <PlusIcon className="h-3.5 w-3.5" />
                 Nueva
@@ -2131,7 +2134,7 @@ export default function ToolsTab({
 
         <div className="space-y-2 px-3 py-3">
           {isLoading ? (
-            <div className="flex h-28 items-center justify-center gap-2.5 text-sm text-black/60">
+            <div className="flex h-28 items-center justify-center gap-2.5 text-sm text-text-secondary">
               <div className="h-4 w-4 animate-spin rounded-full border-2 border-[#271173] border-t-transparent" />
               Cargando herramientas...
             </div>
@@ -2162,18 +2165,18 @@ export default function ToolsTab({
                       )
                     }
                   }}
-                  className="cursor-pointer rounded-xl border border-[#e4e0f5] bg-white p-4 transition-colors hover:bg-[#f5f3ff]"
+                  className="cursor-pointer rounded-xl border border-border-default bg-surface p-4 transition-colors hover:bg-primary-50/60"
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div className="min-w-0 flex-1">
                       <div className="mb-1 flex flex-wrap items-center gap-2">
-                        <LinkIcon className="h-3.5 w-3.5 shrink-0 text-black/50" />
-                        <p className="text-sm font-medium text-black">
+                        <LinkIcon className="h-3.5 w-3.5 shrink-0 text-text-tertiary" />
+                        <p className="text-sm font-medium text-text-primary">
                           {tool.tool_config.name}
                         </p>
                         {isAttached && (
                           <span
-                            className={`inline-flex items-center gap-1 rounded-full bg-[#ede9ff] px-2 py-0.5 text-[11px] font-medium text-[#271173] ${
+                            className={`inline-flex items-center gap-1 rounded-full bg-primary-50 px-2 py-0.5 text-[11px] font-medium text-primary-600 ${
                               togglingWorkspaceId === tool.id ? 'animate-pulse' : ''
                             }`}
                           >
@@ -2183,7 +2186,7 @@ export default function ToolsTab({
                         )}
                       </div>
 
-                      <div className="space-y-1 text-xs text-black/50">
+                      <div className="space-y-1 text-xs text-text-tertiary">
                         <p>{tool.tool_config.description ?? 'Sin descripcion'}</p>
                         <p className="font-mono">Tipo: {tool.tool_config.type ?? 'unknown'}</p>
                         {tool.tool_config.api_schema?.url && (
@@ -2204,7 +2207,7 @@ export default function ToolsTab({
                           type="button"
                           disabled={deletingToolId === tool.id}
                           onClick={(e) => handleDeleteTool(tool.id, e)}
-                          className="rounded-lg p-1.5 text-black/40 transition-colors hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50"
+                          className="rounded-lg p-1.5 text-text-primary/40 transition-colors hover:bg-danger-50 hover:text-danger-600 disabled:opacity-50"
                           title="Eliminar herramienta"
                         >
                           <TrashIcon className="h-4 w-4" />
@@ -2217,7 +2220,7 @@ export default function ToolsTab({
                         />
                       </div>
                       <ChevronDownIcon
-                        className={`h-4 w-4 text-black/50 transition-transform ${
+                        className={`h-4 w-4 text-text-tertiary transition-transform ${
                           isExpanded ? 'rotate-180' : ''
                         }`}
                       />
@@ -2225,8 +2228,8 @@ export default function ToolsTab({
                   </div>
 
                   {isExpanded && hasApiSchema && (
-                    <div className="mt-3 border-t border-[#e4e0f5] pt-3">
-                      <p className="mb-2 text-[11px] font-medium uppercase tracking-[0.16em] text-black/45">
+                    <div className="mt-3 border-t border-border-default pt-3">
+                      <p className="mb-2 text-[11px] font-medium uppercase tracking-[0.16em] text-text-muted">
                         api_schema
                       </p>
                       <pre className="overflow-x-auto rounded-xl bg-[#1a1a2e] p-3 font-mono text-xs text-green-400">
@@ -2245,10 +2248,10 @@ export default function ToolsTab({
       )}
 
       {/* Embedded tools */}
-      <div className="rounded-xl border border-[#e4e0f5] bg-white p-5">
+      <div className="rounded-xl border border-border-default bg-surface p-5">
         <div className="mb-3 flex items-center gap-2.5">
-          <LinkIcon className="h-4 w-4 text-[#271173]" />
-          <p className="text-sm font-medium text-black">Herramientas embebidas ya presentes</p>
+          <LinkIcon className="h-4 w-4 text-primary-600" />
+          <p className="text-sm font-medium text-text-primary">Herramientas embebidas ya presentes</p>
         </div>
 
         <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
@@ -2285,29 +2288,29 @@ export default function ToolsTab({
                       )
                     }
                   }}
-                  className="cursor-pointer rounded-xl border border-[#e4e0f5] bg-[#f5f3ff] p-4"
+                  className="cursor-pointer rounded-xl border border-border-default bg-[#f5f3ff] p-4"
                 >
                   <div className="mb-1 flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
-                      <CheckCircleIcon className="h-4 w-4 text-[#271173]" />
-                      <p className="text-sm font-medium text-black">
+                      <CheckCircleIcon className="h-4 w-4 text-primary-600" />
+                      <p className="text-sm font-medium text-text-primary">
                         {String(tool.name ?? `tool_${index + 1}`)}
                       </p>
                     </div>
                     <ChevronDownIcon
-                      className={`h-4 w-4 text-black/50 transition-transform ${
+                      className={`h-4 w-4 text-text-tertiary transition-transform ${
                         isExpanded ? 'rotate-180' : ''
                       }`}
                     />
                   </div>
-                  <p className="text-xs text-black/60">Tipo: {String(tool.type ?? 'custom')}</p>
+                  <p className="text-xs text-text-secondary">Tipo: {String(tool.type ?? 'custom')}</p>
                   {'description' in tool && typeof tool.description === 'string' && (
-                    <p className="mt-1 text-xs text-black/50">{tool.description}</p>
+                    <p className="mt-1 text-xs text-text-tertiary">{tool.description}</p>
                   )}
 
                   {isExpanded && (
-                    <div className="mt-3 border-t border-[#e4e0f5] pt-3">
-                      <p className="mb-2 text-[11px] font-medium uppercase tracking-[0.16em] text-black/45">
+                    <div className="mt-3 border-t border-border-default pt-3">
+                      <p className="mb-2 text-[11px] font-medium uppercase tracking-[0.16em] text-text-muted">
                         tool json
                       </p>
                       <pre className="overflow-x-auto rounded-xl bg-[#1a1a2e] p-3 font-mono text-xs text-green-400">

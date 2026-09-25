@@ -1,0 +1,18 @@
+# Nunca copiar secretos ni dependencias del host dentro de las imágenes.
+**/.env
+**/.env.*
+!**/.env.example
+**/.venv
+**/.uv-cache
+**/__pycache__
+**/.pytest_cache
+**/node_modules
+**/dist
+**/test-results
+**/playwright-report
+**/*.db
+.git
+.github
+.claude
+.agents
+.playwright-mcp

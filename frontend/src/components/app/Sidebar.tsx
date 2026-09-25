@@ -26,6 +26,7 @@ import {
 } from '@heroicons/react/24/solid'
 import Logo from '@/components/Logo'
 import { getAuthenticatedUser } from '@/api/AuthAPI'
+import { clearSession } from '@/lib/session'
 
 const baseNavItems = [
   {
@@ -65,7 +66,7 @@ const baseNavItems = [
     iconActive: ChatBubbleOvalLeftEllipsisSolid,
   },
   {
-    label: 'Numeros de telefono',
+    label: 'Números de teléfono',
     path: '/numeros_telefono',
     icon: DevicePhoneMobileIcon,
     iconActive: DevicePhoneMobileSolid,
@@ -93,7 +94,7 @@ export default function Sidebar() {
       ? [
           ...baseNavItems,
           {
-            label: 'Administracion',
+            label: 'Administración',
             path: '/admin/usuarios',
             icon: UserGroupIcon,
             iconActive: UserGroupSolid,
@@ -106,26 +107,28 @@ export default function Sidebar() {
     location.pathname.startsWith('/configuracion/')
 
   const handleLogout = () => {
-    localStorage.removeItem('AUTH_TOKEN')
+    clearSession()
     navigate('/auth/login')
   }
 
   return (
-    <aside className="flex h-full w-64 shrink-0 flex-col border-r border-[#e4e0f5] bg-white">
-      <div className="border-b border-[#e4e0f5] px-5 py-5">
-        <div className="rounded-2xl border border-[#e4e0f5] bg-[#f5f3ff] px-4 py-4">
-          <div className="flex justify-center rounded-xl bg-[#271173] px-3 py-2 shadow-sm">
+    <aside className="flex h-full w-64 shrink-0 flex-col bg-surface border-r border-border-default">
+      {/* Brand header */}
+      <div className="px-5 py-5">
+        <div className="rounded-2xl border border-border-default bg-bg-secondary px-4 py-4">
+          <div className="flex justify-center rounded-xl bg-primary-600 px-3 py-2.5 shadow-sm">
             <Logo className="h-9 w-auto" />
           </div>
-          <div className="mt-3 flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-black/50">
-            <span className="inline-block h-2 w-2 rounded-full bg-[#271173]" />
+          <div className="mt-3 flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-text-tertiary">
+            <span className="inline-block h-2 w-2 rounded-full bg-accent-500 animate-pulse" />
             Voice Console
           </div>
         </div>
       </div>
 
-      <nav className="flex-1 space-y-0.5 px-3 py-4">
-        <p className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-black/40">
+      {/* Navigation */}
+      <nav className="flex-1 space-y-0.5 px-3 py-2 custom-scrollbar overflow-y-auto">
+        <p className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-text-muted">
           Llamadas
         </p>
 
@@ -139,39 +142,40 @@ export default function Sidebar() {
             <Link
               key={item.path}
               to={item.path}
-              className={`nav-item flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm transition-colors duration-150 ${
+              className={`nav-item flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200 ${
                 active
-                  ? 'bg-[#ede9ff] text-[#271173] font-medium'
-                  : 'text-black/60 hover:bg-[#f5f3ff] hover:text-[#271173]'
+                  ? 'bg-primary-50 text-primary-700 shadow-sm ring-1 ring-primary-200'
+                  : 'text-text-secondary hover:bg-neutral-50 hover:text-text-primary'
               }`}
               style={{ animationDelay: `${index * 40}ms` }}
             >
-              <Icon className="w-4 h-4 shrink-0" />
-              <span>{item.label}</span>
+              <Icon className="w-[18px] h-[18px] shrink-0" />
+              <span className="truncate">{item.label}</span>
             </Link>
           )
         })}
       </nav>
 
-      <div className="space-y-0.5 border-t border-[#e4e0f5] px-3 py-4">
+      {/* Footer actions */}
+      <div className="space-y-0.5 border-t border-border-default px-3 py-4">
         <Link
           to="/configuracion"
-          className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm transition-colors duration-150 ${
+          className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200 ${
             settingsActive
-              ? 'bg-[#ede9ff] text-[#271173] font-medium'
-              : 'text-black/60 hover:bg-[#f5f3ff] hover:text-[#271173]'
+              ? 'bg-primary-50 text-primary-700 shadow-sm ring-1 ring-primary-200'
+              : 'text-text-secondary hover:bg-neutral-50 hover:text-text-primary'
           }`}
         >
-          <Cog6ToothIcon className="w-4 h-4" />
-          Configuracion
+          <Cog6ToothIcon className="w-[18px] h-[18px]" />
+          Configuración
         </Link>
 
         <button
           onClick={handleLogout}
-          className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm text-black/60 transition-colors duration-150 hover:bg-rose-50 hover:text-rose-600"
+          className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm font-medium text-text-secondary transition-all duration-200 hover:bg-danger-50 hover:text-danger-600"
         >
-          <ArrowRightStartOnRectangleIcon className="w-4 h-4" />
-          Cerrar sesion
+          <ArrowRightStartOnRectangleIcon className="w-[18px] h-[18px]" />
+          Cerrar sesión
         </button>
       </div>
     </aside>

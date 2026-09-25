@@ -23,7 +23,7 @@ type FormValues = {
 }
 
 const inputClass =
-  'rounded-xl border border-[#e4e0f5] bg-white px-3 py-2.5 text-sm text-black placeholder:text-black/40 transition-colors focus:border-[#271173] focus:outline-none'
+  'rounded-xl border border-border-default bg-surface px-3 py-2.5 text-sm text-text-primary placeholder:text-text-muted transition-all duration-200 focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 focus:outline-none'
 
 function toDefaults(config: UserWhatsAppGlobalConfig | null): FormValues {
   return {
@@ -90,7 +90,7 @@ export default function WhatsAppConfigView() {
 
   if (isLoading) {
     return (
-      <div className="flex h-full items-center justify-center gap-2.5 text-black/60">
+      <div className="flex h-full items-center justify-center gap-2.5 text-text-secondary">
         <div className="h-5 w-5 animate-spin rounded-full border-2 border-[#271173] border-t-transparent" />
         Cargando configuracion de WhatsApp...
       </div>
@@ -99,7 +99,7 @@ export default function WhatsAppConfigView() {
 
   if (isError) {
     return (
-      <div className="flex h-full items-center justify-center text-black/60">
+      <div className="flex h-full items-center justify-center text-text-secondary">
         No se pudo cargar la configuracion de WhatsApp.
       </div>
     )
@@ -109,21 +109,21 @@ export default function WhatsAppConfigView() {
     <div className="h-full overflow-y-auto">
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-8 py-8">
         <div className="section-enter">
-          <h1 className="text-2xl font-semibold text-black">WhatsApp Configuration</h1>
-          <p className="mt-1 text-sm text-black/60">
+          <h1 className="text-2xl font-semibold text-text-primary">WhatsApp Configuration</h1>
+          <p className="mt-1 text-sm text-text-secondary">
             Configuracion global reutilizable para escalaciones, confirmaciones de citas y mensajes salientes.
           </p>
         </div>
 
-        <section className="rounded-2xl border border-[#e4e0f5] bg-white p-6 shadow-sm">
-          <div className="mb-5 flex items-center gap-2.5 text-black">
-            <ChatBubbleLeftRightIcon className="h-5 w-5 text-[#271173]" />
+        <section className="rounded-2xl border border-border-default bg-surface p-6 shadow-sm">
+          <div className="mb-5 flex items-center gap-2.5 text-text-primary">
+            <ChatBubbleLeftRightIcon className="h-5 w-5 text-primary-600" />
             <h2 className="text-lg font-semibold">Canal y credenciales</h2>
           </div>
 
           <form onSubmit={handleSubmit((values) => saveConfig(values))} className="space-y-5" noValidate>
             <div className="grid gap-4 md:grid-cols-2">
-              <label className="flex flex-col gap-1.5 text-sm font-medium text-black/80">
+              <label className="flex flex-col gap-1.5 text-sm font-medium text-text-primary">
                 Proveedor
                 <select className={inputClass} {...register('provider')}>
                   <option value="twilio">Twilio WhatsApp</option>
@@ -131,7 +131,7 @@ export default function WhatsAppConfigView() {
                 </select>
               </label>
 
-              <label className="flex flex-col gap-1.5 text-sm font-medium text-black/80">
+              <label className="flex flex-col gap-1.5 text-sm font-medium text-text-primary">
                 Numero remitente por defecto
                 <input
                   type="text"
@@ -142,14 +142,14 @@ export default function WhatsAppConfigView() {
               </label>
             </div>
 
-            <label className="inline-flex items-center gap-2 rounded-xl border border-[#e4e0f5] bg-[#f5f3ff] px-3 py-2 text-sm text-black/80">
+            <label className="inline-flex items-center gap-2 rounded-xl border border-border-default bg-[#f5f3ff] px-3 py-2 text-sm text-text-primary">
               <input type="checkbox" className="h-4 w-4" {...register('active')} />
               Activar envio por WhatsApp
             </label>
 
             {provider === 'twilio' ? (
               <div className="grid gap-4 md:grid-cols-2">
-                <label className="flex flex-col gap-1.5 text-sm font-medium text-black/80">
+                <label className="flex flex-col gap-1.5 text-sm font-medium text-text-primary">
                   Account SID
                   <input
                     type="text"
@@ -159,7 +159,7 @@ export default function WhatsAppConfigView() {
                   />
                 </label>
 
-                <label className="flex flex-col gap-1.5 text-sm font-medium text-black/80">
+                <label className="flex flex-col gap-1.5 text-sm font-medium text-text-primary">
                   Auth Token
                   <input
                     type="password"
@@ -171,7 +171,7 @@ export default function WhatsAppConfigView() {
               </div>
             ) : (
               <div className="grid gap-4 md:grid-cols-2">
-                <label className="flex flex-col gap-1.5 text-sm font-medium text-black/80">
+                <label className="flex flex-col gap-1.5 text-sm font-medium text-text-primary">
                   Phone Number ID
                   <input
                     type="text"
@@ -181,7 +181,7 @@ export default function WhatsAppConfigView() {
                   />
                 </label>
 
-                <label className="flex flex-col gap-1.5 text-sm font-medium text-black/80">
+                <label className="flex flex-col gap-1.5 text-sm font-medium text-text-primary">
                   Business Account ID (opcional)
                   <input
                     type="text"
@@ -191,7 +191,7 @@ export default function WhatsAppConfigView() {
                   />
                 </label>
 
-                <label className="md:col-span-2 flex flex-col gap-1.5 text-sm font-medium text-black/80">
+                <label className="md:col-span-2 flex flex-col gap-1.5 text-sm font-medium text-text-primary">
                   Access Token
                   <input
                     type="password"
@@ -204,7 +204,7 @@ export default function WhatsAppConfigView() {
             )}
 
             <div className="grid gap-4">
-              <label className="flex flex-col gap-1.5 text-sm font-medium text-black/80">
+              <label className="flex flex-col gap-1.5 text-sm font-medium text-text-primary">
                 Template de escalacion (opcional)
                 <textarea
                   rows={3}
@@ -214,7 +214,7 @@ export default function WhatsAppConfigView() {
                 />
               </label>
 
-              <label className="flex flex-col gap-1.5 text-sm font-medium text-black/80">
+              <label className="flex flex-col gap-1.5 text-sm font-medium text-text-primary">
                 Template de confirmacion de cita (opcional)
                 <textarea
                   rows={3}
@@ -229,7 +229,7 @@ export default function WhatsAppConfigView() {
               <button
                 type="submit"
                 disabled={isSaving || !isDirty}
-                className="inline-flex items-center gap-2 rounded-xl bg-[#271173] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#1f0d5a] disabled:opacity-50"
+                className="inline-flex items-center gap-2 rounded-xl bg-primary-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-primary-700 disabled:opacity-50"
               >
                 {isSaving ? (
                   <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />

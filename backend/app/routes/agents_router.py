@@ -74,76 +74,77 @@ async def delete_tool(tool_id: str, current_user: CurrentUser, session: SessionD
 
 
 @agents_router.get("/knowledge-base")
-async def list_knowledge_base_documents(current_user: CurrentUser):
-    return await AgentController.list_knowledge_base_documents(current_user)
+async def list_knowledge_base_documents(current_user: CurrentUser, session: SessionDep):
+    return await AgentController.list_knowledge_base_documents(current_user, session)
 
 
 @agents_router.post("/knowledge-base/file")
 async def create_knowledge_base_document_from_file(
     current_user: CurrentUser,
+    session: SessionDep,
     file: UploadFile = File(...),
     name: str | None = Form(None),
 ):
     return await AgentController.create_knowledge_base_document_from_file(
-        file, name, current_user
+        file, name, current_user, session
     )
 
 
 @agents_router.post("/knowledge-base/text")
 async def create_knowledge_base_document_from_text(
-    request: Request, current_user: CurrentUser
+    request: Request, current_user: CurrentUser, session: SessionDep
 ):
     payload = await request.json()
     return await AgentController.create_knowledge_base_document_from_text(
-        payload, current_user
+        payload, current_user, session
     )
 
 
 @agents_router.post("/knowledge-base/url")
 async def create_knowledge_base_document_from_url(
-    request: Request, current_user: CurrentUser
+    request: Request, current_user: CurrentUser, session: SessionDep
 ):
     payload = await request.json()
     return await AgentController.create_knowledge_base_document_from_url(
-        payload, current_user
+        payload, current_user, session
     )
 
 
 @agents_router.patch("/knowledge-base/{documentation_id}")
 async def update_knowledge_base_document(
-    documentation_id: str, request: Request, current_user: CurrentUser
+    documentation_id: str, request: Request, current_user: CurrentUser, session: SessionDep
 ):
     payload = await request.json()
     return await AgentController.update_knowledge_base_document(
-        documentation_id, payload, current_user
+        documentation_id, payload, current_user, session
     )
 
 
 @agents_router.delete("/knowledge-base/{documentation_id}")
 async def delete_knowledge_base_document(
-    documentation_id: str, current_user: CurrentUser
+    documentation_id: str, current_user: CurrentUser, session: SessionDep
 ):
     return await AgentController.delete_knowledge_base_document(
-        documentation_id, current_user
+        documentation_id, current_user, session
     )
 
 
 @agents_router.get("/knowledge-base/{documentation_id}/rag-index")
 async def get_knowledge_base_rag_indexes(
-    documentation_id: str, current_user: CurrentUser
+    documentation_id: str, current_user: CurrentUser, session: SessionDep
 ):
     return await AgentController.get_knowledge_base_rag_indexes(
-        documentation_id, current_user
+        documentation_id, current_user, session
     )
 
 
 @agents_router.post("/knowledge-base/{documentation_id}/rag-index")
 async def compute_knowledge_base_rag_index(
-    documentation_id: str, request: Request, current_user: CurrentUser
+    documentation_id: str, request: Request, current_user: CurrentUser, session: SessionDep
 ):
     payload = await request.json()
     return await AgentController.compute_knowledge_base_rag_index(
-        documentation_id, payload, current_user
+        documentation_id, payload, current_user, session
     )
 
 

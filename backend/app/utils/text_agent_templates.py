@@ -11,6 +11,7 @@ from app.utils.client_defaults import (
 )
 
 TEXT_AGENT_NON_ADMIN_LIMIT = 3
+VOICE_AGENT_NON_ADMIN_LIMIT = 3
 TEXT_AGENT_DEFAULT_TEMPLATE_KEY = "sofia"
 
 _SUPPORTED_TEMPLATE_KEYS = ("sofia", "recepcionista", "faq_bot", "custom")

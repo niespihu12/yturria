@@ -225,6 +225,14 @@ class AdminCreateUserRequest(BaseSchema):
             raise ValueError("El password es muy corto, minimo 8 caracteres")
         return value
 
+    @field_validator("role", mode="before")
+    @classmethod
+    def validate_role(cls, value: object) -> str:
+        role = _normalize_text(value).lower() or "agent"
+        if role not in {"agent", "supervisor", "admin", "super_admin"}:
+            raise ValueError("Rol no valido")
+        return role
+
 
 class MfaChallengeResponse(BaseModel):
     requires_mfa: bool = True

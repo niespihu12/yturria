@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import hmac
+import logging
+import threading
+import time
+from collections import deque
 from datetime import datetime, timedelta
 
 from fastapi import HTTPException, status
@@ -11,7 +16,7 @@ from app.controllers.deps.auth import CurrentUser
 from app.controllers.deps.db_session import SessionDep
 from app.models.TextAgent import TextAgent
 from app.models.Token import Token
-from app.models.User import User
+from app.models.User import User, UserRole
 from app.models.UserAgent import UserAgent
 from app.models.UserPhoneNumber import UserPhoneNumber
 from app.schemas.auth import (
@@ -35,6 +40,7 @@ from app.utils.auth import check_password, hash_password
 from app.utils.jwt import decode_jwt, generate_jwt
 from app.utils.mfa import MFA_LOCK_MINUTES, MFA_MAX_ATTEMPTS, normalize_mfa_code
 from app.utils.roles import (
+    is_platform_super_admin_email,
     is_super_admin_user,
     normalize_email,
     resolve_default_user_role,
@@ -45,6 +51,29 @@ from app.utils.token import generate_token
 ACCOUNT_CONFIRMATION = "account_confirmation"
 PASSWORD_RESET = "password_reset"
 MFA_LOGIN = "mfa_login"
+
+logger = logging.getLogger(__name__)
+
+# Los codigos de confirmacion/reset son de 6 digitos y se buscan solo por valor.
+# Ademas del limite por IP, un presupuesto global de fallos frena la fuerza bruta
+# distribuida (muchas IPs) contra el espacio de 10^6 codigos.
+# Muy por encima de lo que aporta una sola IP (10/min x 10 min = 100): una IP
+# sola no puede bloquear confirmaciones y resets de todos los usuarios.
+TOKEN_FAILURE_LIMIT = 1000
+TOKEN_FAILURE_WINDOW_SECONDS = 600
+_token_failures: deque[float] = deque()
+_token_failures_lock = threading.Lock()
+
+
+def _token_guessing_blocked(now: float) -> bool:
+    cutoff = now - TOKEN_FAILURE_WINDOW_SECONDS
+    while _token_failures and _token_failures[0] < cutoff:
+        _token_failures.popleft()
+    return len(_token_failures) >= TOKEN_FAILURE_LIMIT
+
+
+def _access_token(user: User) -> str:
+    return generate_jwt({"id": user.id, "tv": user.token_version or 0})
 
 
 class AuthController:
@@ -77,6 +106,14 @@ class AuthController:
 
     @staticmethod
     def _get_token_or_404(session: SessionDep, token_value: str, purpose: str) -> Token:
+        with _token_failures_lock:
+            if _token_guessing_blocked(time.monotonic()):
+                logger.warning("auth: demasiados codigos invalidos, validacion bloqueada temporalmente")
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail="Demasiados intentos. Intenta de nuevo en unos minutos",
+                )
+
         statement = select(Token).where(Token.token == token_value, Token.purpose == purpose)
         token = session.exec(statement).first()
 
@@ -86,6 +123,8 @@ class AuthController:
             token = None
 
         if not token:
+            with _token_failures_lock:
+                _token_failures.append(time.monotonic())
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Token no valido",
@@ -212,10 +251,15 @@ class AuthController:
     @staticmethod
     def login(payload: LoginRequest, session: SessionDep):
         user = AuthController._get_user_by_email(session, payload.email)
-        if not user:
+        # Same response for unknown email and wrong password to avoid account enumeration.
+        if (
+            not user
+            or user.deleted_at is not None
+            or not check_password(payload.password, user.password)
+        ):
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="El Usuario no existe",
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Email o password incorrectos",
             )
 
         if not user.confirmed:
@@ -237,12 +281,6 @@ class AuthController:
                     "La cuenta no ha sido confirmada, te hemos enviado un nuevo "
                     "email de confirmacion"
                 ),
-            )
-
-        if not check_password(payload.password, user.password):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="El password es incorrecto",
             )
 
         if user.mfa_enabled:
@@ -271,7 +309,7 @@ class AuthController:
                 }
             )
 
-        return PlainTextResponse(generate_jwt({"id": user.id}))
+        return PlainTextResponse(_access_token(user))
 
     @staticmethod
     def login_with_mfa(payload: MfaLoginRequest, session: SessionDep) -> PlainTextResponse:
@@ -312,30 +350,22 @@ class AuthController:
                 detail="El codigo MFA expiro. Solicita uno nuevo iniciando sesion otra vez",
             )
 
-        if normalize_mfa_code(payload.code) != login_token.token:
+        if not hmac.compare_digest(normalize_mfa_code(payload.code), login_token.token):
             AuthController._handle_failed_mfa_attempt(user, session)
 
         session.delete(login_token)
         session.commit()
         AuthController._reset_mfa_attempts(user, session)
-        return PlainTextResponse(generate_jwt({"id": user.id}))
+        return PlainTextResponse(_access_token(user))
 
     @staticmethod
     def request_confirmation_code(
         payload: RequestConfirmationCodeRequest, session: SessionDep
     ) -> str:
+        generic_message = "Si la cuenta existe y no esta confirmada, te enviamos un nuevo codigo"
         user = AuthController._get_user_by_email(session, payload.email)
-        if not user:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="El Usuario no esta registrado",
-            )
-
-        if user.confirmed:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="El Usuario ya esta confirmado",
-            )
+        if not user or user.confirmed or user.deleted_at is not None:
+            return generic_message
 
         token = AuthController._create_token(session, user.id, ACCOUNT_CONFIRMATION)
         user_email = user.email
@@ -349,16 +379,14 @@ class AuthController:
             token=token_value,
         )
 
-        return "Se envio un nuevo token a tu email"
+        return generic_message
 
     @staticmethod
     def forgot_password(payload: ForgotPasswordRequest, session: SessionDep) -> str:
+        generic_message = "Si el email esta registrado, recibiras instrucciones para restablecer tu password"
         user = AuthController._get_user_by_email(session, payload.email)
-        if not user:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="El Usuario no esta registrado",
-            )
+        if not user or user.deleted_at is not None:
+            return generic_message
 
         token = AuthController._create_token(session, user.id, PASSWORD_RESET)
         user_email = user.email
@@ -372,7 +400,7 @@ class AuthController:
             token=token_value,
         )
 
-        return "Revisa tu email para instrucciones"
+        return generic_message
 
     @staticmethod
     def validate_token(payload: ValidateTokenRequest, session: SessionDep) -> str:
@@ -395,6 +423,7 @@ class AuthController:
         user = AuthController._get_user_or_404(session, token_record.user_id)
 
         user.password = hash_password(payload.password)
+        user.token_version = (user.token_version or 0) + 1
         session.add(user)
         session.delete(token_record)
         session.commit()
@@ -476,7 +505,7 @@ class AuthController:
             email=normalized_email,
             name=payload.name,
             password=hash_password(payload.password),
-            role=payload.role,
+            role=UserRole(payload.role),
             confirmed=True,
         )
         session.add(user)
@@ -500,7 +529,10 @@ class AuthController:
     ) -> str:
         normalized_email = normalize_email(payload.email)
         user_exists = AuthController._get_user_by_email(session, normalized_email)
-        if user_exists and user_exists.id != current_user.id:
+        email_changed = normalized_email != normalize_email(current_user.email)
+        if (user_exists and user_exists.id != current_user.id) or (
+            email_changed and is_platform_super_admin_email(normalized_email)
+        ):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="El email ya esta registrado",
@@ -527,6 +559,7 @@ class AuthController:
             )
 
         current_user.password = hash_password(payload.password)
+        current_user.token_version = (current_user.token_version or 0) + 1
         session.add(current_user)
         session.commit()
 

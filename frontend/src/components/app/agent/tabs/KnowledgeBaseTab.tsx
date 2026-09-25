@@ -47,10 +47,10 @@ type RagDraft = {
 }
 
 const inputClass =
-  'w-full rounded-xl border border-[#e4e0f5] bg-white px-3.5 py-2.5 text-sm text-black placeholder:text-black/40 focus:border-[#271173] focus:outline-none transition-colors'
+  'w-full rounded-xl border border-border-default bg-surface px-3.5 py-2.5 text-sm text-text-primary placeholder:text-text-primary/40 focus:border-primary-500 focus:outline-none transition-colors'
 
 const sliderClass =
-  'w-full h-1.5 rounded-full appearance-none bg-[#e4e0f5] [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[#271173] [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:shadow-md'
+  'w-full h-1.5 rounded-full appearance-none bg-[#e4e0f5] [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary-600 [&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:shadow-md'
 
 function formatBytes(value?: number) {
   if (!value) return 'Tamano no disponible'
@@ -62,16 +62,16 @@ function formatBytes(value?: number) {
 function statusTone(status: string) {
   switch (status) {
     case 'succeeded':
-      return 'border-emerald-200 bg-emerald-50 text-emerald-700'
+      return 'border-emerald-200 bg-accent-50 text-accent-700'
     case 'processing':
     case 'created':
       return 'border-amber-200 bg-amber-50 text-amber-700'
     case 'failed':
       return 'border-red-200 bg-red-50 text-red-700'
     case 'disabled':
-      return 'border-gray-200 bg-gray-50 text-black/50'
+      return 'border-gray-200 bg-gray-50 text-text-tertiary'
     default:
-      return 'border-[#e4e0f5] bg-[#ede9ff] text-[#271173]'
+      return 'border-border-default bg-primary-50 text-primary-600'
   }
 }
 
@@ -84,7 +84,7 @@ function typeTone(type: string) {
     case 'text':
       return 'bg-amber-50 text-amber-700 border-amber-200'
     default:
-      return 'bg-[#f5f3ff] text-black/60 border-[#e4e0f5]'
+      return 'bg-[#f5f3ff] text-text-secondary border-border-default'
   }
 }
 
@@ -131,11 +131,11 @@ function TogglePill({
     <div
       onClick={onClick}
       className={`relative h-5 w-10 cursor-pointer rounded-full transition-colors duration-200 ${
-        enabled ? 'bg-[#271173]' : 'bg-black/20'
+        enabled ? 'bg-primary-600' : 'bg-black/20'
       }`}
     >
       <div
-        className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform duration-200 ${
+        className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-surface shadow transition-transform duration-200 ${
           enabled ? 'translate-x-5' : 'translate-x-0'
         }`}
       />
@@ -427,15 +427,15 @@ export default function KnowledgeBaseTab({ agentId, agent, knowledgeBase, onUpda
   return (
     <div className="space-y-5">
       {/* Header stats */}
-      <section className="overflow-hidden rounded-[28px] border border-[#e4e0f5] bg-white shadow-sm">
+      <section className="overflow-hidden rounded-3xl border border-border-default bg-surface shadow-sm">
         <div className="flex flex-col gap-6 px-6 py-6 lg:flex-row lg:items-start lg:justify-between">
           <div className="max-w-2xl">
-            <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-[#e4e0f5] bg-[#ede9ff] px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-[#271173]">
+            <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-border-default bg-primary-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-primary-600">
               <SparklesIcon className="h-3.5 w-3.5" />
               Knowledge Base
             </div>
-            <h2 className="text-xl font-semibold text-black">Documentos listos para respuestas con contexto</h2>
-            <p className="mt-2 max-w-xl text-sm leading-6 text-black/60">
+            <h2 className="text-xl font-semibold text-text-primary">Documentos listos para respuestas con contexto</h2>
+            <p className="mt-2 max-w-xl text-sm leading-6 text-text-secondary">
               Segun la documentacion oficial de la plataforma, los documentos se crean primero en la
               knowledge base del workspace y luego se vinculan al agente.
             </p>
@@ -464,12 +464,12 @@ export default function KnowledgeBaseTab({ agentId, agent, knowledgeBase, onUpda
             ].map((stat) => (
               <div
                 key={stat.label}
-                className="relative overflow-hidden rounded-2xl border border-[#e4e0f5] bg-linear-to-br from-[#f5f3ff] to-white p-4"
+                className="relative overflow-hidden rounded-2xl border border-border-default bg-linear-to-br from-[#f5f3ff] to-white p-4"
               >
-                <stat.icon className="pointer-events-none absolute -bottom-3 -right-3 h-16 w-16 text-[#271173] opacity-5" />
-                <p className="text-xs uppercase tracking-[0.18em] text-black/50">{stat.label}</p>
-                <p className="mt-2 text-3xl font-bold text-[#271173]">{stat.value}</p>
-                <p className="mt-1 text-xs text-black/50">{stat.sub}</p>
+                <stat.icon className="pointer-events-none absolute -bottom-3 -right-3 h-16 w-16 text-primary-600 opacity-5" />
+                <p className="text-xs uppercase tracking-[0.18em] text-text-tertiary">{stat.label}</p>
+                <p className="mt-2 text-3xl font-bold text-primary-600">{stat.value}</p>
+                <p className="mt-1 text-xs text-text-tertiary">{stat.sub}</p>
               </div>
             ))}
           </div>
@@ -477,15 +477,15 @@ export default function KnowledgeBaseTab({ agentId, agent, knowledgeBase, onUpda
       </section>
 
       {/* Upload section */}
-      <section className="rounded-2xl border border-[#e4e0f5] bg-white p-5 shadow-sm">
+      <section className="rounded-2xl border border-border-default bg-surface p-5 shadow-sm">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h3 className="text-sm font-semibold text-black">Agregar conocimiento</h3>
-            <p className="mt-1 text-xs text-black/50">
+            <h3 className="text-sm font-semibold text-text-primary">Agregar conocimiento</h3>
+            <p className="mt-1 text-xs text-text-tertiary">
               Puedes montar archivos, URLs o texto libre y adjuntarlo al agente.
             </p>
           </div>
-          <div className="inline-flex rounded-xl border border-[#e4e0f5] bg-[#f5f3ff] p-1">
+          <div className="inline-flex rounded-xl border border-border-default bg-[#f5f3ff] p-1">
             {(['file', 'url', 'text'] as UploadMode[]).map((mode) => (
               <button
                 key={mode}
@@ -493,8 +493,8 @@ export default function KnowledgeBaseTab({ agentId, agent, knowledgeBase, onUpda
                 onClick={() => setUploadMode(mode)}
                 className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
                   uploadMode === mode
-                    ? 'bg-[#271173] text-white shadow-sm'
-                    : 'text-black/60 hover:text-[#271173]'
+                    ? 'bg-primary-600 text-white shadow-sm'
+                    : 'text-text-secondary hover:text-primary-600'
                 }`}
               >
                 {mode === 'file' ? (
@@ -521,8 +521,8 @@ export default function KnowledgeBaseTab({ agentId, agent, knowledgeBase, onUpda
             onClick={() => fileRef.current?.click()}
             className={`cursor-pointer rounded-2xl border-2 border-dashed px-6 py-10 text-center transition-all ${
               dragOver
-                ? 'border-[#271173] bg-[#ede9ff] ring-2 ring-[#271173] ring-offset-2'
-                : 'border-[#e4e0f5] bg-[#f5f3ff] hover:border-[#271173]/40 hover:bg-[#ede9ff]/50'
+                ? 'border-[#271173] bg-primary-50 ring-2 ring-[#271173] ring-offset-2'
+                : 'border-border-default bg-[#f5f3ff] hover:border-[#271173]/40 hover:bg-primary-50/50'
             }`}
           >
             <input
@@ -539,12 +539,12 @@ export default function KnowledgeBaseTab({ agentId, agent, knowledgeBase, onUpda
               }}
             />
             <ArrowUpTrayIcon
-              className={`mx-auto h-10 w-10 text-[#271173]/50 ${dragOver ? 'animate-bounce' : ''}`}
+              className={`mx-auto h-10 w-10 text-primary-600/50 ${dragOver ? 'animate-bounce' : ''}`}
             />
-            <p className="mt-3 text-sm font-medium text-black">
+            <p className="mt-3 text-sm font-medium text-text-primary">
               {isUploading ? 'Subiendo documento...' : 'Arrastra un archivo o haz clic para abrir'}
             </p>
-            <p className="mt-1 text-xs text-black/45">PDF, TXT, DOC, DOCX o MD</p>
+            <p className="mt-1 text-xs text-text-muted">PDF, TXT, DOC, DOCX o MD</p>
           </div>
         )}
 
@@ -568,7 +568,7 @@ export default function KnowledgeBaseTab({ agentId, agent, knowledgeBase, onUpda
               type="button"
               onClick={handleUrlSubmit}
               disabled={isUploading || !urlValue.trim()}
-              className="rounded-xl bg-[#271173] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#1f0d5a] disabled:cursor-not-allowed disabled:opacity-60"
+              className="rounded-xl bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isUploading ? 'Agregando...' : 'Agregar URL'}
             </button>
@@ -596,7 +596,7 @@ export default function KnowledgeBaseTab({ agentId, agent, knowledgeBase, onUpda
                 type="button"
                 onClick={handleTextSubmit}
                 disabled={isUploading || !textValue.trim()}
-                className="rounded-xl bg-[#271173] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#1f0d5a] disabled:cursor-not-allowed disabled:opacity-60"
+                className="rounded-xl bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {isUploading ? 'Creando...' : 'Crear documento'}
               </button>
@@ -606,25 +606,25 @@ export default function KnowledgeBaseTab({ agentId, agent, knowledgeBase, onUpda
       </section>
 
       {/* Documents list */}
-      <section className="rounded-2xl border border-[#e4e0f5] bg-white p-5 shadow-sm">
+      <section className="rounded-2xl border border-border-default bg-surface p-5 shadow-sm">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h3 className="text-sm font-semibold text-black">Documentos vinculados al agente</h3>
-            <p className="mt-1 text-xs text-black/50">
+            <h3 className="text-sm font-semibold text-text-primary">Documentos vinculados al agente</h3>
+            <p className="mt-1 text-xs text-text-tertiary">
               Administra el modo de uso y el estado de indexacion sin salir del detalle del agente.
             </p>
           </div>
-          <div className="inline-flex items-center gap-2 rounded-full border border-[#e4e0f5] bg-[#f5f3ff] px-3 py-1.5 text-xs text-black/60">
-            <CircleStackIcon className="h-3.5 w-3.5 text-[#271173]" />
+          <div className="inline-flex items-center gap-2 rounded-full border border-border-default bg-[#f5f3ff] px-3 py-1.5 text-xs text-text-secondary">
+            <CircleStackIcon className="h-3.5 w-3.5 text-primary-600" />
             Workspace docs: {workspaceKnowledgeBase?.documents?.length ?? 0}
           </div>
         </div>
 
         {docsSorted.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-[#e4e0f5] bg-[#f5f3ff] px-6 py-10 text-center">
-            <BookOpenIcon className="mx-auto h-10 w-10 text-black/30" />
-            <p className="mt-3 text-sm font-medium text-black">Todavia no hay documentos montados</p>
-            <p className="mt-1 text-xs text-black/45">
+          <div className="rounded-2xl border border-dashed border-border-default bg-[#f5f3ff] px-6 py-10 text-center">
+            <BookOpenIcon className="mx-auto h-10 w-10 text-text-primary/30" />
+            <p className="mt-3 text-sm font-medium text-text-primary">Todavia no hay documentos montados</p>
+            <p className="mt-1 text-xs text-text-muted">
               Sube el primero y luego activa RAG si quieres respuestas por recuperacion semantica.
             </p>
           </div>
@@ -643,23 +643,23 @@ export default function KnowledgeBaseTab({ agentId, agent, knowledgeBase, onUpda
               return (
                 <div
                   key={document.id}
-                  className="rounded-2xl border border-[#e4e0f5] bg-white p-4 shadow-sm transition-shadow hover:shadow-md"
+                  className="rounded-2xl border border-border-default bg-surface p-4 shadow-sm transition-shadow hover:shadow-md"
                 >
                   <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                     <div className="min-w-0">
                       <div className="flex items-start gap-3">
-                        <div className="rounded-xl bg-[#ede9ff] p-2">
+                        <div className="rounded-xl bg-primary-50 p-2">
                           {document.type === 'url' ? (
-                            <LinkIcon className="h-5 w-5 text-[#271173]" />
+                            <LinkIcon className="h-5 w-5 text-primary-600" />
                           ) : document.type === 'text' ? (
-                            <CloudArrowUpIcon className="h-5 w-5 text-[#271173]" />
+                            <CloudArrowUpIcon className="h-5 w-5 text-primary-600" />
                           ) : (
-                            <DocumentTextIcon className="h-5 w-5 text-[#271173]" />
+                            <DocumentTextIcon className="h-5 w-5 text-primary-600" />
                           )}
                         </div>
                         <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold text-black">{document.name}</p>
-                          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-black/50">
+                          <p className="truncate text-sm font-semibold text-text-primary">{document.name}</p>
+                          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-text-tertiary">
                             <span
                               className={`rounded-full border px-2 py-1 uppercase tracking-[0.16em] ${typeTone(document.type)}`}
                             >
@@ -672,7 +672,7 @@ export default function KnowledgeBaseTab({ agentId, agent, knowledgeBase, onUpda
                               {rawStatus === 'succeeded' && (
                                 <span className="relative mr-1 inline-flex h-3 w-3 items-center justify-center">
                                   <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400/70 animate-[ping_1s_ease-in-out_1]" />
-                                  <CheckCircleIcon className="relative h-3 w-3 text-emerald-700" />
+                                  <CheckCircleIcon className="relative h-3 w-3 text-accent-700" />
                                 </span>
                               )}
                               {normalizeStatusLabel(rawStatus)}
@@ -714,7 +714,7 @@ export default function KnowledgeBaseTab({ agentId, agent, knowledgeBase, onUpda
                           type="button"
                           onClick={() => handleReindexDocument(document.id)}
                           disabled={busyDocId === document.id || !ragDraft.enabled}
-                          className="rounded-xl border border-[#e4e0f5] bg-[#ede9ff] px-3 py-2.5 text-sm font-medium text-[#271173] transition-colors hover:bg-[#e0d9ff] disabled:cursor-not-allowed disabled:opacity-50"
+                          className="rounded-xl border border-border-default bg-primary-50 px-3 py-2.5 text-sm font-medium text-primary-600 transition-colors hover:bg-[#e0d9ff] disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           Reindexar
                         </button>
@@ -749,22 +749,22 @@ export default function KnowledgeBaseTab({ agentId, agent, knowledgeBase, onUpda
 
       {/* RAG Config */}
       {!isClient && (
-      <section className="rounded-2xl border border-[#e4e0f5] bg-white p-5 shadow-sm">
+      <section className="rounded-2xl border border-border-default bg-surface p-5 shadow-sm">
         <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h3 className="text-sm font-semibold text-black">Configuracion RAG</h3>
-            <p className="mt-1 text-xs text-black/50">
+            <h3 className="text-sm font-semibold text-text-primary">Configuracion RAG</h3>
+            <p className="mt-1 text-xs text-text-tertiary">
               la plataforma recomienda RAG para bases grandes y deja el modo prompt para contexto
               critico o documentos pequenos.
             </p>
           </div>
 
-          <div className="inline-flex items-center gap-3 rounded-xl border border-[#e4e0f5] bg-white px-3 py-2">
+          <div className="inline-flex items-center gap-3 rounded-xl border border-border-default bg-surface px-3 py-2">
             <div>
-              <p className="text-xs font-semibold text-black">
+              <p className="text-xs font-semibold text-text-primary">
                 {ragDraft.enabled ? 'RAG activado' : 'RAG desactivado'}
               </p>
-              <p className="text-[11px] text-black/45">Activa recuperacion semantica en respuestas</p>
+              <p className="text-[11px] text-text-muted">Activa recuperacion semantica en respuestas</p>
             </div>
             <TogglePill
               enabled={ragDraft.enabled}
@@ -780,7 +780,7 @@ export default function KnowledgeBaseTab({ agentId, agent, knowledgeBase, onUpda
 
         <div className="grid gap-5 lg:grid-cols-2">
           <div>
-            <label className="mb-1.5 block text-xs font-medium text-black/60">
+            <label className="mb-1.5 block text-xs font-medium text-text-secondary">
               Embedding model
             </label>
             <select
@@ -809,10 +809,10 @@ export default function KnowledgeBaseTab({ agentId, agent, knowledgeBase, onUpda
           <div>
             <div className="mb-2 flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-black">Chunks recuperados</p>
-                <p className="text-xs text-black/50">Numero de bloques recuperados por consulta</p>
+                <p className="text-sm font-medium text-text-primary">Chunks recuperados</p>
+                <p className="text-xs text-text-tertiary">Numero de bloques recuperados por consulta</p>
               </div>
-              <span className="min-w-12 rounded-lg bg-[#ede9ff] px-2.5 py-1 text-center text-sm font-semibold text-[#271173]">
+              <span className="min-w-12 rounded-lg bg-primary-50 px-2.5 py-1 text-center text-sm font-semibold text-primary-600">
                 {ragDraft.max_retrieved_rag_chunks_count}
               </span>
             </div>
@@ -830,7 +830,7 @@ export default function KnowledgeBaseTab({ agentId, agent, knowledgeBase, onUpda
               }
               className={sliderClass}
             />
-            <div className="mt-1 flex justify-between text-xs text-black/40">
+            <div className="mt-1 flex justify-between text-xs text-text-primary/40">
               <span>1</span>
               <span>20</span>
             </div>
@@ -839,10 +839,10 @@ export default function KnowledgeBaseTab({ agentId, agent, knowledgeBase, onUpda
           <div>
             <div className="mb-2 flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-black">Distancia vectorial maxima</p>
-                <p className="text-xs text-black/50">Umbral de distancia para recuperar contexto</p>
+                <p className="text-sm font-medium text-text-primary">Distancia vectorial maxima</p>
+                <p className="text-xs text-text-tertiary">Umbral de distancia para recuperar contexto</p>
               </div>
-              <span className="min-w-12 rounded-lg bg-[#ede9ff] px-2.5 py-1 text-center text-sm font-semibold text-[#271173]">
+              <span className="min-w-12 rounded-lg bg-primary-50 px-2.5 py-1 text-center text-sm font-semibold text-primary-600">
                 {ragDraft.max_vector_distance.toFixed(2)}
               </span>
             </div>
@@ -860,7 +860,7 @@ export default function KnowledgeBaseTab({ agentId, agent, knowledgeBase, onUpda
               }
               className={sliderClass}
             />
-            <div className="mt-1 flex justify-between text-xs text-black/40">
+            <div className="mt-1 flex justify-between text-xs text-text-primary/40">
               <span>0.00</span>
               <span>1.00</span>
             </div>
@@ -869,10 +869,10 @@ export default function KnowledgeBaseTab({ agentId, agent, knowledgeBase, onUpda
           <div>
             <div className="mb-2 flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-black">Longitud maxima del contexto</p>
-                <p className="text-xs text-black/50">Limite de caracteres del contexto recuperado</p>
+                <p className="text-sm font-medium text-text-primary">Longitud maxima del contexto</p>
+                <p className="text-xs text-text-tertiary">Limite de caracteres del contexto recuperado</p>
               </div>
-              <span className="min-w-16 rounded-lg bg-[#ede9ff] px-2.5 py-1 text-center text-sm font-semibold text-[#271173]">
+              <span className="min-w-16 rounded-lg bg-primary-50 px-2.5 py-1 text-center text-sm font-semibold text-primary-600">
                 {ragDraft.max_documents_length}
               </span>
             </div>
@@ -890,20 +890,20 @@ export default function KnowledgeBaseTab({ agentId, agent, knowledgeBase, onUpda
               }
               className={sliderClass}
             />
-            <div className="mt-1 flex justify-between text-xs text-black/40">
+            <div className="mt-1 flex justify-between text-xs text-text-primary/40">
               <span>1000</span>
               <span>100000</span>
             </div>
           </div>
         </div>
 
-        <div className="mt-4 rounded-xl border border-[#e4e0f5] bg-[#f5f3ff] px-4 py-3 text-xs leading-6 text-black/50">
+        <div className="mt-4 rounded-xl border border-border-default bg-[#f5f3ff] px-4 py-3 text-xs leading-6 text-text-tertiary">
           Indexing no es instantaneo. la plataforma indica que puede tardar unos minutos en documentos
           grandes, y los archivos menores a 500 bytes se quedan en modo prompt.
         </div>
 
         <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
-          <p className="text-xs text-black/50">
+          <p className="text-xs text-text-tertiary">
             Al guardar, tambien se intentan reindexar los documentos del agente con el modelo
             seleccionado.
           </p>
@@ -911,7 +911,7 @@ export default function KnowledgeBaseTab({ agentId, agent, knowledgeBase, onUpda
             type="button"
             onClick={handleSaveRag}
             disabled={isSavingRag}
-            className="rounded-xl bg-[#271173] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#1f0d5a] disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded-xl bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isSavingRag ? 'Guardando...' : 'Guardar configuracion RAG'}
           </button>

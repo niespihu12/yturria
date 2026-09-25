@@ -10,12 +10,19 @@ from sqlmodel import delete, select
 from app.controllers.deps.auth import CurrentUser
 from app.controllers.deps.db_session import SessionDep
 from app.models.AuditTrailEvent import AuditTrailEvent
+from app.models.Contact import Contact
 from app.models.DataPrivacyRequest import DataPrivacyRequest
+from app.models.TextAgent import TextAgent
+from app.models.TextAgentWhatsApp import TextAgentWhatsApp
+from app.models.TextAppointment import TextAppointment
 from app.models.TextConversation import TextConversation
 from app.models.TextMessage import TextMessage
 from app.models.TextProviderConfig import TextProviderConfig
 from app.models.Token import Token
 from app.models.User import User
+from app.models.UserCalendarConnection import UserCalendarConnection
+from app.models.UserWhatsAppConfig import UserWhatsAppConfig
+from app.models.VoiceMessage import VoiceMessage
 from app.utils.roles import is_super_admin_user
 
 
@@ -117,6 +124,24 @@ def _soft_delete_user_data(
 
     session.exec(delete(TextProviderConfig).where(TextProviderConfig.user_id == user_id))
     session.exec(delete(Token).where(Token.user_id == user_id))
+    # Credenciales de terceros y datos personales de los clientes del usuario.
+    session.exec(delete(UserCalendarConnection).where(UserCalendarConnection.user_id == user_id))
+    session.exec(delete(UserWhatsAppConfig).where(UserWhatsAppConfig.user_id == user_id))
+    session.exec(delete(Contact).where(Contact.user_id == user_id))
+    session.exec(delete(VoiceMessage).where(VoiceMessage.user_id == user_id))
+    appointments_deleted = len(
+        session.exec(select(TextAppointment.id).where(TextAppointment.user_id == user_id)).all()
+    )
+    session.exec(delete(TextAppointment).where(TextAppointment.user_id == user_id))
+
+    # Los agentes dejan de atender por embed y WhatsApp.
+    text_agents = session.exec(select(TextAgent).where(TextAgent.user_id == user_id)).all()
+    text_agent_ids = [agent.id for agent in text_agents]
+    if text_agent_ids:
+        session.exec(delete(TextAgentWhatsApp).where(TextAgentWhatsApp.text_agent_id.in_(text_agent_ids)))
+    for agent in text_agents:
+        agent.embed_enabled = False
+        session.add(agent)
 
     user.deleted_at = now
     user.name = "Usuario eliminado"
@@ -125,6 +150,7 @@ def _soft_delete_user_data(
     user.mfa_enabled = False
     user.mfa_failed_attempts = 0
     user.mfa_locked_until = None
+    user.token_version = (user.token_version or 0) + 1
     session.add(user)
 
     _log_audit(
@@ -138,12 +164,16 @@ def _soft_delete_user_data(
             "reason": reason,
             "conversations_soft_deleted": len(conversations),
             "messages_redacted": redacted_messages,
+            "appointments_deleted": appointments_deleted,
+            "text_agents_disabled": len(text_agents),
         },
     )
 
     return {
         "conversations_soft_deleted": len(conversations),
         "messages_redacted": redacted_messages,
+        "appointments_deleted": appointments_deleted,
+        "text_agents_disabled": len(text_agents),
     }
 
 

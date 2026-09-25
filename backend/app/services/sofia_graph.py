@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import logging
+import os
+import re
+import unicodedata
+from contextvars import ContextVar
 from typing import Annotated, Any, TypedDict
 
 from langgraph.graph import StateGraph, START, END
@@ -19,6 +24,37 @@ from app.services.sofia_prompts import (
 
 logger = logging.getLogger(__name__)
 
+LLM_TIMEOUT_SECONDS = 30
+LLM_MAX_RETRIES = 1
+
+try:
+    SOFIA_HISTORY_LIMIT = max(2, int(os.getenv("TEXT_AGENT_HISTORY_LIMIT", "30").strip() or "30"))
+except ValueError:
+    SOFIA_HISTORY_LIMIT = 30
+
+# API key del dueño del agente para la ejecución en curso (no viaja en el estado del grafo).
+_SOFIA_API_KEY: ContextVar[str | None] = ContextVar("sofia_api_key", default=None)
+
+
+def _make_llm(
+    model: str,
+    temperature: float,
+    max_tokens: int,
+    api_key: str | None = None,
+) -> ChatOpenAI:
+    kwargs: dict[str, Any] = {}
+    resolved_key = api_key or _SOFIA_API_KEY.get()
+    if resolved_key:
+        kwargs["api_key"] = resolved_key
+    return ChatOpenAI(
+        model=model,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        timeout=LLM_TIMEOUT_SECONDS,
+        max_retries=LLM_MAX_RETRIES,
+        **kwargs,
+    )
+
 
 class SofiaState(TypedDict):
     messages: Annotated[list, add_messages]
@@ -34,6 +70,7 @@ class SofiaState(TypedDict):
     already_escalated: bool
     has_open_appointment: bool
     uncertainty_count: int
+    allow_threshold_escalation: bool
 
 
 # Frases que indican que la IA no está segura de su respuesta.
@@ -58,6 +95,41 @@ _UNCERTAINTY_PHRASES: tuple[str, ...] = (
     "no tengo certeza",
 )
 _UNCERTAINTY_ESCALATION_THRESHOLD = 2
+
+# Palabras completas: "robo" no debe coincidir con "robot".
+_CLAIM_KEYWORDS_RE = re.compile(
+    r"\b("
+    r"siniestros?|accidentes?|robos?|robaron|robad[oa]s?|hurtos?|"
+    r"choques?|chocaron|reclamos?|reclamaci[oó]n(?:es)?"
+    r")\b",
+    re.IGNORECASE,
+)
+
+_PROMPT_PLACEHOLDERS = (
+    "company_name",
+    "company_years",
+    "business_hours",
+    "company_context",
+    "carriers",
+    "extra_context",
+    "legal_notice_section",
+)
+_COMPANY_PLACEHOLDERS = _PROMPT_PLACEHOLDERS[:5]
+
+_GUARD_STATUS_WORDS = {
+    "OK",
+    "CUMPLE",
+    "APROBADO",
+    "APROBADA",
+    "VALIDO",
+    "VALIDA",
+    "CORRECTO",
+    "CORRECTA",
+    "SI",
+    "YES",
+    "PASS",
+    "APPROVED",
+}
 
 
 def _coerce_config(raw_config: dict[str, Any] | None) -> SofiaConfig:
@@ -138,15 +210,6 @@ def classify(state: SofiaState) -> dict:
         "poliza",
         "asegurar",
     ]
-    claim_keywords = [
-        "siniestro",
-        "accidente",
-        "robo",
-        "choque",
-        "reclamo",
-        "reclamacion",
-        "reclamación",
-    ]
     renewal_keywords = [
         "renov",
         "venc",
@@ -171,7 +234,7 @@ def classify(state: SofiaState) -> dict:
             "escalation_reason": "active_claim",
         }
 
-    if any(keyword in lower_msg for keyword in claim_keywords):
+    if _CLAIM_KEYWORDS_RE.search(lower_msg):
         return {"intent": "siniestro"}
     if any(keyword in lower_msg for keyword in renewal_keywords):
         return {"intent": "renovacion"}
@@ -217,10 +280,12 @@ def classify(state: SofiaState) -> dict:
     if any(keyword in lower_msg for keyword in quote_keywords):
         return {"intent": "cotizacion"}
 
+    # Tras una escalación resuelta no se re-escala por umbral; solo por solicitud explícita.
     if (
         state["message_count"] >= config.escalation_threshold
         and not already_escalated
         and not has_open_appointment
+        and state.get("allow_threshold_escalation", True)
     ):
         return {
             "intent": "otro",
@@ -228,15 +293,14 @@ def classify(state: SofiaState) -> dict:
             "escalation_reason": "auto_threshold",
         }
 
-    llm = ChatOpenAI(
-        model=config.model,
-        temperature=0.0,
-        max_tokens=20,
-    )
-
     prompt = CLASSIFY_PROMPT.format(user_message=user_msg)
-    result = llm.invoke([HumanMessage(content=prompt)])
-    raw = result.content.strip().lower()
+    try:
+        result = _make_llm(config.model, 0.0, 20).invoke([HumanMessage(content=prompt)])
+        raw = str(result.content).strip().lower()
+    except Exception:
+        # Classification is best-effort: an LLM outage must not break the chat.
+        logger.exception("classify: LLM no disponible, se usa intent 'otro'")
+        return {"intent": "otro"}
 
     valid = {"cotizacion", "siniestro", "renovacion", "otro"}
     intent = raw if raw in valid else "otro"
@@ -263,27 +327,59 @@ def escalate_to_human(state: SofiaState) -> dict:
     }
 
 
+def _build_system_text(override: str, rag_context: str, config: SofiaConfig) -> str:
+    """Arma el system prompt sin usar str.format sobre texto del usuario."""
+    rag = (rag_context or "").strip()
+    if rag and not rag.startswith("Contexto de base de conocimiento"):
+        rag = f"Contexto de base de conocimiento:\n{rag}"
+
+    legal_notice = str(config.legal_notice or "").strip()
+    values = {
+        "company_name": config.company_name,
+        "company_years": config.company_years,
+        "business_hours": config.business_hours,
+        "company_context": config.company_context,
+        "carriers": config.carriers,
+        "extra_context": rag,
+        "legal_notice_section": f"\nAVISO LEGAL: {legal_notice}" if legal_notice else "",
+    }
+
+    template = override if (override or "").strip() else SOFIA_SYSTEM_PROMPT
+    present = {name for name in _PROMPT_PLACEHOLDERS if "{" + name + "}" in template}
+    system_text = template
+    for name in present:
+        system_text = system_text.replace("{" + name + "}", str(values[name]))
+
+    blocks: list[str] = []
+    if not present.intersection(_COMPANY_PLACEHOLDERS):
+        blocks.append(
+            "Datos de la empresa:\n"
+            f"- Nombre: {config.company_name}\n"
+            f"- Años en el mercado: {config.company_years}\n"
+            f"- Horario de atención: {config.business_hours}\n"
+            f"- Contexto: {config.company_context}\n"
+            f"- Aseguradoras: {config.carriers}"
+        )
+    if rag and "extra_context" not in present:
+        blocks.append(rag)
+    if legal_notice and "legal_notice_section" not in present:
+        blocks.append(f"AVISO LEGAL: {legal_notice}")
+
+    if blocks:
+        system_text = system_text.rstrip() + "\n\n" + "\n\n".join(blocks)
+    return system_text
+
+
 def respond(state: SofiaState) -> dict:
     if state.get("should_escalate"):
         return {}
 
     config = _coerce_config(state.get("config"))
 
-    system_base = state.get("system_prompt_override") or SOFIA_SYSTEM_PROMPT
-    rag = state.get("rag_context") or ""
-    extra = f"Contexto de base de conocimiento:\n{rag}" if rag else ""
-
-    legal_notice_section = (
-        f"\nAVISO LEGAL: {config.legal_notice}" if config.legal_notice.strip() else ""
-    )
-    system_text = system_base.format(
-        company_name=config.company_name,
-        company_years=config.company_years,
-        business_hours=config.business_hours,
-        company_context=config.company_context,
-        carriers=config.carriers,
-        extra_context=extra,
-        legal_notice_section=legal_notice_section,
+    system_text = _build_system_text(
+        state.get("system_prompt_override") or "",
+        state.get("rag_context") or "",
+        config,
     )
 
     lang_instruction = get_language_instruction(config.language)
@@ -298,21 +394,33 @@ def respond(state: SofiaState) -> dict:
             "Después pide su preferencia concreta (día/hora/canal)."
         )
 
-    llm = ChatOpenAI(
-        model=config.model,
-        temperature=config.temperature,
-        max_tokens=config.max_tokens,
-    )
+    llm = _make_llm(config.model, config.temperature, config.max_tokens)
 
     chat_messages = [SystemMessage(content=system_text)] + list(state["messages"])
 
     result = llm.invoke(chat_messages)
-    return {"response": result.content.strip()}
+    return {"response": str(result.content).strip()}
 
 
 def _detect_uncertainty(response: str) -> bool:
     lower = response.lower()
     return any(phrase in lower for phrase in _UNCERTAINTY_PHRASES)
+
+
+def _is_guard_approval(verdict: str) -> bool:
+    """True si el veredicto del guard es una aprobación y no una respuesta reescrita."""
+    normalized = unicodedata.normalize("NFKD", verdict or "")
+    normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    normalized = normalized.strip().strip("\"'`“”‘’«»*").strip()
+    normalized = normalized.rstrip(".!¡¿?").strip().upper()
+    if not normalized:
+        return True
+    if normalized in _GUARD_STATUS_WORDS:
+        return True
+    first_word = re.split(r"[\s,.:;!\-]+", normalized, maxsplit=1)[0]
+    if first_word == "OK" and len(normalized) <= 40:
+        return True
+    return len(normalized) < 10
 
 
 def guard(state: SofiaState) -> dict:
@@ -328,7 +436,10 @@ def guard(state: SofiaState) -> dict:
     if _detect_uncertainty(response):
         uncertainty_count += 1
         logger.info("guard: frase de incertidumbre detectada (count=%s)", uncertainty_count)
-        if uncertainty_count >= _UNCERTAINTY_ESCALATION_THRESHOLD:
+        if (
+            uncertainty_count >= _UNCERTAINTY_ESCALATION_THRESHOLD
+            and not state.get("already_escalated")
+        ):
             logger.info("guard: umbral de incertidumbre alcanzado → escalando")
             return {
                 "uncertainty_count": uncertainty_count,
@@ -339,21 +450,20 @@ def guard(state: SofiaState) -> dict:
 
     # ── Validación de formato/longitud (comportamiento original) ──────────────
     config = _coerce_config(state.get("config"))
-    llm = ChatOpenAI(
-        model=config.model,
-        temperature=0.0,
-        max_tokens=config.max_tokens,
-    )
-
     prompt = GUARD_PROMPT.format(
         response=response,
         max_response_lines=config.max_response_lines,
         max_chars=config.max_response_lines * 70,
     )
-    result = llm.invoke([HumanMessage(content=prompt)])
-    verdict = result.content.strip()
+    try:
+        result = _make_llm(config.model, 0.0, config.max_tokens).invoke([HumanMessage(content=prompt)])
+        verdict = str(result.content).strip()
+    except Exception:
+        # The guard only polishes format; keep the original answer if it fails.
+        logger.exception("guard: LLM no disponible, se conserva la respuesta original")
+        return {}
 
-    if verdict.upper() == "OK":
+    if _is_guard_approval(verdict):
         return {}
 
     return {"response": verdict}
@@ -367,7 +477,8 @@ def route_intent(state: SofiaState) -> str:
 
     intent = state.get("intent", "general")
     if intent == "siniestro":
-        return "escalate_to_human"
+        # Si ya hay una escalación abierta, Sofía responde en lugar de re-escalar.
+        return "respond" if state.get("already_escalated") else "escalate_to_human"
     if intent == "cotizacion":
         return "quote_price"
     if intent == "renovacion":
@@ -421,11 +532,15 @@ async def run_sofia(
     config: dict[str, Any] | None = None,
     already_escalated: bool = False,
     has_open_appointment: bool = False,
+    *,
+    uncertainty_count: int = 0,
+    allow_threshold_escalation: bool = True,
+    api_key: str | None = None,
 ) -> dict[str, Any]:
     from langchain_core.messages import HumanMessage as HM, AIMessage
 
     chat_messages = []
-    for msg in history[:-1]:
+    for msg in history[:-1][-SOFIA_HISTORY_LIMIT:]:
         if msg["role"] == "user":
             chat_messages.append(HM(content=msg["content"]))
         elif msg["role"] == "assistant":
@@ -446,13 +561,21 @@ async def run_sofia(
         "config": config or {},
         "already_escalated": already_escalated,
         "has_open_appointment": has_open_appointment,
+        "uncertainty_count": max(0, int(uncertainty_count or 0)),
+        "allow_threshold_escalation": allow_threshold_escalation,
     }
 
-    result = sofia_app.invoke(initial_state)
+    # El grafo hace llamadas HTTP bloqueantes: se ejecuta fuera del event loop.
+    token = _SOFIA_API_KEY.set(api_key or None)
+    try:
+        result = await asyncio.to_thread(sofia_app.invoke, initial_state)
+    finally:
+        _SOFIA_API_KEY.reset(token)
 
     return {
         "response": result.get("response", ""),
         "should_escalate": result.get("should_escalate", False),
         "escalation_reason": result.get("escalation_reason", ""),
         "intent": result.get("intent", ""),
+        "uncertainty_count": int(result.get("uncertainty_count") or 0),
     }

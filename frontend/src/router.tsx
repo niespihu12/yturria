@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react'
 import { BrowserRouter, Navigate, Routes, Route } from 'react-router-dom'
 import AuthLayout from '@/layouts/AuthLayout'
 import AppLayout from '@/layouts/AppLayout'
@@ -7,25 +8,28 @@ import ConfirmAccountView from '@/views/auth/ConfirmAccountView'
 import RequestNewCodeView from '@/views/auth/RequestNewCodeView'
 import ForgotPasswordView from '@/views/auth/ForgotPasswordView'
 import NewPasswordView from '@/views/auth/NewPasswordView'
-import VoiceAgentsView from '@/views/app/VoiceAgentsView'
-import VoiceAgentDetailView from '@/views/app/VoiceAgentDetailView'
-import PhoneNumbersView from '@/views/app/PhoneNumbersView'
-import TextAgentsView from '@/views/app/TextAgentsView'
-import TextAgentDetailView from '@/views/app/TextAgentDetailView'
-import SettingsView from '@/views/app/SettingsView'
-import DashboardView from '@/views/app/DashboardView'
-import AdminUsersView from '@/views/app/AdminUsersView'
-import EscalationsView from '@/views/app/EscalationsView'
-import AppointmentsView from '@/views/app/AppointmentsView'
-import WhatsAppConfigView from '@/views/app/WhatsAppConfigView'
-import TextAgentEmbedView from '@/views/embed/TextAgentEmbedView'
-import SofiaErrorsView from '@/views/app/sofia-errors/SofiaErrorsView'
-import VoiceAnalyticsView from '@/views/app/voice-analytics/VoiceAnalyticsView'
-import ContactsView from '@/views/app/ContactsView'
+
+const VoiceAgentsView = lazy(() => import('@/views/app/VoiceAgentsView'))
+const VoiceAgentDetailView = lazy(() => import('@/views/app/VoiceAgentDetailView'))
+const PhoneNumbersView = lazy(() => import('@/views/app/PhoneNumbersView'))
+const TextAgentsView = lazy(() => import('@/views/app/TextAgentsView'))
+const TextAgentDetailView = lazy(() => import('@/views/app/TextAgentDetailView'))
+const SettingsView = lazy(() => import('@/views/app/SettingsView'))
+const DashboardView = lazy(() => import('@/views/app/DashboardView'))
+const AdminUsersView = lazy(() => import('@/views/app/AdminUsersView'))
+const EscalationsView = lazy(() => import('@/views/app/EscalationsView'))
+const AppointmentsView = lazy(() => import('@/views/app/AppointmentsView'))
+const WhatsAppConfigView = lazy(() => import('@/views/app/WhatsAppConfigView'))
+const TextAgentEmbedView = lazy(() => import('@/views/embed/TextAgentEmbedView'))
+const SofiaErrorsView = lazy(() => import('@/views/app/sofia-errors/SofiaErrorsView'))
+const VoiceAnalyticsView = lazy(() => import('@/views/app/voice-analytics/VoiceAnalyticsView'))
+const ContactsView = lazy(() => import('@/views/app/ContactsView'))
 
 export default function Router() {
   return (
     <BrowserRouter>
+      {/* Vistas bajo demanda: el widget embebido no descarga todo el panel. */}
+      <Suspense fallback={null}>
       <Routes>
         <Route path="/embed/text-agent/:id" element={<TextAgentEmbedView />} />
 
@@ -59,6 +63,7 @@ export default function Router() {
           <Route path="*" element={<Navigate to="/agentes_voz" replace />} />
         </Route>
       </Routes>
+      </Suspense>
     </BrowserRouter>
   )
 }

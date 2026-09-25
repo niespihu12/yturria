@@ -3,9 +3,9 @@ import ErrorMessage from "@/components/ErrorMessage";
 import type { ConfirmToken, MfaChallenge, UserLoginForm } from "@/types/index";
 import { PinInput, PinInputField } from '@chakra-ui/pin-input'
 import { useMutation } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
 
 const inputClass =
@@ -15,6 +15,15 @@ const labelClass = "block text-sm font-medium text-black/80 mb-1.5"
 
 export default function LoginView() {
   const navigate = useNavigate()
+  const location = useLocation()
+
+  // Notice passed by flows that end the session on purpose (e.g. password change).
+  useEffect(() => {
+    const notice = (location.state as { notice?: string } | null)?.notice
+    if (!notice) return
+    toast.success(notice)
+    navigate(location.pathname, { replace: true, state: null })
+  }, [location.state, location.pathname, navigate])
   const initialValues: UserLoginForm = {
     email: '',
     password: '',

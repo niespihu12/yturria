@@ -464,6 +464,7 @@ export async function updateConversationRenewal(
     renewal_status:
       | 'none'
       | 'scheduled'
+      | 'reminder_due'
       | 'reminder_sent'
       | 'contacted'
       | 'renewed'
@@ -484,6 +485,7 @@ export async function updateConversationRenewal(
       renewal_status:
         | 'none'
         | 'scheduled'
+        | 'reminder_due'
         | 'reminder_sent'
         | 'contacted'
         | 'renewed'
@@ -707,6 +709,18 @@ export async function updateSofiaErrorLabel(
   }
 }
 
-export function getSofiaErrorsExportUrl(agentId: string): string {
-  return `/api/text-agents/${agentId}/sofia-errors/export`
+export async function downloadSofiaErrorsCsv(agentId: string): Promise<void> {
+  try {
+    const { data } = await api.get<Blob>(`/text-agents/${agentId}/sofia-errors/export`, {
+      responseType: 'blob',
+    })
+    const url = URL.createObjectURL(data)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `sofia_errors_${agentId}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  } catch (error) {
+    throw new Error(getError(error))
+  }
 }

@@ -119,7 +119,7 @@ export type TextConversation = {
   escalation_reason?: string
   escalated_at_unix_secs?: number | null
   renewal_date_unix_secs?: number | null
-  renewal_status?: 'none' | 'scheduled' | 'reminder_sent' | 'contacted' | 'renewed' | 'expired' | 'cancelled'
+  renewal_status?: 'none' | 'scheduled' | 'reminder_due' | 'reminder_sent' | 'contacted' | 'renewed' | 'expired' | 'cancelled'
   renewal_note?: string
   renewal_reminder_sent_at_unix_secs?: number | null
 }
@@ -130,7 +130,7 @@ export type UpcomingRenewal = {
   agent_name: string
   title: string
   renewal_date_unix_secs: number
-  renewal_status: 'none' | 'scheduled' | 'reminder_sent' | 'contacted' | 'renewed' | 'expired' | 'cancelled'
+  renewal_status: 'none' | 'scheduled' | 'reminder_due' | 'reminder_sent' | 'contacted' | 'renewed' | 'expired' | 'cancelled'
   renewal_note: string
   renewal_reminder_sent_at_unix_secs?: number | null
   days_until_renewal: number

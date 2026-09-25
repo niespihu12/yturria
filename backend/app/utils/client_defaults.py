@@ -10,8 +10,21 @@ Perfil de tenant configurable vía variables de entorno:
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from typing import Any
+
+E164_PHONE_PATTERN = re.compile(r"^\+[1-9]\d{7,15}$")
+_PHONE_SEPARATORS = re.compile(r"[\s\-().]")
+
+
+def normalize_phone_number(value: Any) -> str:
+    """Quita espacios y separadores comunes: '+52 55 1234-5678' -> '+525512345678'."""
+    return _PHONE_SEPARATORS.sub("", str(value or "").strip())
+
+
+def is_valid_e164(value: Any) -> bool:
+    return bool(E164_PHONE_PATTERN.match(str(value or "")))
 
 
 # ── Tenant Profile ────────────────────────────────────────────────────────────
@@ -129,8 +142,9 @@ def build_client_built_in_tools(contacts: list[Any] | None = None) -> dict[str, 
             transfers: list[dict[str, str]] = []
             if contacts:
                 for c in contacts:
-                    phone = str(getattr(c, "phone", "") or "").strip()
-                    if not phone:
+                    phone = normalize_phone_number(getattr(c, "phone", ""))
+                    # Un numero invalido hace que ElevenLabs rechace todo el PATCH de transfers.
+                    if not is_valid_e164(phone):
                         continue
                     name = f"{getattr(c, 'name', '')} {getattr(c, 'last_name', '')}".strip()
                     specialty = str(getattr(c, "specialty", "") or "").strip()
@@ -239,11 +253,14 @@ def apply_client_voice_defaults(
     first_message_override: str | None = None,
     language_override: str | None = None,
     contacts: list[Any] | None = None,
+    partial: bool = False,
 ) -> dict[str, Any]:
     """Mezcla defaults sobre un payload existente del cliente.
 
     Se fuerzan los campos no negociables (LLM, TTS model, language default si vacío).
     El prompt y first_message solo se inyectan si vienen vacíos.
+    Con `partial=True` (PATCH) prompt/first_message/language solo se tocan si la clave
+    viene en el payload; si no, ElevenLabs conserva el valor actual del agente.
     """
     if not isinstance(payload, dict):
         payload = {}
@@ -254,25 +271,28 @@ def apply_client_voice_defaults(
 
     # Cliente final: llm, tools y tts son inmutables por politica.
     # prompt/first_message/language pueden inyectarse por plantilla en create_agent.
-    prompt_cfg["prompt"] = _resolve_non_empty(
-        prompt_override,
-        prompt_cfg.get("prompt"),
-        fallback=SOFIA_VOICE_PROMPT,
-    )
+    if not partial or "prompt" in prompt_cfg:
+        prompt_cfg["prompt"] = _resolve_non_empty(
+            prompt_override,
+            prompt_cfg.get("prompt"),
+            fallback=SOFIA_VOICE_PROMPT,
+        )
 
     prompt_cfg["llm"] = DEFAULT_VOICE_LLM
     prompt_cfg["built_in_tools"] = build_client_built_in_tools(contacts)
 
-    agent_cfg["first_message"] = _resolve_non_empty(
-        first_message_override,
-        agent_cfg.get("first_message"),
-        fallback=SOFIA_FIRST_MESSAGE,
-    )
-    agent_cfg["language"] = _resolve_non_empty(
-        language_override,
-        agent_cfg.get("language"),
-        fallback=DEFAULT_LANGUAGE,
-    )
+    if not partial or "first_message" in agent_cfg:
+        agent_cfg["first_message"] = _resolve_non_empty(
+            first_message_override,
+            agent_cfg.get("first_message"),
+            fallback=SOFIA_FIRST_MESSAGE,
+        )
+    if not partial or "language" in agent_cfg:
+        agent_cfg["language"] = _resolve_non_empty(
+            language_override,
+            agent_cfg.get("language"),
+            fallback=DEFAULT_LANGUAGE,
+        )
 
 
     tts = conv.setdefault("tts", {})

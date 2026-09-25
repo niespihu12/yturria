@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, File, Form, Query, Request, UploadFile
 from fastapi import HTTPException
 
@@ -398,7 +400,7 @@ async def chat_with_text_agent(
     current_user: CurrentUser,
     session: SessionDep,
 ):
-    payload = await request.json()
+    payload = await _safe_json_payload(request)
     return await TextAgentController.chat(text_agent_id, payload, current_user, session)
 
 
@@ -480,7 +482,16 @@ async def push_conversation_to_crm(
             detail="Ningún CRM configurado. Define HUBSPOT_API_KEY o SALESFORCE_CLIENT_ID en el entorno."
         )
 
-    payload = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
+    payload: dict = {}
+    if request.headers.get("content-type", "").startswith("application/json"):
+        raw_body = await request.body()
+        if raw_body.strip():
+            try:
+                payload = json.loads(raw_body)
+            except (ValueError, UnicodeDecodeError):
+                raise HTTPException(status_code=400, detail="El cuerpo debe ser un JSON valido")
+            if not isinstance(payload, dict):
+                raise HTTPException(status_code=400, detail="El cuerpo debe ser un objeto JSON")
     lead = LeadData(
         name=payload.get("name", conv.title or "Sin nombre"),
         phone=payload.get("phone", ""),

@@ -14,4 +14,9 @@ if not DATABASE_URL:
 if DATABASE_URL.startswith("mysql://"):
     DATABASE_URL = DATABASE_URL.replace("mysql://", "mysql+pymysql://", 1)
 
-engine = create_engine(DATABASE_URL, echo=SQL_ECHO)
+_engine_kwargs: dict = {"echo": SQL_ECHO}
+if not DATABASE_URL.startswith("sqlite"):
+    # Evita "MySQL server has gone away" con conexiones inactivas del pool.
+    _engine_kwargs.update(pool_pre_ping=True, pool_recycle=1800)
+
+engine = create_engine(DATABASE_URL, **_engine_kwargs)

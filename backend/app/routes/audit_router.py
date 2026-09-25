@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Query  # noqa: F401
 from fastapi.responses import StreamingResponse
-from sqlmodel import select
+from sqlmodel import or_, select
 
 from app.controllers.deps.auth import CurrentUser
 from app.controllers.deps.db_session import SessionDep
@@ -17,6 +17,20 @@ from app.utils.roles import is_super_admin_user, role_as_value
 audit_router = APIRouter(prefix="/audit", tags=["Audit"])
 
 _MAX_EXPORT_ROWS = 10_000
+
+
+def _scoped_events_query(current_user, stmt):
+    """super_admin ve todo; un admin solo los eventos donde es actor o sujeto."""
+    if is_super_admin_user(current_user):
+        return stmt
+    if role_as_value(getattr(current_user, "role", None)) != "admin":
+        raise HTTPException(status_code=403, detail="Acceso denegado")
+    return stmt.where(
+        or_(
+            AuditTrailEvent.actor_user_id == current_user.id,
+            AuditTrailEvent.subject_user_id == current_user.id,
+        )
+    )
 
 
 def _parse_date(value: str | None, field_name: str) -> datetime | None:
@@ -38,13 +52,14 @@ async def export_audit(
     actor_user_id: str | None = Query(default=None),
     format: str = Query(default="csv", pattern="^(csv|json)$"),
 ):
-    if not is_super_admin_user(current_user) and role_as_value(getattr(current_user, "role", None)) not in ("admin", "super_admin"):
-        raise HTTPException(status_code=403, detail="Acceso denegado")
 
     since = _parse_date(from_date, "from")
     until = _parse_date(to_date, "to")
 
-    stmt = select(AuditTrailEvent).order_by(AuditTrailEvent.created_at.desc()).limit(_MAX_EXPORT_ROWS)
+    stmt = _scoped_events_query(
+        current_user,
+        select(AuditTrailEvent).order_by(AuditTrailEvent.created_at.desc()).limit(_MAX_EXPORT_ROWS),
+    )
     if since:
         stmt = stmt.where(AuditTrailEvent.created_at >= since)
     if until:
@@ -115,13 +130,13 @@ async def list_audit_events(
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ):
-    if not is_super_admin_user(current_user) and role_as_value(getattr(current_user, "role", None)) not in ("admin", "super_admin"):
-        raise HTTPException(status_code=403, detail="Acceso denegado")
 
     since = _parse_date(from_date, "from")
     until = _parse_date(to_date, "to")
 
-    stmt = select(AuditTrailEvent).order_by(AuditTrailEvent.created_at.desc())
+    stmt = _scoped_events_query(
+        current_user, select(AuditTrailEvent).order_by(AuditTrailEvent.created_at.desc())
+    )
     if since:
         stmt = stmt.where(AuditTrailEvent.created_at >= since)
     if until:

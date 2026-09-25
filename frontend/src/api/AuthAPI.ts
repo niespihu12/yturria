@@ -1,5 +1,6 @@
 import api from "@/lib/axios";
 import { isAxiosError } from "axios";
+import { startSession } from "@/lib/session";
 import {
     type AdminUserSummary,
     type AuthenticatedUser,
@@ -71,7 +72,7 @@ export async function authenticateUser(formData: UserLoginForm): Promise<string 
         }
 
         if (typeof data === 'string') {
-            localStorage.setItem('AUTH_TOKEN', data)
+            startSession(data)
             return data
         }
 
@@ -84,7 +85,7 @@ export async function authenticateUser(formData: UserLoginForm): Promise<string 
 export async function verifyMfaLogin(formData: MfaLoginForm) {
     try {
         const { data } = await api.post<string>('/auth/login/mfa', formData)
-        localStorage.setItem('AUTH_TOKEN', data)
+        startSession(data)
         return data
     } catch (error) {
         throw new Error(getApiErrorMessage(error))

@@ -620,8 +620,7 @@ function buildUpdatePayload(
 function VoiceAgentForm({ id, initialAgent }: { id: string; initialAgent: AgentDetail }) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const { isSuperAdmin } = useCurrentUser()
-  const isClient = !isSuperAdmin
+  const { isClient } = useCurrentUser()
   const [activeTab, setActiveTab] = useState<TabId>('agent')
   const [editingName, setEditingName] = useState(false)
   const [enabledSystemTools, setEnabledSystemTools] = useState<string[]>(() =>
@@ -866,12 +865,12 @@ function VoiceAgentForm({ id, initialAgent }: { id: string; initialAgent: AgentD
       {/* Left: Main content */}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {/* Top bar */}
-        <div className="px-8 py-4 border-b border-[#e4e0f5] bg-white flex items-center justify-between shrink-0">
+        <div className="px-8 py-4 border-b border-border-default bg-surface flex items-center justify-between shrink-0">
           <div className="flex items-center gap-4">
             <button
               type="button"
               onClick={() => navigate('/agentes_voz')}
-              className="rounded-lg p-1.5 text-black/50 transition-colors hover:bg-[#f5f3ff] hover:text-[#271173]"
+              className="rounded-lg p-1.5 text-text-tertiary transition-colors hover:bg-primary-50/60 hover:text-primary-600"
             >
               <ChevronLeftIcon className="w-5 h-5" />
             </button>
@@ -881,19 +880,19 @@ function VoiceAgentForm({ id, initialAgent }: { id: string; initialAgent: AgentD
                 <input
                   autoFocus
                   onKeyDown={(e) => e.key === 'Enter' && setEditingName(false)}
-                  className="bg-[#f5f3ff] border border-[#271173]/30 text-black rounded-xl px-3 py-1.5 text-sm font-semibold focus:outline-none focus:border-[#271173]"
+                  className="bg-primary-50 border border-[#271173]/30 text-text-primary rounded-xl px-3 py-1.5 text-sm font-semibold focus:outline-none focus:border-primary-500"
                   {...register('name', {
                     required: true,
                     onBlur: () => setEditingName(false),
                   })}
                 />
               ) : (
-                <h1 className="text-black font-semibold text-lg">{watchedName || agent.name}</h1>
+                <h1 className="text-text-primary font-semibold text-lg">{watchedName || agent.name}</h1>
               )}
               <button
                 type="button"
                 onClick={() => setEditingName((p) => !p)}
-                className="rounded p-1 text-black/40 transition-colors hover:text-black/70"
+                className="rounded p-1 text-text-muted transition-colors hover:text-text-secondary"
               >
                 <PencilIcon className="w-3.5 h-3.5" />
               </button>
@@ -903,7 +902,7 @@ function VoiceAgentForm({ id, initialAgent }: { id: string; initialAgent: AgentD
           <button
             type="submit"
             disabled={isSaving || !hasPendingChanges}
-            className={`flex items-center gap-2 bg-[#271173] hover:bg-[#1f0d5a] disabled:opacity-60 text-white px-4 py-2 rounded-xl text-sm font-semibold ${
+            className={`flex items-center gap-2 bg-primary-600 hover:bg-primary-700 disabled:opacity-60 text-white px-4 py-2 rounded-xl text-sm font-semibold ${
               hasPendingChanges ? 'opacity-100' : 'opacity-0 pointer-events-none'
             }`}
             style={{ transition: 'opacity 180ms ease, background-color 180ms ease' }}
@@ -918,7 +917,7 @@ function VoiceAgentForm({ id, initialAgent }: { id: string; initialAgent: AgentD
         </div>
 
         {/* Tabs */}
-        <div className="px-8 border-b border-[#e4e0f5] bg-white shrink-0">
+        <div className="px-8 border-b border-border-default bg-surface shrink-0">
           <div className="flex gap-0">
             {TABS.map((tab) => {
               const Icon = tab.icon
@@ -931,8 +930,8 @@ function VoiceAgentForm({ id, initialAgent }: { id: string; initialAgent: AgentD
                   onClick={() => setActiveTab(tab.id)}
                   className={`flex items-center gap-2 px-4 py-3.5 text-sm font-medium border-b-2 transition-colors disabled:cursor-not-allowed disabled:opacity-55 ${
                     active
-                      ? 'border-[#271173] text-[#271173]'
-                      : 'border-transparent text-black/50 hover:text-black/80'
+                      ? 'border-primary-600 text-primary-600'
+                      : 'border-transparent text-text-tertiary hover:text-text-primary'
                   }`}
                 >
                   <Icon className="w-4 h-4" />
@@ -1019,23 +1018,26 @@ export default function VoiceAgentDetailView() {
     queryFn: () => getAgent(id!),
     enabled: !!id,
   })
+  // The form trims admin-only system tools for clients on mount, so it must not
+  // mount before the role is known (a super admin would otherwise lose them on save).
+  const { user, isLoading: isUserLoading } = useCurrentUser()
 
-  if (isLoading) {
+  if (isLoading || isUserLoading) {
     return (
-      <div className="flex items-center justify-center h-full text-black/60 gap-2.5">
-        <div className="w-5 h-5 border-2 border-[#271173] border-t-transparent rounded-full animate-spin" />
+      <div className="flex items-center justify-center h-full text-text-secondary gap-2.5">
+        <div className="w-5 h-5 border-2 border-primary-600 border-t-transparent rounded-full animate-spin" />
         Cargando agente...
       </div>
     )
   }
 
-  if (isError || !agent) {
+  if (isError || !agent || !user) {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-3">
-        <p className="text-black/60">No se pudo cargar el agente.</p>
+        <p className="text-text-secondary">No se pudo cargar el agente.</p>
         <button
           onClick={() => navigate('/agentes_voz')}
-          className="text-[#271173] hover:text-[#1f0d5a] text-sm transition-colors"
+          className="text-primary-600 hover:text-primary-700 text-sm transition-colors"
         >
           ← Volver
         </button>
