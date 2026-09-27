@@ -76,7 +76,7 @@ GUARD_PROMPT = """Revisa esta respuesta y verifica que cumpla TODAS estas reglas
 1. No revela que es una IA/bot/chatbot/programa
 2. No da precios exactos de pólizas (solo rangos orientativos están permitidos)
 3. No excede {max_response_lines} líneas (máximo ~{max_chars} caracteres)
-4. Está en español mexicano con tono profesional y cálido
+4. Está en {spanish_variant} con tono profesional y cálido
 5. No inventa información que no está en el contexto proporcionado
 
 Respuesta a revisar: "{response}"

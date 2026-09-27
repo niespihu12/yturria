@@ -49,6 +49,7 @@ class TenantProfile:
     carriers: str = _DEFAULT_CARRIERS
     legal_notice: str = ""
     company_context: str = _DEFAULT_COMPANY_CONTEXT
+    spanish_variant: str = "español mexicano"
 
 
 def _load_tenant_profile() -> TenantProfile:
@@ -65,6 +66,7 @@ def _load_tenant_profile() -> TenantProfile:
         carriers=os.getenv("TENANT_CARRIERS", _DEFAULT_CARRIERS).strip(),
         legal_notice=legal_notice,
         company_context=os.getenv("TENANT_COMPANY_CONTEXT", _DEFAULT_COMPANY_CONTEXT).strip(),
+        spanish_variant=os.getenv("TENANT_SPANISH_VARIANT", "").strip() or "español mexicano",
     )
 
 

@@ -14,6 +14,8 @@ class SofiaConfig:
     company_context: str = field(default_factory=lambda: TENANT.company_context)
     carriers: str = field(default_factory=lambda: TENANT.carriers)
     legal_notice: str = field(default_factory=lambda: TENANT.legal_notice)
+    # Variante que exige el guard de respuestas (p. ej. "español colombiano").
+    spanish_variant: str = field(default_factory=lambda: TENANT.spanish_variant)
     escalation_threshold: int = 4
     temperature: float = 0.3
     max_tokens: int = 256

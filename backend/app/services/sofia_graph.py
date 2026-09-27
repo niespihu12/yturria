@@ -454,6 +454,7 @@ def guard(state: SofiaState) -> dict:
         response=response,
         max_response_lines=config.max_response_lines,
         max_chars=config.max_response_lines * 70,
+        spanish_variant=config.spanish_variant,
     )
     try:
         result = _make_llm(config.model, 0.0, config.max_tokens).invoke([HumanMessage(content=prompt)])

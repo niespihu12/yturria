@@ -113,6 +113,33 @@ def test_load_tenant_profile_overrides_company_context(monkeypatch):
     assert t.company_context == "Seguros marítimos en el norte del país"
 
 
+def test_tenant_default_spanish_variant_is_mexican(monkeypatch):
+    monkeypatch.delenv("TENANT_SPANISH_VARIANT", raising=False)
+    assert _load_tenant_profile().spanish_variant == "español mexicano"
+
+
+def test_load_tenant_profile_overrides_spanish_variant(monkeypatch):
+    monkeypatch.setenv("TENANT_SPANISH_VARIANT", "español colombiano")
+    assert _load_tenant_profile().spanish_variant == "español colombiano"
+
+
+def test_guard_prompt_uses_configured_spanish_variant():
+    from app.services import sofia_graph
+
+    captured: list[str] = []
+
+    class _FakeLLM:
+        def invoke(self, messages):
+            captured.append(messages[0].content)
+            return type("R", (), {"content": "OK"})()
+
+    state = {"response": "Con gusto le ayudo.", "config": {"spanish_variant": "español colombiano"}}
+    with patch.object(sofia_graph, "_make_llm", return_value=_FakeLLM()):
+        assert sofia_graph.guard(state) == {}
+    assert "español colombiano" in captured[0]
+    assert "mexicano" not in captured[0]
+
+
 def test_load_tenant_profile_strips_whitespace(monkeypatch):
     monkeypatch.setenv("TENANT_COMPANY_NAME", "  Seguros Gamma  ")
     t = _load_tenant_profile()
