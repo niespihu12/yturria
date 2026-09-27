@@ -1,0 +1,14 @@
+# HTTPS delante del frontend: Caddy obtiene y renueva solo el certificado (Let's Encrypt)
+# y redirige http -> https. PUBLIC_HOSTNAME viene de docker-compose.https.yml.
+{
+	servers {
+		# Sin HTTP/3: el grupo de seguridad solo abre TCP.
+		protocols h1 h2
+	}
+}
+
+{$PUBLIC_HOSTNAME} {
+	encode zstd gzip
+	header Strict-Transport-Security "max-age=31536000"
+	reverse_proxy frontend:80
+}

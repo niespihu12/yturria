@@ -458,10 +458,32 @@ docker compose up -d --build
 BACKUP_ENCRYPT_PASSPHRASE=... docker compose --profile backup run --rm backup
 ```
 
+### HTTPS con renovación automática
+
+`docker-compose.https.yml` agrega Caddy delante del frontend: obtiene el certificado de
+Let's Encrypt, lo renueva solo y redirige http → https. Requisitos: un nombre DNS que
+apunte al servidor (sin dominio propio sirve `<nombre>.<ip-con-guiones>.sslip.io`) y los
+puertos 80 y 443 abiertos.
+
+```bash
+# .env de la raíz
+PUBLIC_HOSTNAME=app.midominio.com
+COMPOSE_FILE=docker-compose.yml:docker-compose.https.yml
+
+# backend/.env
+FRONTEND_URL=https://app.midominio.com
+CORS_ORIGINS=https://app.midominio.com
+BACKEND_PUBLIC_URL=https://app.midominio.com/api
+
+docker compose up -d --build
+```
+
 Notas de producción:
 
-- Poner TLS delante (balanceador, Cloudflare o nginx del host) y definir
+- Sin `docker-compose.https.yml`, poner TLS delante (balanceador o Cloudflare) y definir
   `FRONTEND_URL`, `CORS_ORIGINS` y `BACKEND_PUBLIC_URL` con las URLs públicas https.
+- Las herramientas webhook de los agentes de voz (`/api/webhooks/voice/tools/*`) exigen
+  `VOICE_AGENT_TOOL_TOKEN` (p. ej. `openssl rand -hex 32`).
 - `BACKEND_PUBLIC_URL` (con `/api`) es el redirect de Google OAuth y la URL que
   firma Twilio; los webhooks de Meta/Twilio apuntan a `https://<dominio>/api/webhooks/...`.
 - Los webhooks de WhatsApp exigen firma: configurar el **App Secret** de Meta o el

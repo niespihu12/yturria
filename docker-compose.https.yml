@@ -1,0 +1,30 @@
+# HTTPS con renovación automática: Caddy termina TLS y reenvía al frontend (nginx).
+# Requiere PUBLIC_HOSTNAME con DNS apuntando al servidor y los puertos 80 y 443 abiertos.
+# Se activa con COMPOSE_FILE=docker-compose.yml:docker-compose.https.yml en el .env de la raíz.
+services:
+  frontend:
+    # Solo Caddy queda expuesto a internet.
+    ports: !reset []
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      PUBLIC_HOSTNAME: ${PUBLIC_HOSTNAME:?Define PUBLIC_HOSTNAME}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificados y cuenta ACME: se conservan entre reinicios (evita límites de Let's Encrypt).
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      frontend:
+        condition: service_healthy
+    networks:
+      - public
+
+volumes:
+  caddy_data:
+  caddy_config:
