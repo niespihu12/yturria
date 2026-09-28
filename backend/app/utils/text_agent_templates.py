@@ -261,9 +261,10 @@ def apply_text_agent_template_defaults(payload: dict[str, Any], template_key: st
     next_payload["welcome_message"] = str(defaults.get("welcome_message") or "")
     next_payload["sofia_mode"] = bool(defaults.get("sofia_mode", False))
 
+    # "custom" conserva lo que envió el cliente (se lee de payload: next_payload ya tiene los defaults).
     if definition["key"] == "custom":
-        next_payload["system_prompt"] = str(next_payload.get("system_prompt") or "")
-        next_payload["welcome_message"] = str(next_payload.get("welcome_message") or "")
-        next_payload["sofia_mode"] = bool(next_payload.get("sofia_mode", False))
+        next_payload["system_prompt"] = str(payload.get("system_prompt") or "")
+        next_payload["welcome_message"] = str(payload.get("welcome_message") or "")
+        next_payload["sofia_mode"] = bool(payload.get("sofia_mode", False))
 
     return next_payload

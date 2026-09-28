@@ -48,6 +48,14 @@ def test_create_agent_keeps_zero_temperature(client, make_user, headers_for):
     assert res.json()["temperature"] == 0.0
 
 
+def test_create_custom_agent_keeps_prompt_welcome_and_sofia_mode(client, make_user, headers_for):
+    headers = headers_for(make_user())
+    agent = _create_agent(client, headers, welcome_message="Hola, soy Sofía.", sofia_mode=True)
+    assert agent["system_prompt"] == "Eres un asistente."
+    assert agent["welcome_message"] == "Hola, soy Sofía."
+    assert agent["sofia_mode"] is True
+
+
 @pytest.mark.parametrize("field, value", [("temperature", "abc"), ("max_tokens", "muchos"), ("temperature", True)])
 def test_non_numeric_runtime_params_are_400(client, make_user, headers_for, field, value):
     headers = headers_for(make_user())
