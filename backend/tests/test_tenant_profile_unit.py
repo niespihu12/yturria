@@ -139,6 +139,8 @@ def test_guard_prompt_uses_configured_spanish_variant():
     assert "español colombiano" in captured[0]
     assert "mexicano" not in captured[0]
     assert "rangos orientativos están permitidos" in captured[0]
+    # Presentarse como asistente virtual no debe hacer que el guard reescriba la respuesta.
+    assert "presentarse como asistente virtual SÍ está permitido" in captured[0]
 
 
 @pytest.mark.parametrize("flag", [False, "false"])

@@ -79,7 +79,7 @@ GUARD_PRICE_RULE_NO_PRICES = (
 )
 
 GUARD_PROMPT = """Revisa esta respuesta y verifica que cumpla TODAS estas reglas:
-1. No revela que es una IA/bot/chatbot/programa
+1. No dice que es una IA, un bot, un chatbot o un programa (presentarse como asistente virtual SÍ está permitido)
 2. {price_rule}
 3. No excede {max_response_lines} líneas (máximo ~{max_chars} caracteres)
 4. Está en {spanish_variant} con tono profesional y cálido
