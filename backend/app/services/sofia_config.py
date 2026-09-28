@@ -16,6 +16,8 @@ class SofiaConfig:
     legal_notice: str = field(default_factory=lambda: TENANT.legal_notice)
     # Variante que exige el guard de respuestas (p. ej. "español colombiano").
     spanish_variant: str = field(default_factory=lambda: TENANT.spanish_variant)
+    # False: el guard no admite rangos de precio (compañías que no publican tarifas).
+    allow_price_ranges: bool = True
     escalation_threshold: int = 4
     temperature: float = 0.3
     max_tokens: int = 256
@@ -33,9 +35,10 @@ DEFAULT_CONFIG = SofiaConfig()
 # ── Mensajes de escalación por idioma ─────────────────────────────────────────
 
 _ESCALATION_MESSAGES: dict[str, str] = {
+    # Sofía trata de "usted" (ver reglas del system prompt).
     "es": (
-        "Entendido. Voy a comunicarte con un asesor humano que podrá ayudarte mejor. "
-        "En breve alguien de nuestro equipo se pondrá en contacto contigo."
+        "Entendido. Voy a comunicarle con un asesor que podrá ayudarle mejor. "
+        "En breve alguien de nuestro equipo se pondrá en contacto con usted."
     ),
     "en": (
         "Understood. I'm connecting you with a human advisor who can better assist you. "

@@ -18,6 +18,8 @@ from app.services.sofia_prompts import (
     CLASSIFY_PROMPT,
     ESCALATION_MESSAGE,
     ESCALATION_PHRASES,
+    GUARD_PRICE_RULE_NO_PRICES,
+    GUARD_PRICE_RULE_RANGES,
     GUARD_PROMPT,
     SOFIA_SYSTEM_PROMPT,
 )
@@ -157,6 +159,13 @@ def _coerce_config(raw_config: dict[str, Any] | None) -> SofiaConfig:
             normalized["extra_escalation_phrases"] = [
                 str(item).strip() for item in phrases if str(item).strip()
             ]
+
+    if "allow_price_ranges" in normalized:
+        raw_flag = normalized["allow_price_ranges"]
+        normalized["allow_price_ranges"] = (
+            raw_flag if isinstance(raw_flag, bool)
+            else str(raw_flag).strip().lower() not in {"false", "0", "no", ""}
+        )
 
     if "escalation_threshold" in normalized:
         try:
@@ -452,6 +461,7 @@ def guard(state: SofiaState) -> dict:
     config = _coerce_config(state.get("config"))
     prompt = GUARD_PROMPT.format(
         response=response,
+        price_rule=GUARD_PRICE_RULE_RANGES if config.allow_price_ranges else GUARD_PRICE_RULE_NO_PRICES,
         max_response_lines=config.max_response_lines,
         max_chars=config.max_response_lines * 70,
         spanish_variant=config.spanish_variant,

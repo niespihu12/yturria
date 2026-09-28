@@ -138,6 +138,33 @@ def test_guard_prompt_uses_configured_spanish_variant():
         assert sofia_graph.guard(state) == {}
     assert "español colombiano" in captured[0]
     assert "mexicano" not in captured[0]
+    assert "rangos orientativos están permitidos" in captured[0]
+
+
+@pytest.mark.parametrize("flag", [False, "false"])
+def test_guard_without_price_ranges(flag):
+    from app.services import sofia_graph
+
+    captured: list[str] = []
+
+    class _FakeLLM:
+        def invoke(self, messages):
+            captured.append(messages[0].content)
+            return type("R", (), {"content": "OK"})()
+
+    state = {"response": "Depende del plan.", "config": {"allow_price_ranges": flag}}
+    with patch.object(sofia_graph, "_make_llm", return_value=_FakeLLM()):
+        sofia_graph.guard(state)
+    assert "No da precios, rangos de precio ni cotizaciones" in captured[0]
+    assert "rangos orientativos" not in captured[0]
+
+
+def test_spanish_escalation_message_uses_usted():
+    from app.services.sofia_config import get_escalation_message
+
+    message = get_escalation_message("es")
+    assert "usted" in message
+    assert "contigo" not in message and "comunicarte" not in message
 
 
 def test_load_tenant_profile_strips_whitespace(monkeypatch):

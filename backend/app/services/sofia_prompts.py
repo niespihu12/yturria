@@ -72,9 +72,15 @@ Mensaje del usuario: "{user_message}"
 
 Responde SOLO con la categoría, sin explicación. Ejemplo: renovacion"""
 
+GUARD_PRICE_RULE_RANGES = "No da precios exactos de pólizas (solo rangos orientativos están permitidos)"
+GUARD_PRICE_RULE_NO_PRICES = (
+    "No da precios, rangos de precio ni cotizaciones; si preguntan por precios, "
+    "remite a cotizar con la compañía"
+)
+
 GUARD_PROMPT = """Revisa esta respuesta y verifica que cumpla TODAS estas reglas:
 1. No revela que es una IA/bot/chatbot/programa
-2. No da precios exactos de pólizas (solo rangos orientativos están permitidos)
+2. {price_rule}
 3. No excede {max_response_lines} líneas (máximo ~{max_chars} caracteres)
 4. Está en {spanish_variant} con tono profesional y cálido
 5. No inventa información que no está en el contexto proporcionado
@@ -82,7 +88,7 @@ GUARD_PROMPT = """Revisa esta respuesta y verifica que cumpla TODAS estas reglas
 Respuesta a revisar: "{response}"
 
 Si la respuesta cumple todas las reglas, responde EXACTAMENTE: "OK"
-Si NO cumple alguna regla, genera una versión corregida que sí cumpla todas las reglas. Responde SOLO con la versión corregida, sin explicación."""
+Si NO cumple alguna regla, genera una versión corregida que sí cumpla todas las reglas, sin agregar datos, ofertas ni preguntas que no estén en la respuesta original. Responde SOLO con la versión corregida, sin explicación."""
 
 ESCALATION_MESSAGE = """Entiendo perfectamente. Voy a comunicarle con uno de nuestros asesores especializados para que le brinde atención personalizada. En breve se pondrán en contacto con usted. 🤝"""
 
