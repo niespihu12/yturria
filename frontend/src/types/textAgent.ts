@@ -190,6 +190,10 @@ export type TextConversationDetail = {
   agent_id: string
   status: string
   channel?: string
+  /** Datos que dejó el cliente del chat web/widget al pedir un asesor. */
+  contact_name?: string
+  contact_phone?: string
+  contact_email?: string
   transcript: Array<{
     role: string
     message: string

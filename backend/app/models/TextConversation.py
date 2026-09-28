@@ -22,6 +22,11 @@ class TextConversation(SQLModel, table=True):
     renewal_reminder_sent_at: Optional[datetime] = Field(default=None, nullable=True)
     sofia_error_label: str = Field(default="", nullable=False)
     sofia_uncertainty_count: int = Field(default=0, nullable=False)
+    # Datos que deja un cliente de un canal sin teléfono (web/widget) para que un asesor lo contacte.
+    contact_name: str = Field(default="", max_length=255, nullable=False)
+    contact_phone: str = Field(default="", max_length=50, nullable=False)
+    contact_email: str = Field(default="", max_length=255, nullable=False)
+    contact_requested: bool = Field(default=False, nullable=False)
     deleted_at: Optional[datetime] = Field(default=None, nullable=True)
     created_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
     updated_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)

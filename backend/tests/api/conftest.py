@@ -43,6 +43,7 @@ def sent_emails(monkeypatch) -> list[dict]:
         outbox.append(kwargs)
 
     monkeypatch.setattr("app.services.AuthEmail.send_email_async", _capture)
+    monkeypatch.setattr("app.controllers.TextAgentController.send_email_async", _capture)
     return outbox
 
 

@@ -13,12 +13,12 @@ import SegmentedFilter from '@/components/app/escalations/SegmentedFilter'
 import {
   ESCALATION_QUERY_PARAMS,
   channelLabel,
-  customerLabel,
   describeEscalationReason,
   formatDateTime,
   formatPhone,
   isOpenEscalation,
-  phoneFromTitle,
+  rowIdentity,
+  rowPhone,
   timeAgo,
   useNow,
   type EscalationRow,
@@ -119,7 +119,7 @@ export default function EscalationsView() {
   const query = normalize(search.trim())
   const visibleRows = (statusFilter === 'open' ? openRows : resolvedRows).filter((row) => {
     if (!query) return true
-    const phone = phoneFromTitle(row.title)
+    const phone = rowPhone(row)
     const haystack = normalize(
       [
         row.title,
@@ -128,6 +128,8 @@ export default function EscalationsView() {
         channelLabel(row.channel),
         phone ?? '',
         phone ? formatPhone(phone) : '',
+        row.contact_name ?? '',
+        row.contact_email ?? '',
       ].join(' '),
     )
     return haystack.includes(query)
@@ -275,10 +277,7 @@ export default function EscalationsView() {
               </div>
               <ul className="space-y-3 md:space-y-0 md:divide-y md:divide-border-subtle">
                 {visibleRows.map((row) => {
-                  const phone = phoneFromTitle(row.title)
-                  const identity = phone
-                    ? `${customerLabel(row.channel, phone)} · ${channelLabel(row.channel)}`
-                    : customerLabel(row.channel, null)
+                  const identity = rowIdentity(row)
                   const reason = describeEscalationReason(row.escalation_reason)
                   const waited = timeAgo(row.escalated_at_unix_secs, now)
                   return (

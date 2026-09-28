@@ -9,6 +9,7 @@ import re
 import secrets
 import socket
 from datetime import datetime, timedelta, timezone
+from html import escape
 from typing import Any
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -53,6 +54,9 @@ from app.services.appointment_service import is_time_slot_available
 from app.services.renewal_scheduler import run_due_renewal_reminders
 from app.services.sofia_graph import run_sofia
 from app.services.sofia_prompts import ADVISOR_NOTIFICATION_TEMPLATE
+from app.services.sofia_config import get_contact_confirmation_message, get_contact_request_message
+from app.services.contact_capture import ContactInfo, contact_display, extract_contact
+from app.config.email import send_email_async
 
 logger = logging.getLogger(__name__)
 
@@ -3166,6 +3170,9 @@ class TextAgentController:
                 "escalated_at_unix_secs": _to_unix(conv.escalated_at) if conv.escalated_at else None,
                 "last_user_message": last_msg.content[:200] if last_msg else "",
                 "created_at_unix_secs": _to_unix(conv.created_at),
+                "contact_name": conv.contact_name,
+                "contact_phone": conv.contact_phone,
+                "contact_email": conv.contact_email,
             })
 
         return {"escalations": escalations}
@@ -4128,6 +4135,9 @@ class TextAgentController:
             "agent_id": agent.id,
             "status": "done",
             "channel": conversation.channel,
+            "contact_name": conversation.contact_name,
+            "contact_phone": conversation.contact_phone,
+            "contact_email": conversation.contact_email,
             "transcript": transcript,
             "metadata": {
                 "start_time_unix_secs": _to_unix(conversation.created_at),
@@ -4604,6 +4614,14 @@ async def _run_sofia_chat(
     if effective_legal_notice:
         sofia_config["legal_notice"] = effective_legal_notice
 
+    language = str(sofia_config.get("language") or agent.language or "es").strip().lower()
+    # Web y widget no traen teléfono: tras pedirle los datos al cliente, se guardan al llegar.
+    web_channel = not sender_phone
+    if web_channel and conversation.contact_requested and not _has_contact(conversation):
+        contact = extract_contact(user_message)
+        if contact.reachable:
+            return _save_captured_contact(agent, conversation, contact, language, session)
+
     if user_message_count is None:
         user_message_count = sum(1 for m in history if m["role"] == "user")
 
@@ -4649,6 +4667,11 @@ async def _run_sofia_chat(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="El asistente no esta disponible en este momento. Intenta de nuevo.",
         ) from exc
+
+    if sofia_result.get("should_escalate") and web_channel and not _has_contact(conversation):
+        # Sin un teléfono o correo nadie podría contactarlo: se le piden antes de pasar al asesor.
+        conversation.contact_requested = True
+        sofia_result = {**sofia_result, "response": get_contact_request_message(language)}
 
     assistant_content = sofia_result.get("response", "")
     if has_prior_assistant is None:
@@ -4721,8 +4744,122 @@ async def _run_sofia_chat(
             user_message,
             conversation.id,
         )
+        _notify_owner_of_escalation(agent, conversation, session, customer_phone=sender_phone)
 
     return sofia_result
+
+
+def _has_contact(conversation: TextConversation) -> bool:
+    return bool((conversation.contact_phone or "").strip() or (conversation.contact_email or "").strip())
+
+
+def _save_captured_contact(
+    agent: TextAgent,
+    conversation: TextConversation,
+    contact: ContactInfo,
+    language: str,
+    session: SessionDep,
+) -> dict[str, Any]:
+    now = _utcnow()
+    conversation.contact_name = contact.name[:255]
+    conversation.contact_phone = contact.phone[:50]
+    conversation.contact_email = contact.email[:255]
+    conversation.contact_requested = False
+    if conversation.escalation_status in {"", "none", "resolved"}:
+        conversation.escalation_status = "pending"
+        conversation.escalation_reason = conversation.escalation_reason or "user_request"
+        conversation.escalated_at = now
+
+    response = get_contact_confirmation_message(
+        language, contact.name, contact_display(contact.phone, contact.email)
+    )
+    session.add(
+        TextMessage(
+            conversation_id=conversation.id,
+            role="assistant",
+            content=response,
+            provider=agent.provider,
+            model=agent.model,
+        )
+    )
+    conversation.updated_at = now
+    session.add(conversation)
+    session.commit()
+
+    _notify_owner_of_escalation(agent, conversation, session)
+    return {
+        "response": response,
+        "should_escalate": True,
+        "escalation_reason": conversation.escalation_reason,
+        "intent": "contacto",
+    }
+
+
+_ESCALATION_CHANNEL_LABELS = {"whatsapp": "de WhatsApp", "web": "del chat web", "embed": "del sitio web"}
+_ESCALATION_REASON_LABELS = {
+    "user_request": "Pidió hablar con una persona",
+    "active_claim": "Reclamación en curso",
+    "uncertainty_detected": "Sofía no estaba segura de la respuesta",
+    "auto_threshold": "Conversación larga sin resolver",
+    "specific_policy": "Consulta sobre su póliza",
+}
+
+
+def _notify_owner_of_escalation(
+    agent: TextAgent,
+    conversation: TextConversation,
+    session: SessionDep,
+    *,
+    customer_phone: str = "",
+) -> None:
+    """Avisa por correo al dueño del agente que un cliente espera a un asesor."""
+    owner = session.get(User, agent.user_id)
+    owner_email = str(getattr(owner, "email", "") or "").strip()
+    if not owner_email:
+        return
+
+    recent = session.exec(
+        select(TextMessage)
+        .where(TextMessage.conversation_id == conversation.id, TextMessage.deleted_at == None)
+        .order_by(TextMessage.created_at.desc())
+        .limit(8)
+    ).all()
+    transcript = [
+        ("Cliente" if message.role == "user" else "Sofía", message.content)
+        for message in reversed(recent)
+        if message.role in {"user", "assistant"}
+    ]
+    details = [
+        (label, value)
+        for label, value in (
+            ("Nombre", conversation.contact_name),
+            ("Teléfono", customer_phone or conversation.contact_phone),
+            ("Correo", conversation.contact_email),
+        )
+        if value
+    ]
+    channel = _ESCALATION_CHANNEL_LABELS.get(conversation.channel, "de otro canal")
+    reason = _ESCALATION_REASON_LABELS.get(conversation.escalation_reason, "Necesita a una persona del equipo")
+    link = f"{FRONTEND_PUBLIC_URL}/escalamientos?conversacion={conversation.id}&agente={agent.id}"
+    subject = f"{agent.name}: un cliente espera a un asesor"
+
+    text_lines = [f"Un cliente {channel} pidió hablar con un asesor ({reason}).", ""]
+    text_lines += [f"{label}: {value}" for label, value in details] or ["El cliente no dejó datos de contacto."]
+    text_lines += ["", "Últimos mensajes:"] + [f"{who}: {what}" for who, what in transcript]
+    text_lines += ["", f"Ver la conversación: {link}"]
+
+    detail_html = "".join(f"<li><b>{escape(label)}:</b> {escape(value)}</li>" for label, value in details)
+    transcript_html = "".join(f"<p><b>{escape(who)}:</b> {escape(what)}</p>" for who, what in transcript)
+    html = (
+        f"<p>Un cliente {escape(channel)} pidió hablar con un asesor ({escape(reason)}).</p>"
+        + (f"<ul>{detail_html}</ul>" if detail_html else "<p>El cliente no dejó datos de contacto.</p>")
+        + f"<p><b>Últimos mensajes</b></p>{transcript_html}"
+        + f'<p><a href="{escape(link)}">Ver la conversación en la consola</a></p>'
+    )
+    try:
+        send_email_async(to_email=owner_email, subject=subject, text="\n".join(text_lines), html=html)
+    except Exception:
+        logger.exception("No se pudo encolar el aviso de escalación para %s", owner_email)
 
 
 def _resolve_sofia_api_key(agent: TextAgent, session: SessionDep) -> str | None:

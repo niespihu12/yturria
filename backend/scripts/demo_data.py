@@ -74,6 +74,13 @@ CONVERSATIONS = [
         ("user", "Gracias por la atención de ayer."),
         ("assistant", "Con mucho gusto. Estamos atentos a lo que necesite."),
     ]),
+    # Widget sin teléfono: Sofía pide los datos antes de pasar a un asesor.
+    ("embed", 1.0, "pending", "user_request", [
+        ("user", "Quiero contratar un seguro de hogar, ¿me puede atender un asesor?"),
+        ("assistant", "Con gusto le comunico con un asesor. Para que pueda contactarle, ¿me indica su nombre y un número de teléfono o correo electrónico?"),
+        ("user", "Valentina Ríos, 310 456 7890, valentina.rios@correo.com"),
+        ("assistant", "Gracias, Valentina Ríos. Un asesor se comunicará con usted al 3104567890 lo antes posible."),
+    ], {"contact_name": "Valentina Ríos", "contact_phone": "3104567890", "contact_email": "valentina.rios@correo.com"}),
 ]
 
 APPOINTMENTS = [
@@ -145,7 +152,8 @@ def seed_demo_data(session: Session, *, owner_email: str) -> None:
     session.commit()
 
     conversations: list[TextConversation] = []
-    for index, (channel, hours_ago, escalation, reason, messages) in enumerate(CONVERSATIONS):
+    for index, (channel, hours_ago, escalation, reason, messages, *extra) in enumerate(CONVERSATIONS):
+        contact = extra[0] if extra else {}
         started = now - timedelta(hours=hours_ago)
         agent = sofia if index % 4 != 2 else quotes
         conversation = TextConversation(
@@ -156,6 +164,7 @@ def seed_demo_data(session: Session, *, owner_email: str) -> None:
             escalation_status=escalation,
             escalation_reason=reason,
             escalated_at=started + timedelta(minutes=2) if escalation != "none" else None,
+            **contact,
             created_at=started,
             updated_at=started + timedelta(minutes=len(messages)),
         )

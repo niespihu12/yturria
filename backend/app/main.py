@@ -568,6 +568,24 @@ def ensure_text_conversations_uncertainty_column() -> None:
         session.commit()
 
 
+def ensure_text_conversations_contact_columns() -> None:
+    with Session(engine) as session:
+        connection = session.connection()
+        if not _table_exists(connection, "text_conversations"):
+            session.commit()
+            return
+        for column, size in (("contact_name", 255), ("contact_phone", 50), ("contact_email", 255)):
+            if not _column_exists(connection, "text_conversations", column):
+                connection.execute(
+                    text(f"ALTER TABLE text_conversations ADD COLUMN {column} VARCHAR({size}) NOT NULL DEFAULT ''")
+                )
+        if not _column_exists(connection, "text_conversations", "contact_requested"):
+            connection.execute(
+                text("ALTER TABLE text_conversations ADD COLUMN contact_requested BOOLEAN NOT NULL DEFAULT FALSE")
+            )
+        session.commit()
+
+
 def _widen_columns_to_text(targets: list[tuple[str, str]]) -> None:
     """create_all no altera tablas existentes: pasa a TEXT/LONGTEXT las columnas que
     quedaron como VARCHAR(n) (idempotente: omite las que ya son de tipo texto)."""
@@ -641,6 +659,7 @@ async def lifespan(_: FastAPI):
         ensure_voice_text_columns()
         ensure_text_messages_external_id_column()
         ensure_text_conversations_uncertainty_column()
+        ensure_text_conversations_contact_columns()
 
     scheduler_stop = asyncio.Event()
     scheduler_task = asyncio.create_task(_renewal_scheduler_loop(scheduler_stop))

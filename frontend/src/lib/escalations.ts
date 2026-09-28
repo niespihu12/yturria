@@ -6,6 +6,10 @@ export type EscalationRow = EscalatedConversation & {
   title?: string
   last_user_message?: string
   created_at_unix_secs?: number
+  /** Datos que dejó el cliente del chat web/widget al pedir un asesor. */
+  contact_name?: string
+  contact_phone?: string
+  contact_email?: string
 }
 
 /** Contrato de URL para abrir una conversación de la bandeja: /escalamientos?conversacion=…&agente=… */
@@ -143,6 +147,20 @@ export function customerLabel(channel?: string | null, phone?: string | null): s
     default:
       return 'Cliente'
   }
+}
+
+/** Teléfono para contactar: el de WhatsApp o el que el cliente dejó al pedir un asesor. */
+export function rowPhone(row: Pick<EscalationRow, 'title' | 'contact_phone'>): string | null {
+  return phoneFromTitle(row.title) ?? normalizePhone(row.contact_phone)
+}
+
+/** Nombre en la bandeja: el que dejó el cliente o, si no, el teléfono / tipo de visitante. */
+export function rowIdentity(row: Pick<EscalationRow, 'title' | 'channel' | 'contact_name' | 'contact_phone' | 'contact_email'>): string {
+  const phone = rowPhone(row)
+  const who = row.contact_name?.trim() || customerLabel(row.channel, phone)
+  if (row.contact_name?.trim() && phone) return `${who} · ${formatPhone(phone)}`
+  if (!phone && row.contact_email?.trim()) return `${who} · ${row.contact_email.trim()}`
+  return phone ? `${who} · ${channelLabel(row.channel)}` : who
 }
 
 export const telHref = (digits: string) => `tel:+${digits}`

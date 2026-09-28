@@ -57,6 +57,38 @@ _LANGUAGE_INSTRUCTIONS: dict[str, str] = {
 }
 
 
+# Canales sin teléfono (chat web / widget): antes de pasar a un asesor se piden los datos.
+_CONTACT_REQUEST_MESSAGES: dict[str, str] = {
+    "es": (
+        "Con gusto le comunico con un asesor. Para que pueda contactarle, ¿me indica su "
+        "nombre y un número de teléfono o correo electrónico?"
+    ),
+    "en": (
+        "I'll gladly connect you with an advisor. So they can reach you, could you share "
+        "your name and a phone number or email address?"
+    ),
+    "pt": (
+        "Com prazer vou te conectar com um assessor. Para que ele possa entrar em contato, "
+        "pode me informar seu nome e um telefone ou e-mail?"
+    ),
+}
+
+_CONTACT_CONFIRMATION_MESSAGES: dict[str, str] = {
+    "es": "Gracias{name}. Un asesor se comunicará con usted al {contact} lo antes posible.",
+    "en": "Thank you{name}. An advisor will contact you at {contact} as soon as possible.",
+    "pt": "Obrigado{name}. Um assessor entrará em contato pelo {contact} o quanto antes.",
+}
+
+
+def get_contact_request_message(language: str) -> str:
+    return _CONTACT_REQUEST_MESSAGES.get(language, _CONTACT_REQUEST_MESSAGES["es"])
+
+
+def get_contact_confirmation_message(language: str, name: str, contact: str) -> str:
+    template = _CONTACT_CONFIRMATION_MESSAGES.get(language, _CONTACT_CONFIRMATION_MESSAGES["es"])
+    return template.format(name=f", {name}" if name else "", contact=contact)
+
+
 def get_escalation_message(language: str) -> str:
     return _ESCALATION_MESSAGES.get(language, _ESCALATION_MESSAGES["es"])
 

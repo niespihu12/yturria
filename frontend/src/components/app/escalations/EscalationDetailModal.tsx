@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'react-toastify'
-import { ChatBubbleLeftRightIcon, PhoneIcon } from '@heroicons/react/24/outline'
+import { ChatBubbleLeftRightIcon, EnvelopeIcon, PhoneIcon } from '@heroicons/react/24/outline'
 import {
   getTextAgentAppointments,
   getTextConversationDetail,
@@ -77,15 +77,20 @@ export default function EscalationDetailModal({ agentId, conversationId, escalat
     (item) => item.conversation_id === conversationId,
   )
   const titlePhone = phoneFromTitle(escalation?.title)
+  const leftPhone = normalizePhone(escalation?.contact_phone || detail?.contact_phone)
   const appointmentPhone = normalizePhone(appointment?.contact_phone)
   const chatPhone = phoneFromTranscript(transcript)
-  const phone = titlePhone ?? appointmentPhone ?? chatPhone
+  const phone = titlePhone ?? leftPhone ?? appointmentPhone ?? chatPhone
   const phoneSource = titlePhone
     ? 'Número desde el que escribió por WhatsApp'
-    : appointmentPhone
-      ? 'Dato de la cita que agendó'
-      : 'Número que el cliente escribió en la conversación'
-  const customerName = appointment?.contact_name?.trim() || null
+    : leftPhone
+      ? 'Dato que dejó para que un asesor lo contacte'
+      : appointmentPhone
+        ? 'Dato de la cita que agendó'
+        : 'Número que el cliente escribió en la conversación'
+  const email = (escalation?.contact_email || detail?.contact_email || '').trim() || null
+  const customerName =
+    (escalation?.contact_name || detail?.contact_name || '').trim() || appointment?.contact_name?.trim() || null
 
   const channel = escalation?.channel ?? detail?.channel
   const status: EscalationStatus = escalation?.escalation_status ?? 'pending'
@@ -191,6 +196,7 @@ export default function EscalationDetailModal({ agentId, conversationId, escalat
                 {customerName ? `${customerName} · ` : ''}
                 {formatPhone(phone)}
               </p>
+              {email ? <p className="mt-0.5 break-all text-sm text-text-secondary">{email}</p> : null}
               <p className="mt-0.5 text-xs text-text-tertiary">{phoneSource}</p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -209,10 +215,25 @@ export default function EscalationDetailModal({ agentId, conversationId, escalat
               </a>
             </div>
           </div>
+        ) : email ? (
+          <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <p className="break-all text-base font-medium text-text-primary">
+                {customerName ? `${customerName} · ` : ''}
+                {email}
+              </p>
+              <p className="mt-0.5 text-xs text-text-tertiary">Dato que dejó para que un asesor lo contacte</p>
+            </div>
+            <a href={`mailto:${email}`} className={cn(LINK_BUTTON, LINK_PRIMARY)}>
+              <EnvelopeIcon className="h-4 w-4" aria-hidden="true" />
+              Escribir correo
+            </a>
+          </div>
         ) : (
           <p className="mt-1 max-w-[65ch] text-sm text-text-secondary">
-            No hay un teléfono registrado para este cliente. Revise la conversación por si dejó otro
-            dato de contacto.
+            {isWhatsApp
+              ? 'No hay un teléfono registrado para este cliente. Revise la conversación por si dejó otro dato de contacto.'
+              : 'El cliente todavía no dejó un teléfono ni un correo. Sofía se los pidió; aparecerán aquí cuando los escriba.'}
           </p>
         )}
       </section>
