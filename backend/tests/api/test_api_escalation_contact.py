@@ -1,11 +1,14 @@
 """HTTP: al escalar un chat web/widget, Sofía pide los datos de contacto y avisa al dueño."""
 from __future__ import annotations
 
+from datetime import datetime
+
 import pytest
 
 import app.controllers.TextAgentController as ctrl
 from app.models.TextAgent import TextAgent
 from app.models.TextConversation import TextConversation
+from app.models.TextMessage import TextMessage
 
 
 @pytest.fixture(autouse=True)
@@ -79,6 +82,21 @@ def test_message_without_contact_keeps_asking_later(client, db, make_user, heade
     done = _public_chat(client, agent_id, token, "mi correo es cliente@correo.com", first["conversation_id"])
     assert "cliente@correo.com" in done["response"]
     assert len(sent_emails) == 1
+
+
+def test_same_second_messages_keep_customer_first(client, db, make_user, headers_for):
+    owner, agent_id, _ = _sofia_agent(client, db, make_user, headers_for)
+    conversation = TextConversation(text_agent_id=agent_id, user_id=owner.id, channel="web", title="t")
+    db.add(conversation)
+    db.commit()
+    moment = datetime(2026, 9, 28, 12, 0, 0)
+    db.add(TextMessage(conversation_id=conversation.id, role="assistant", content="respuesta", created_at=moment))
+    db.add(TextMessage(conversation_id=conversation.id, role="user", content="pregunta", created_at=moment))
+    db.commit()
+
+    detail = client.get(f"/api/text-agents/conversations/{conversation.id}", headers=headers_for(owner)).json()
+    assert [entry["message"] for entry in detail["transcript"]] == ["pregunta", "respuesta"]
+    assert [m["content"] for m in ctrl._load_recent_history(db, conversation.id)] == ["pregunta", "respuesta"]
 
 
 def test_whatsapp_escalation_notifies_owner_with_phone(db, make_user, sent_emails):

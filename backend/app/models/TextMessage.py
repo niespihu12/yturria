@@ -27,3 +27,11 @@ class TextMessage(SQLModel, table=True):
     # Id del proveedor (wamid de Meta / MessageSid de Twilio) para deduplicar reintentos.
     external_id: str | None = Field(default=None, nullable=True, unique=True, index=True, max_length=255)
     created_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
+
+
+def message_order(*, newest_first: bool = False) -> tuple:
+    """Orden cronológico estable. Filas antiguas de MySQL guardan solo segundos: ante la
+    misma hora, el mensaje del cliente va antes que la respuesta del asistente."""
+    if newest_first:
+        return (TextMessage.created_at.desc(), TextMessage.role.asc())
+    return (TextMessage.created_at.asc(), TextMessage.role.desc())

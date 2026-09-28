@@ -12,7 +12,7 @@ from app.controllers.deps.auth import CurrentUser
 from app.controllers.deps.db_session import SessionDep
 from app.models.TextAgent import TextAgent
 from app.models.TextConversation import TextConversation
-from app.models.TextMessage import TextMessage
+from app.models.TextMessage import TextMessage, message_order
 
 sofia_errors_router = APIRouter(prefix="/text-agents", tags=["Sofia Errors"])
 
@@ -66,7 +66,7 @@ async def list_sofia_errors(
         messages = session.exec(
             select(TextMessage)
             .where(TextMessage.conversation_id == conv.id)
-            .order_by(TextMessage.created_at)
+            .order_by(*message_order())
         ).all()
         result.append(_conversation_to_dict(conv, list(messages)))
 
@@ -126,7 +126,7 @@ async def export_sofia_errors_csv(
         messages = session.exec(
             select(TextMessage)
             .where(TextMessage.conversation_id == conv.id)
-            .order_by(TextMessage.created_at)
+            .order_by(*message_order())
         ).all()
         transcript = " | ".join(f"[{m.role}] {m.content}" for m in messages if not m.deleted_at)
         writer.writerow([

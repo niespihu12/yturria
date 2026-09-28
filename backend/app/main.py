@@ -586,6 +586,25 @@ def ensure_text_conversations_contact_columns() -> None:
         session.commit()
 
 
+def ensure_text_messages_created_at_precision() -> None:
+    """DATETIME de MySQL guarda solo segundos y la pregunta del cliente y la respuesta
+    quedaban empatadas; con microsegundos el orden de la conversación es exacto."""
+    if _dialect() != "mysql":
+        return
+    with Session(engine) as session:
+        connection = session.connection()
+        precision = connection.execute(
+            text(
+                "SELECT DATETIME_PRECISION FROM information_schema.COLUMNS "
+                "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'text_messages' "
+                "AND COLUMN_NAME = 'created_at'"
+            )
+        ).scalar()
+        if precision is not None and int(precision) < 6:
+            connection.execute(text("ALTER TABLE text_messages MODIFY COLUMN created_at DATETIME(6) NOT NULL"))
+        session.commit()
+
+
 def _widen_columns_to_text(targets: list[tuple[str, str]]) -> None:
     """create_all no altera tablas existentes: pasa a TEXT/LONGTEXT las columnas que
     quedaron como VARCHAR(n) (idempotente: omite las que ya son de tipo texto)."""
@@ -660,6 +679,7 @@ async def lifespan(_: FastAPI):
         ensure_text_messages_external_id_column()
         ensure_text_conversations_uncertainty_column()
         ensure_text_conversations_contact_columns()
+        ensure_text_messages_created_at_precision()
 
     scheduler_stop = asyncio.Event()
     scheduler_task = asyncio.create_task(_renewal_scheduler_loop(scheduler_stop))

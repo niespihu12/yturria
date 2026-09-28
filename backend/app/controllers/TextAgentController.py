@@ -32,7 +32,7 @@ from app.models.TextAgentWhatsApp import TextAgentWhatsApp
 from app.models.TextConversation import TextConversation
 from app.models.TextKnowledgeBaseChunk import TextKnowledgeBaseChunk
 from app.models.TextKnowledgeBaseDocument import TextKnowledgeBaseDocument
-from app.models.TextMessage import TextMessage
+from app.models.TextMessage import TextMessage, message_order
 from app.models.TextProviderConfig import TextProviderConfig
 from app.models.UserCalendarConnection import UserCalendarConnection
 from app.utils.crypto import decrypt_secret, encrypt_secret, mask_secret
@@ -251,7 +251,7 @@ def _load_recent_history(session: SessionDep, conversation_id: str) -> list[dict
             TextMessage.deleted_at == None,
             TextMessage.role.in_(["user", "assistant"]),
         )
-        .order_by(TextMessage.created_at.desc())
+        .order_by(*message_order(newest_first=True))
         .limit(HISTORY_MESSAGE_LIMIT)
     ).all()
     return [{"role": row.role, "content": row.content} for row in reversed(rows)]
@@ -4113,7 +4113,7 @@ class TextAgentController:
                 TextMessage.conversation_id == conversation.id,
                 TextMessage.deleted_at == None,
             )
-            .order_by(TextMessage.created_at.asc())
+            .order_by(*message_order())
         ).all()
 
         transcript = [
@@ -4821,7 +4821,7 @@ def _notify_owner_of_escalation(
     recent = session.exec(
         select(TextMessage)
         .where(TextMessage.conversation_id == conversation.id, TextMessage.deleted_at == None)
-        .order_by(TextMessage.created_at.desc())
+        .order_by(*message_order(newest_first=True))
         .limit(8)
     ).all()
     transcript = [
