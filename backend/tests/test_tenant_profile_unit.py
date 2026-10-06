@@ -141,6 +141,9 @@ def test_guard_prompt_uses_configured_spanish_variant():
     assert "rangos orientativos están permitidos" in captured[0]
     # Presentarse como asistente virtual no debe hacer que el guard reescriba la respuesta.
     assert "presentarse como asistente virtual SÍ está permitido" in captured[0]
+    # Sin la base de conocimiento, el guard no debe juzgar ni cambiar los datos de la respuesta.
+    assert "no los evalúes ni los cambies" in captured[0]
+    assert "contexto proporcionado" not in captured[0]
 
 
 @pytest.mark.parametrize("flag", [False, "false"])

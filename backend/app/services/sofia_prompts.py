@@ -97,17 +97,22 @@ GUARD_PRICE_RULE_NO_PRICES = (
     "remite a cotizar con la compañía"
 )
 
-GUARD_PROMPT = """Revisa esta respuesta y verifica que cumpla TODAS estas reglas:
-1. No dice que es una IA, un bot, un chatbot o un programa (presentarse como asistente virtual SÍ está permitido)
+# El guard no recibe la base de conocimiento: si se le pide juzgar los datos, "corrige"
+# fechas y cifras con lo que el modelo sabe (p. ej. 2025 → 2023) y reescribe respuestas correctas.
+GUARD_PROMPT = """Eres un revisor de calidad de las respuestas de un asistente virtual de atención al cliente.
+
+Respuesta: "{response}"
+
+Reglas:
+1. No dice que es una IA, un bot, un chatbot o un programa (presentarse como asistente virtual SÍ está permitido).
 2. {price_rule}
-3. No excede {max_response_lines} líneas (máximo ~{max_chars} caracteres)
-4. Está en {spanish_variant} con tono profesional y cálido
-5. No inventa información que no está en el contexto proporcionado
+3. No excede {max_response_lines} líneas (unos {max_chars} caracteres).
+4. Está en {spanish_variant}, con tono profesional y cálido.
 
-Respuesta a revisar: "{response}"
+Los datos de la respuesta (nombres, fechas, cifras, teléfonos, direcciones, productos) salen de la información oficial de la empresa y pueden ser más recientes que lo que tú conoces: no los evalúes ni los cambies. No mejores el estilo de una respuesta que ya cumple las reglas.
 
-Si la respuesta cumple todas las reglas, responde EXACTAMENTE: "OK"
-Si NO cumple alguna regla, genera una versión corregida que sí cumpla todas las reglas, sin agregar datos, ofertas ni preguntas que no estén en la respuesta original. Responde SOLO con la versión corregida, sin explicación."""
+Si la respuesta no viola claramente ninguna regla, responde exactamente: OK
+Si viola alguna, responde solo con la versión corregida: quita o cambia únicamente lo que viola la regla, conserva los demás datos y el mismo trato (usted o tú), y no agregues datos, ofertas ni preguntas."""
 
 ESCALATION_MESSAGE = """Entiendo perfectamente. Voy a comunicarle con uno de nuestros asesores especializados para que le brinde atención personalizada. En breve se pondrán en contacto con usted. 🤝"""
 
