@@ -478,6 +478,23 @@ BACKEND_PUBLIC_URL=https://app.midominio.com/api
 docker compose up -d --build
 ```
 
+### Segunda marca en otro dominio
+
+`docker-compose.secondary-brand.yml` publica un segundo frontend (otra clave de
+`frontend/src/brands.json`) en otro dominio, con el mismo backend y los mismos datos. Los
+enlaces del widget y de los correos de escalación usan el dominio desde el que se usa la
+consola, siempre que esté en `CORS_ORIGINS`.
+
+```bash
+# .env de la raíz
+ALT_BRAND=bolivar
+ALT_HOSTNAME=demo.midominio.com
+COMPOSE_FILE=docker-compose.yml:docker-compose.https.yml:docker-compose.secondary-brand.yml
+
+# backend/.env
+CORS_ORIGINS=https://app.midominio.com,https://demo.midominio.com
+```
+
 Notas de producción:
 
 - Sin `docker-compose.https.yml`, poner TLS delante (balanceador o Cloudflare) y definir

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from types import SimpleNamespace
 
 import pytest
 
@@ -82,6 +83,29 @@ def test_message_without_contact_keeps_asking_later(client, db, make_user, heade
     done = _public_chat(client, agent_id, token, "mi correo es cliente@correo.com", first["conversation_id"])
     assert "cliente@correo.com" in done["response"]
     assert len(sent_emails) == 1
+
+
+@pytest.mark.parametrize(
+    "host, expected",
+    [("bolivar.example.co", "https://bolivar.example.co"), ("evil.example.com", ctrl.FRONTEND_PUBLIC_URL), ("", ctrl.FRONTEND_PUBLIC_URL)],
+)
+def test_frontend_url_follows_allowed_request_host(monkeypatch, host, expected):
+    monkeypatch.setenv("CORS_ORIGINS", "https://aos.example.co,https://bolivar.example.co")
+    request = SimpleNamespace(headers={"host": host}, url=SimpleNamespace(scheme="https"))
+    assert ctrl._frontend_url_for(request) == expected
+    assert ctrl._frontend_url_for(None) == ctrl.FRONTEND_PUBLIC_URL
+
+
+def test_embed_link_and_owner_email_use_the_brand_domain(client, db, make_user, headers_for, sent_emails, monkeypatch):
+    monkeypatch.setenv("CORS_ORIGINS", "http://testserver")
+    owner, agent_id, token = _sofia_agent(client, db, make_user, headers_for)
+
+    embed = client.get(f"/api/text-agents/{agent_id}/embed-config", headers=headers_for(owner)).json()
+    assert embed["iframe_url"].startswith(f"http://testserver/embed/text-agent/{agent_id}?token=")
+
+    first = _public_chat(client, agent_id, token, "Quiero hablar con un asesor")
+    _public_chat(client, agent_id, token, "Ana Gómez, 300 123 4567", first["conversation_id"])
+    assert f"http://testserver/escalamientos?conversacion={first['conversation_id']}" in sent_emails[0]["text"]
 
 
 def test_same_second_messages_keep_customer_first(client, db, make_user, headers_for):

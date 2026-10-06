@@ -1,0 +1,33 @@
+# Segunda marca en otro dominio con el mismo backend y los mismos datos (p. ej. una demo con la
+# marca de un cliente). Requiere docker-compose.https.yml. En el .env de la raíz:
+#   ALT_BRAND=<clave de frontend/src/brands.json>   ALT_HOSTNAME=<dominio con DNS al servidor>
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.https.yml:docker-compose.secondary-brand.yml
+# Agregue https://<ALT_HOSTNAME> a CORS_ORIGINS para que los enlaces (widget, correos) usen ese dominio.
+services:
+  frontend-alt:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        VITE_API_URL: ${VITE_API_URL:-/api}
+        VITE_BRAND: ${ALT_BRAND:?Define ALT_BRAND}
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      - public
+
+  caddy:
+    environment:
+      ALT_HOSTNAME: ${ALT_HOSTNAME:?Define ALT_HOSTNAME}
+    volumes:
+      - ./deploy/sites/secondary-brand.caddy:/etc/caddy/sites/secondary-brand.caddy:ro
+    depends_on:
+      frontend-alt:
+        condition: service_healthy

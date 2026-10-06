@@ -200,7 +200,7 @@ async def chat_with_public_text_embed(
     session: SessionDep,
 ):
     payload = await _safe_json_payload(request)
-    return await TextAgentController.public_embed_chat(text_agent_id, payload, session)
+    return await TextAgentController.public_embed_chat(text_agent_id, payload, session, request)
 
 
 # ── Per-agent routes ──────────────────────────────────────────────────────────
@@ -208,10 +208,11 @@ async def chat_with_public_text_embed(
 @text_agents_router.get("/{text_agent_id}/embed-config")
 async def get_text_agent_embed_config(
     text_agent_id: str,
+    request: Request,
     current_user: CurrentUser,
     session: SessionDep,
 ):
-    return await TextAgentController.get_embed_config(text_agent_id, current_user, session)
+    return await TextAgentController.get_embed_config(text_agent_id, current_user, session, request)
 
 
 @text_agents_router.get("/{text_agent_id}/appointments")
@@ -401,7 +402,7 @@ async def chat_with_text_agent(
     session: SessionDep,
 ):
     payload = await _safe_json_payload(request)
-    return await TextAgentController.chat(text_agent_id, payload, current_user, session)
+    return await TextAgentController.chat(text_agent_id, payload, current_user, session, request)
 
 
 @text_agents_router.get("/{text_agent_id}/conversations")

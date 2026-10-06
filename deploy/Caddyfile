@@ -13,6 +13,10 @@
 	reverse_proxy frontend:80
 }
 
+# Sitios adicionales (p. ej. una segunda marca, ver docker-compose.secondary-brand.yml).
+# Si no hay ninguno montado, el import no hace nada.
+import /etc/caddy/sites/*.caddy
+
 # La IP u otros nombres por http van al nombre público (no hay certificado para ellos).
 http:// {
 	redir https://{$PUBLIC_HOSTNAME}{uri} permanent

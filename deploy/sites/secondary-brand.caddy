@@ -1,0 +1,7 @@
+# Segunda marca: otro frontend en otro dominio, mismo backend y mismos datos.
+# Lo monta docker-compose.secondary-brand.yml en /etc/caddy/sites/.
+{$ALT_HOSTNAME} {
+	encode zstd gzip
+	header Strict-Transport-Security "max-age=31536000"
+	reverse_proxy frontend-alt:80
+}

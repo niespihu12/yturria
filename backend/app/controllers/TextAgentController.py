@@ -15,7 +15,7 @@ from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
-from fastapi import HTTPException, UploadFile, status
+from fastapi import HTTPException, Request, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import func
 from sqlalchemy.exc import DataError, IntegrityError
@@ -487,8 +487,24 @@ def _normalize_session_id(value: Any) -> str:
     return filtered[:64] or secrets.token_hex(8)
 
 
-def _build_embed_iframe_url(text_agent_id: str, embed_token: str) -> str:
-    return f"{FRONTEND_PUBLIC_URL}/embed/text-agent/{text_agent_id}?token={embed_token}"
+def _allowed_frontend_origins() -> set[str]:
+    raw = ",".join(os.getenv(name, "") for name in ("CORS_ORIGINS", "FRONTEND_PUBLIC_URL", "FRONTEND_URL"))
+    return {origin.strip().rstrip("/") for origin in raw.split(",") if origin.strip()}
+
+
+def _frontend_url_for(request: Request | None) -> str:
+    """Varias marcas pueden compartir el backend (un frontend por dominio): los enlaces usan
+    el dominio desde el que llega la petición si es un origen permitido; si no, el principal."""
+    host = str(request.headers.get("host") or "").strip() if request is not None else ""
+    if host:
+        origin = f"{request.url.scheme}://{host}".rstrip("/")
+        if origin in _allowed_frontend_origins():
+            return origin
+    return FRONTEND_PUBLIC_URL
+
+
+def _build_embed_iframe_url(text_agent_id: str, embed_token: str, frontend_url: str = "") -> str:
+    return f"{frontend_url or FRONTEND_PUBLIC_URL}/embed/text-agent/{text_agent_id}?token={embed_token}"
 
 
 def _build_embed_iframe_snippet(iframe_url: str) -> str:
@@ -2955,6 +2971,7 @@ class TextAgentController:
         text_agent_id: str,
         current_user: CurrentUser,
         session: SessionDep,
+        request: Request | None = None,
     ):
         agent = _require_owned_text_agent(text_agent_id, current_user, session)
 
@@ -2965,7 +2982,7 @@ class TextAgentController:
             session.commit()
             session.refresh(agent)
 
-        iframe_url = _build_embed_iframe_url(agent.id, agent.embed_token)
+        iframe_url = _build_embed_iframe_url(agent.id, agent.embed_token, _frontend_url_for(request))
         iframe_snippet = _build_embed_iframe_snippet(iframe_url)
         script_snippet = _build_embed_script_snippet(iframe_url)
 
@@ -3001,6 +3018,7 @@ class TextAgentController:
         text_agent_id: str,
         payload: dict,
         session: SessionDep,
+        request: Request | None = None,
     ):
         token = str(payload.get("token") or "").strip()
         agent = _require_public_embed_agent(text_agent_id, token, session)
@@ -3058,6 +3076,7 @@ class TextAgentController:
                 api_key=_resolve_sofia_api_key(agent, session),
                 user_message_count=_count_user_messages(session, conversation.id),
                 has_prior_assistant=has_prior_assistant,
+                frontend_url=_frontend_url_for(request),
             )
             return {
                 "conversation_id": conversation.id,
@@ -4327,6 +4346,7 @@ class TextAgentController:
         payload: dict,
         current_user: CurrentUser,
         session: SessionDep,
+        request: Request | None = None,
     ):
         agent = _require_owned_text_agent(text_agent_id, current_user, session)
 
@@ -4381,6 +4401,7 @@ class TextAgentController:
                 api_key=_resolve_sofia_api_key(agent, session),
                 user_message_count=_count_user_messages(session, conversation.id),
                 has_prior_assistant=has_prior_assistant,
+                frontend_url=_frontend_url_for(request),
             )
             return {
                 "conversation_id": conversation.id,
@@ -4600,6 +4621,7 @@ async def _run_sofia_chat(
     api_key: str | None = None,
     user_message_count: int | None = None,
     has_prior_assistant: bool | None = None,
+    frontend_url: str = "",
 ) -> dict[str, Any]:
     try:
         sofia_config = json.loads(agent.sofia_config_json or "{}")
@@ -4620,7 +4642,7 @@ async def _run_sofia_chat(
     if web_channel and conversation.contact_requested and not _has_contact(conversation):
         contact = extract_contact(user_message)
         if contact.reachable:
-            return _save_captured_contact(agent, conversation, contact, language, session)
+            return _save_captured_contact(agent, conversation, contact, language, session, frontend_url=frontend_url)
 
     if user_message_count is None:
         user_message_count = sum(1 for m in history if m["role"] == "user")
@@ -4759,6 +4781,8 @@ def _save_captured_contact(
     contact: ContactInfo,
     language: str,
     session: SessionDep,
+    *,
+    frontend_url: str = "",
 ) -> dict[str, Any]:
     now = _utcnow()
     conversation.contact_name = contact.name[:255]
@@ -4786,7 +4810,7 @@ def _save_captured_contact(
     session.add(conversation)
     session.commit()
 
-    _notify_owner_of_escalation(agent, conversation, session)
+    _notify_owner_of_escalation(agent, conversation, session, frontend_url=frontend_url)
     return {
         "response": response,
         "should_escalate": True,
@@ -4811,6 +4835,7 @@ def _notify_owner_of_escalation(
     session: SessionDep,
     *,
     customer_phone: str = "",
+    frontend_url: str = "",
 ) -> None:
     """Avisa por correo al dueño del agente que un cliente espera a un asesor."""
     owner = session.get(User, agent.user_id)
@@ -4840,7 +4865,7 @@ def _notify_owner_of_escalation(
     ]
     channel = _ESCALATION_CHANNEL_LABELS.get(conversation.channel, "de otro canal")
     reason = _ESCALATION_REASON_LABELS.get(conversation.escalation_reason, "Necesita a una persona del equipo")
-    link = f"{FRONTEND_PUBLIC_URL}/escalamientos?conversacion={conversation.id}&agente={agent.id}"
+    link = f"{frontend_url or FRONTEND_PUBLIC_URL}/escalamientos?conversacion={conversation.id}&agente={agent.id}"
     subject = f"{agent.name}: un cliente espera a un asesor"
 
     text_lines = [f"Un cliente {channel} pidió hablar con un asesor ({reason}).", ""]
