@@ -14,12 +14,8 @@ import {
   phoneFromTitle,
   timeAgo,
 } from '@/lib/escalations'
-import {
-  ChannelBreakdown,
-  HourlyActivityChart,
-  type ChannelRow,
-  type HourBucket,
-} from '@/components/app/dashboard/ActivityCharts'
+import { ActivityChart, ChannelBreakdown, type ChannelRow } from '@/components/app/dashboard/ActivityCharts'
+import { buildActivityBuckets, periodWindow, type DashboardPeriod } from '@/lib/dashboardPeriod'
 
 export type DashboardDataset = {
   voiceAgents: AgentListItem[]
@@ -35,6 +31,7 @@ export type DashboardDataset = {
 type Props = {
   data: DashboardDataset
   isSuperAdmin: boolean
+  period: DashboardPeriod
 }
 
 type Stat = {
@@ -70,6 +67,13 @@ function formatClock(unix: number): string {
   return new Date(unix * 1000).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })
 }
 
+/** Hora si fue hoy; si no, fecha y hora ("3 oct · 04:08 p. m."). */
+function formatWhen(unix: number, todayStart: number): string {
+  if (!unix) return '--:--'
+  if (unix >= todayStart) return formatClock(unix)
+  return `${formatShortDate(unix).replace('.', '')} · ${formatClock(unix)}`
+}
+
 function formatShortDate(unix: number): string {
   return new Date(unix * 1000).toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })
 }
@@ -89,30 +93,12 @@ function callStatusLabel(status: unknown): string {
   return 'Registrada'
 }
 
-function buildHourBuckets(timestamps: number[], nowMs: number): HourBucket[] {
-  const hour = new Date(nowMs)
-  hour.setMinutes(0, 0, 0)
-  const currentHour = Math.floor(hour.getTime() / 1000)
-  const buckets: HourBucket[] = Array.from({ length: 12 }, (_, index) => {
-    const start = currentHour - (11 - index) * 3600
-    const label = `${String(new Date(start * 1000).getHours()).padStart(2, '0')}:00`
-    return { start, label, count: 0 }
-  })
-  const first = buckets[0].start
-  for (const timestamp of timestamps) {
-    const index = Math.floor((timestamp - first) / 3600)
-    if (index >= 0 && index < buckets.length) buckets[index].count += 1
-  }
-  return buckets
-}
-
-export default function SecretaryDashboard({ data, isSuperAdmin }: Props) {
+export default function SecretaryDashboard({ data, isSuperAdmin, period }: Props) {
   const nowMs = data.loadedAt
-  const nowUnix = Math.floor(nowMs / 1000)
   const todayDate = new Date(nowMs)
   todayDate.setHours(0, 0, 0, 0)
   const todayStart = Math.floor(todayDate.getTime() / 1000)
-  const yesterdayStart = todayStart - 86400
+  const range = periodWindow(period, nowMs)
 
   const textAgentNames = new Map(data.textAgents.map((agent) => [agent.agent_id, agent.name]))
   const voiceAgentNames = new Map(data.voiceAgents.map((agent) => [agent.agent_id, agent.name]))
@@ -127,19 +113,20 @@ export default function SecretaryDashboard({ data, isSuperAdmin }: Props) {
     }))
     .sort((a, b) => a.since - b.since)
 
-  // ── Cifras de hoy ─────────────────────────────────────────────────────────
+  // ── Cifras del periodo ────────────────────────────────────────────────────
   const startOf = (item: { start_time_unix_secs?: number }) => asUnix(item.start_time_unix_secs)
-  const textToday = data.textConversations.filter((item) => startOf(item) >= todayStart)
-  const voiceToday = data.voiceConversations.filter((item) => startOf(item) >= todayStart)
-  const inYesterday = (item: { start_time_unix_secs?: number }) =>
-    startOf(item) >= yesterdayStart && startOf(item) < todayStart
-  const conversationsYesterday =
-    data.textConversations.filter(inYesterday).length + data.voiceConversations.filter(inYesterday).length
-  const handedToday = textToday.filter(
+  const inPeriod = (item: { start_time_unix_secs?: number }) => startOf(item) >= range.start
+  const inPrevious = (item: { start_time_unix_secs?: number }) =>
+    startOf(item) >= range.previousStart && startOf(item) < range.start
+  const textInPeriod = data.textConversations.filter(inPeriod)
+  const voiceInPeriod = data.voiceConversations.filter(inPeriod)
+  const conversationsBefore =
+    data.textConversations.filter(inPrevious).length + data.voiceConversations.filter(inPrevious).length
+  const handedInPeriod = textInPeriod.filter(
     (item) => item.escalation_status && item.escalation_status !== 'none',
   ).length
 
-  const callDurations = voiceToday
+  const callDurations = voiceInPeriod
     .map((call) => call.call_duration_secs)
     .filter((value): value is number => typeof value === 'number' && value > 0)
   const avgCall = callDurations.length
@@ -153,27 +140,27 @@ export default function SecretaryDashboard({ data, isSuperAdmin }: Props) {
 
   const stats: Stat[] = [
     {
-      label: 'Conversaciones hoy',
-      value: String(textToday.length + voiceToday.length),
-      detail: `Ayer: ${conversationsYesterday}`,
+      label: 'Conversaciones',
+      value: String(textInPeriod.length + voiceInPeriod.length),
+      detail: `${range.previousLabel}: ${conversationsBefore}`,
     },
   ]
-  if (textToday.length > 0) {
+  if (textInPeriod.length > 0) {
     stats.push({
       label: 'Chats resueltos por los agentes',
-      value: String(textToday.length - handedToday),
-      suffix: `de ${textToday.length}`,
+      value: String(textInPeriod.length - handedInPeriod),
+      suffix: `de ${textInPeriod.length}`,
       detail:
-        handedToday === 0
+        handedInPeriod === 0
           ? 'Ninguno necesitó a una persona'
-          : `${handedToday} ${handedToday === 1 ? 'pasó' : 'pasaron'} a una persona del equipo`,
+          : `${handedInPeriod} ${handedInPeriod === 1 ? 'pasó' : 'pasaron'} a una persona del equipo`,
     })
   }
-  if (data.voiceAgents.length > 0 || voiceToday.length > 0) {
+  if (data.voiceAgents.length > 0 || voiceInPeriod.length > 0) {
     stats.push({
-      label: 'Llamadas hoy',
-      value: String(voiceToday.length),
-      detail: avgCall ? `Duración media: ${formatDuration(avgCall)} min` : 'Sin llamadas todavía',
+      label: 'Llamadas',
+      value: String(voiceInPeriod.length),
+      detail: avgCall ? `Duración media: ${formatDuration(avgCall)} min` : `Sin llamadas ${range.emptyPhrase}`,
     })
   }
   if (renewals.length > 0) {
@@ -196,18 +183,15 @@ export default function SecretaryDashboard({ data, isSuperAdmin }: Props) {
   }
 
   // ── Actividad y canales ───────────────────────────────────────────────────
-  const hourBuckets = buildHourBuckets(
-    [...data.textConversations.map(startOf), ...data.voiceConversations.map(startOf)].filter(Boolean),
+  const activityBuckets = buildActivityBuckets(
+    [...textInPeriod.map(startOf), ...voiceInPeriod.map(startOf)],
+    range,
     nowMs,
   )
 
-  const weekStart = nowUnix - 7 * 86400
   const channelCounts = new Map<string, number>()
-  for (const call of data.voiceConversations) {
-    if (startOf(call) >= weekStart) channelCounts.set('voice', (channelCounts.get('voice') ?? 0) + 1)
-  }
-  for (const chat of data.textConversations) {
-    if (startOf(chat) < weekStart) continue
+  if (voiceInPeriod.length > 0) channelCounts.set('voice', voiceInPeriod.length)
+  for (const chat of textInPeriod) {
     const key = String(chat.channel ?? 'web')
     channelCounts.set(key, (channelCounts.get(key) ?? 0) + 1)
   }
@@ -217,7 +201,7 @@ export default function SecretaryDashboard({ data, isSuperAdmin }: Props) {
     count,
   })).sort((a, b) => b.count - a.count)
 
-  const recentCalls = data.voiceConversations
+  const recentCalls = voiceInPeriod
     .slice()
     .sort((a, b) => startOf(b) - startOf(a))
     .slice(0, 5)
@@ -233,12 +217,21 @@ export default function SecretaryDashboard({ data, isSuperAdmin }: Props) {
 
       <div className="grid items-start gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] lg:gap-8">
         <div className="space-y-10">
-          <TodayStats stats={stats} />
-          <ChannelBreakdown rows={channelRows} periodLabel="Últimos 7 días" />
+          <PeriodStats
+            stats={stats}
+            title={period === 'day' ? 'Hoy en cifras' : 'En cifras'}
+            aside={period === 'day' ? undefined : range.label}
+          />
+          <ChannelBreakdown rows={channelRows} periodLabel={range.label} />
         </div>
 
         <div className="space-y-10">
-          <HourlyActivityChart buckets={hourBuckets} />
+          <ActivityChart
+            buckets={activityBuckets}
+            unit={period === 'day' ? 'hour' : 'day'}
+            rangeLabel={range.label}
+            emptyPhrase={range.emptyPhrase}
+          />
 
           {renewals.length > 0 && (
             <ListSection title="Renovaciones próximas" aside="Próximos 30 días">
@@ -270,7 +263,7 @@ export default function SecretaryDashboard({ data, isSuperAdmin }: Props) {
           )}
 
           {recentCalls.length > 0 && (
-            <ListSection title="Últimas llamadas">
+            <ListSection title="Últimas llamadas" aside={range.label}>
               {recentCalls.map((call) => (
                 <li key={call.conversation_id} className="flex items-center justify-between gap-4 px-5 py-3.5">
                   <div className="min-w-0">
@@ -281,7 +274,7 @@ export default function SecretaryDashboard({ data, isSuperAdmin }: Props) {
                   </div>
                   <div className="shrink-0 text-right text-sm tabular-nums">
                     <p className="text-text-primary">{formatDuration(Number(call.call_duration_secs ?? 0))} min</p>
-                    <p className="text-xs text-text-tertiary">{formatClock(startOf(call))}</p>
+                    <p className="text-xs text-text-tertiary">{formatWhen(startOf(call), todayStart)}</p>
                   </div>
                 </li>
               ))}
@@ -405,13 +398,16 @@ function AttentionQueue({
   )
 }
 
-function TodayStats({ stats }: { stats: Stat[] }) {
+function PeriodStats({ stats, title, aside }: { stats: Stat[]; title: string; aside?: string }) {
   const titleId = useId()
   return (
     <section aria-labelledby={titleId}>
-      <h2 id={titleId} className="text-base font-semibold text-text-primary">
-        Hoy en cifras
-      </h2>
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 id={titleId} className="text-base font-semibold text-text-primary">
+          {title}
+        </h2>
+        {aside && <p className="text-sm text-text-tertiary">{aside}</p>}
+      </div>
       <dl className="mt-3 divide-y divide-border-subtle rounded-xl border border-border-default bg-surface">
         {stats.map((stat) => (
           <div key={stat.label} className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-4 px-5 py-4">

@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 import { ADMIN, API_URL, CLIENT, apiToken, login, trackPageErrors } from './helpers'
 
 const ROUTES: Array<[string, string | RegExp]> = [
-  ['/dashboard', 'Resumen de hoy'],
+  ['/dashboard', 'Resumen'],
   ['/agentes_voz', 'Agentes de Voz'],
   ['/agentes_texto', 'Agentes de Texto'],
   ['/escalamientos', 'Bandeja de atención'],

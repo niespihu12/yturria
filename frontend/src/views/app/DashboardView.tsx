@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { useSearchParams } from 'react-router-dom'
 import { ArrowPathIcon } from '@heroicons/react/24/outline'
 import {
   getAgents,
@@ -14,6 +15,14 @@ import PageHeader from '@/components/ui/PageHeader'
 import Button from '@/components/ui/Button'
 import Skeleton from '@/components/ui/Skeleton'
 import SecretaryDashboard, { type DashboardDataset } from '@/components/app/dashboard/SecretaryDashboard'
+import SegmentedFilter from '@/components/app/escalations/SegmentedFilter'
+import {
+  DEFAULT_PERIOD,
+  PERIOD_OPTIONS,
+  PERIOD_PARAM,
+  periodFromParam,
+  type DashboardPeriod,
+} from '@/lib/dashboardPeriod'
 
 const VOICE_PAGE_SIZE = 100
 const VOICE_PAGES_LIMIT = 5
@@ -134,6 +143,20 @@ function DashboardSkeleton() {
 
 export default function DashboardView() {
   const { isSuperAdmin } = useCurrentUser()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const period = periodFromParam(searchParams.get('periodo'))
+
+  const changePeriod = (next: DashboardPeriod) => {
+    setSearchParams(
+      (current) => {
+        const params = new URLSearchParams(current)
+        if (next === DEFAULT_PERIOD) params.delete('periodo')
+        else params.set('periodo', PERIOD_PARAM[next])
+        return params
+      },
+      { replace: true },
+    )
+  }
 
   const { data, isLoading, isFetching, isError, refetch } = useQuery({
     queryKey: ['dashboard-real-data'],
@@ -146,32 +169,35 @@ export default function DashboardView() {
     <div className="h-full overflow-y-auto">
       <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
         <PageHeader
-          title="Resumen de hoy"
+          title="Resumen"
           description={
             data
               ? describeLoadTime(data.loadedAt)
               : 'Lo que resolvieron sus agentes y lo que necesita a una persona del equipo.'
           }
           actions={
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => refetch()}
-              aria-busy={isFetching}
-              leftIcon={
-                <ArrowPathIcon
-                  aria-hidden="true"
-                  className={cn('h-4 w-4', isFetching && 'animate-spin')}
-                />
-              }
-            >
-              Actualizar
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <SegmentedFilter label="Periodo" options={PERIOD_OPTIONS} value={period} onChange={changePeriod} />
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => refetch()}
+                aria-busy={isFetching}
+                leftIcon={
+                  <ArrowPathIcon
+                    aria-hidden="true"
+                    className={cn('h-4 w-4', isFetching && 'animate-spin')}
+                  />
+                }
+              >
+                Actualizar
+              </Button>
+            </div>
           }
         />
 
         {data ? (
-          <SecretaryDashboard data={data} isSuperAdmin={isSuperAdmin} />
+          <SecretaryDashboard data={data} isSuperAdmin={isSuperAdmin} period={period} />
         ) : isLoading ? (
           <DashboardSkeleton />
         ) : isError ? (
