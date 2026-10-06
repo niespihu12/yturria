@@ -18,6 +18,9 @@ class SofiaConfig:
     spanish_variant: str = field(default_factory=lambda: TENANT.spanish_variant)
     # False: el guard no admite rangos de precio (compañías que no publican tarifas).
     allow_price_ranges: bool = True
+    # False (p. ej. un banco): sin flujos de seguros. Siniestros, robos, pólizas e interés
+    # de compra no escalan solos; solo escala cuando el cliente pide hablar con una persona.
+    insurance_flows: bool = True
     escalation_threshold: int = 4
     temperature: float = 0.3
     max_tokens: int = 256

@@ -21,6 +21,7 @@ from app.services.sofia_prompts import (
     GUARD_PRICE_RULE_NO_PRICES,
     GUARD_PRICE_RULE_RANGES,
     GUARD_PROMPT,
+    HUMAN_REQUEST_PHRASES,
     SOFIA_SYSTEM_PROMPT,
 )
 
@@ -160,12 +161,13 @@ def _coerce_config(raw_config: dict[str, Any] | None) -> SofiaConfig:
                 str(item).strip() for item in phrases if str(item).strip()
             ]
 
-    if "allow_price_ranges" in normalized:
-        raw_flag = normalized["allow_price_ranges"]
-        normalized["allow_price_ranges"] = (
-            raw_flag if isinstance(raw_flag, bool)
-            else str(raw_flag).strip().lower() not in {"false", "0", "no", ""}
-        )
+    for flag in ("allow_price_ranges", "insurance_flows"):
+        if flag in normalized:
+            raw_flag = normalized[flag]
+            normalized[flag] = (
+                raw_flag if isinstance(raw_flag, bool)
+                else str(raw_flag).strip().lower() not in {"false", "0", "no", ""}
+            )
 
     if "escalation_threshold" in normalized:
         try:
@@ -210,6 +212,9 @@ def classify(state: SofiaState) -> dict:
         or any(keyword in lower_msg for keyword in scheduling_followup_keywords)
     ):
         return {"intent": "otro"}
+
+    if not config.insurance_flows:
+        return _classify_without_insurance_flows(state, config, lower_msg, already_escalated, has_open_appointment)
 
     quote_keywords = [
         "cotiz",
@@ -315,6 +320,31 @@ def classify(state: SofiaState) -> dict:
     intent = raw if raw in valid else "otro"
 
     return {"intent": intent}
+
+
+def _classify_without_insurance_flows(
+    state: SofiaState,
+    config: SofiaConfig,
+    lower_msg: str,
+    already_escalated: bool,
+    has_open_appointment: bool,
+) -> dict:
+    """Negocios que no son seguros (p. ej. un banco): el agente responde según sus
+    instrucciones (bloquear una tarjeta, cómo abrir un producto…) y solo escala si el
+    cliente pide a una persona o la conversación supera el umbral."""
+    if any(phrase in lower_msg for phrase in HUMAN_REQUEST_PHRASES + config.extra_escalation_phrases):
+        if already_escalated:
+            return {"intent": "otro"}
+        return {"intent": "otro", "should_escalate": True, "escalation_reason": "user_request"}
+
+    if (
+        state["message_count"] >= config.escalation_threshold
+        and not already_escalated
+        and not has_open_appointment
+        and state.get("allow_threshold_escalation", True)
+    ):
+        return {"intent": "otro", "should_escalate": True, "escalation_reason": "auto_threshold"}
+    return {"intent": "otro"}
 
 
 def answer_faq(state: SofiaState) -> dict:

@@ -1,3 +1,22 @@
+# Pedir hablar con una persona: escala en cualquier tipo de negocio.
+HUMAN_REQUEST_PHRASES: list[str] = [
+    "cuándo me llaman",
+    "cuando me llaman",
+    "cuándo me van a llamar",
+    "cuando me van a llamar",
+    "cuándo me contactan",
+    "cuando me contactan",
+    "quiero que me llamen",
+    "hablar con un asesor",
+    "hablar con alguien",
+    "hablar con una persona",
+    "comunicarme con",
+    "necesito hablar",
+    "quiero hablar",
+    "agente humano",
+    "persona real",
+]
+
 ESCALATION_PHRASES: list[str] = [
     # Interés de compra / contratación
     "me interesa",
